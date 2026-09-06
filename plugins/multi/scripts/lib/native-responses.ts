@@ -1,3 +1,4 @@
+import { toolName, callId } from './native-tools.ts';
 // Anthropic Messages <-> OpenAI Responses, for native Claude Code workers.
 const SIGNATURE_PREFIX = 'multi-openai:';
 const IMAGE_MEDIA_TYPES: readonly unknown[] = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
@@ -34,6 +35,8 @@ export interface ContentBlock {
   thinking?: string;
   data?: string;
   cache_control?: unknown;
+  title?: string;
+  tool_name?: string;
 }
 
 export interface RequestMessage {
@@ -46,6 +49,7 @@ export interface Tool {
   name?: string;
   description?: string;
   input_schema?: unknown;
+  defer_loading?: boolean;
 }
 
 export interface ToolChoice {
@@ -70,13 +74,14 @@ export interface MessagesRequest {
   output_config?: { effort?: string; format?: OutputFormat };
   output_format?: OutputFormat;
   stream?: boolean;
+  thinking?: { type: string; budget_tokens?: number };
 }
 
 // ---------------------------------------------------------------------------
 // Anthropic Messages, as the gateway answers them.
 // ---------------------------------------------------------------------------
 
-export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens';
+export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence';
 
 export interface Usage {
   input_tokens: number;
@@ -97,7 +102,7 @@ export interface MessagesResponse {
   model: string;
   content: ResponseContentBlock[];
   stop_reason: StopReason | null;
-  stop_sequence: null;
+  stop_sequence: string | null;
   usage: Usage;
 }
 
@@ -116,7 +121,7 @@ export type StreamEventBody =
   | { index: number; content_block: ResponseContentBlock }
   | { index: number; delta: BlockDelta }
   | { index: number }
-  | { delta: { stop_reason: StopReason | null; stop_sequence: null }; usage: Usage }
+  | { delta: { stop_reason: StopReason | null; stop_sequence: string | null }; usage: Usage }
   | { error: { type: string; message: string } }
   | Record<string, never>;
 
@@ -128,7 +133,8 @@ export type Emit = (type: StreamEventName, value: StreamEventBody) => void;
 
 export type ResponsesInputContent =
   | { type: 'input_text' | 'output_text'; text: string }
-  | { type: 'input_image'; image_url: string; detail: 'auto' };
+  | { type: 'input_image'; image_url: string; detail: 'auto' }
+  | { type: 'input_file'; filename: string; file_data: string };
 
 export type ResponsesInputItem =
   | { role: 'user' | 'assistant' | 'developer'; content: ResponsesInputContent[] }
@@ -168,7 +174,7 @@ export interface ResponsesUsage {
 
 export interface ResponsesResponse {
   id: string;
-  usage?: ResponsesUsage;
+  usage?: ResponsesUsage | null;
   incomplete_details?: { reason?: string };
   error?: { message?: string };
 }
@@ -183,7 +189,7 @@ export interface ResponsesOutputContent {
 /** The output items this gateway understands; any other `type` is rejected. */
 export type ResponsesOutputItem =
   | { type: 'message'; content?: ResponsesOutputContent[] }
-  | { type: 'function_call'; call_id: string; name: string; arguments: string }
+  | { type: 'function_call'; call_id?: string; name?: string; arguments?: string }
   | { type: 'reasoning'; id?: string; encrypted_content?: string; summary?: unknown };
 
 /** Streamed events the translation acts on. Any other `type` is ignored, exactly
@@ -211,46 +217,63 @@ export interface ReasoningState {
 
 // Boundary guards: JSON.parse and the provider stream hand us `unknown`.
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isOutputItem(value: unknown): value is ResponsesOutputItem {
+function isOutputItem(value: unknown, done: boolean): value is ResponsesOutputItem {
   if (!isRecord(value) || typeof value.type !== 'string') return false;
   if (value.type === 'function_call') {
-    return typeof value.call_id === 'string' && typeof value.name === 'string' && typeof value.arguments === 'string';
+    return ['call_id', 'name', 'arguments'].every(key =>
+      value[key] === undefined ? !done : typeof value[key] === 'string');
   }
-  if (value.type === 'message') return value.content === undefined || Array.isArray(value.content);
-  return true; // reasoning fields are checked where used; unknown item types are rejected by the caller
+  if (value.type === 'message') return value.content === undefined ||
+    (Array.isArray(value.content) && value.content.every(part => isRecord(part) &&
+      (part.type === 'output_text' ? typeof part.text === 'string' :
+       part.type === 'refusal' && typeof part.refusal === 'string')));
+  if (value.type === 'reasoning') return (value.id === undefined || typeof value.id === 'string') &&
+    (value.encrypted_content == null ? !done : typeof value.encrypted_content === 'string') &&
+    (value.summary === undefined || (Array.isArray(value.summary) && value.summary.every(part =>
+      isRecord(part) && part.type === 'summary_text' && typeof part.text === 'string')));
+  return false;
 }
 
-const hasIndex = (value: Record<string, unknown>): boolean => typeof value.output_index === 'number';
-const hasDelta = (value: Record<string, unknown>): boolean => hasIndex(value) && typeof value.delta === 'string';
-const hasResponse = (value: Record<string, unknown>): boolean => isRecord(value.response) && typeof value.response.id === 'string';
-const STREAM_SHAPES: Readonly<Record<string, (value: Record<string, unknown>) => boolean>> = {
-  'response.created': hasResponse,
-  'response.completed': hasResponse,
-  'response.incomplete': hasResponse,
-  'response.output_item.added': value => hasIndex(value) && isOutputItem(value.item),
-  'response.output_item.done': value => hasIndex(value) && isOutputItem(value.item),
-  'response.output_text.delta': hasDelta,
-  'response.refusal.delta': hasDelta,
-  'response.function_call_arguments.delta': hasDelta,
-  'response.reasoning_summary_text.delta': hasDelta,
-  'response.failed': () => true,
-  'error': () => true,
-};
+function validResponse(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.id !== 'string') return false;
+  if (value.usage == null) return true;
+  if (!isRecord(value.usage)) return false;
+  const count = (v: unknown) => v === undefined || (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0);
+  const usage = value.usage;
+  return count(usage.input_tokens) && count(usage.output_tokens) &&
+    (usage.input_tokens_details === undefined || (isRecord(usage.input_tokens_details) && count(usage.input_tokens_details.cached_tokens)));
+}
 
-/** False for event types the translation ignores; throws for a known type with a bad shape. */
+/** Ignore new event types; validate every known field before narrowing JSON. */
 function isStreamEvent(value: unknown): value is ResponseStreamEvent {
-  if (!isRecord(value) || typeof value.type !== 'string') return false;
-  const shape = STREAM_SHAPES[value.type];
-  if (!shape) return false;
-  if (!shape(value)) throw new Error(`OpenAI sent a malformed ${value.type} event`);
+  if (!isRecord(value) || typeof value.type !== 'string') throw new Error('Malformed OpenAI stream event');
+  const indexed = Number.isSafeInteger(value.output_index) && Number(value.output_index) >= 0;
+  let valid: boolean;
+  switch (value.type) {
+    case 'response.created': case 'response.completed': case 'response.incomplete':
+      valid = validResponse(value.response); break;
+    case 'response.output_item.added': case 'response.output_item.done':
+      valid = indexed && isOutputItem(value.item, value.type.endsWith('.done')); break;
+    case 'response.output_text.delta': case 'response.refusal.delta':
+    case 'response.function_call_arguments.delta': case 'response.reasoning_summary_text.delta':
+      valid = indexed && typeof value.delta === 'string'; break;
+    case 'response.failed': case 'error':
+      valid = (value.message === undefined || typeof value.message === 'string') &&
+        (value.response === undefined || (isRecord(value.response) &&
+          (value.response.error === undefined || (isRecord(value.response.error) &&
+            (value.response.error.message === undefined || typeof value.response.error.message === 'string'))))); break;
+    default: return false;
+  }
+  if (!valid) throw new Error(`OpenAI sent a malformed ${value.type} event`);
   return true;
 }
 
 function isReasoningState(value: unknown): value is ReasoningState {
-  return isRecord(value) && value.type === 'reasoning' && typeof value.encrypted_content === 'string';
+  return isRecord(value) && isOutputItem(value, true) && value.type === 'reasoning' &&
+    typeof value.encrypted_content === 'string' && value.encrypted_content.length > 0;
 }
 
 function isEffort(value: string): value is Effort {
@@ -275,6 +298,13 @@ export function forAnthropic(body: MessagesRequest): MessagesRequest {
 function blocks(value: unknown): ContentBlock[] {
   if (typeof value === 'string') return [{ type: 'text', text: value }];
   if (!Array.isArray(value)) throw new Error('Expected text or content blocks');
+  for (const block of value) {
+    if (!isRecord(block) || typeof block.type !== 'string') throw new Error('Invalid content block');
+    for (const key of ['id', 'name', 'tool_use_id', 'signature', 'title', 'tool_name']) {
+      if (block[key] !== undefined && typeof block[key] !== 'string') throw new Error(`Invalid content field: ${key}`);
+    }
+    if (block.is_error !== undefined && typeof block.is_error !== 'boolean') throw new Error('Invalid tool result error flag');
+  }
   return value;
 }
 
@@ -310,26 +340,51 @@ function imageInput(block: ContentBlock): ResponsesInputContent {
   return { type: 'input_image', image_url, detail: 'auto' };
 }
 
+function documentInput(block: ContentBlock): ResponsesInputContent[] {
+  const source = block.source;
+  const title = block.title ? `Document: ${block.title}\n` : '';
+  if (source?.type === 'text' && source.media_type === 'text/plain' && typeof source.data === 'string') {
+    return [{ type: 'input_text', text: title + source.data }];
+  }
+  if (source?.type !== 'base64' || source.media_type !== 'application/pdf' ||
+      typeof source.data !== 'string' || !source.data ||
+      Buffer.from(source.data, 'base64').toString('base64') !== source.data) {
+    throw new Error('Unsupported document: use base64 PDF or text/plain');
+  }
+  return [{ type: 'input_file', filename: 'document.pdf', file_data: `data:application/pdf;base64,${source.data}` }];
+}
+
 function toolOutput(block: ContentBlock): string | ResponsesInputContent[] {
   const content = blocks(block.content ?? '');
   const prefix = block.is_error ? 'Tool error:\n' : '';
-  if (!content.some(item => item.type === 'image')) return prefix + textOnly(content);
+  if (!content.some(item => ['image', 'document', 'tool_reference'].includes(item.type))) return prefix + textOnly(content);
   return [
     ...(prefix ? [{ type: 'input_text' as const, text: prefix }] : []),
-    ...content.map((item): ResponsesInputContent =>
-      item.type === 'image' ? imageInput(item) : { type: 'input_text', text: textOnly([item]) })
+    ...content.flatMap((item): ResponsesInputContent[] => {
+      if (item.type === 'image') return [imageInput(item)];
+      if (item.type === 'document') return documentInput(item);
+      if (item.type === 'tool_reference' && item.tool_name) return [{ type: 'input_text', text: `Available tool: ${toolName(item.tool_name)}` }];
+      return [{ type: 'input_text', text: textOnly([item]) }];
+    })
   ];
 }
 
 export function toResponses(body: MessagesRequest, model: string): ResponsesRequest {
   if (!Array.isArray(body.messages)) throw new Error('messages must be an array');
-  if (body.stop_sequences?.length) throw new Error('Native OpenAI workers do not yet support stop sequences');
+  if (body.stop_sequences !== undefined && (!Array.isArray(body.stop_sequences) ||
+      body.stop_sequences.some(s => typeof s !== 'string' || !s.length))) throw new Error('Invalid stop sequences');
+  if (body.tools !== undefined && !Array.isArray(body.tools)) throw new Error('tools must be an array');
+  if (body.stream !== undefined && typeof body.stream !== 'boolean') throw new Error('stream must be boolean');
+  for (const key of ['output_config', 'output_format', 'thinking', 'tool_choice'] as const) {
+    if (body[key] != null && !isRecord(body[key])) throw new Error(`Invalid ${key}`);
+  }
   const format = body.output_config?.format ?? body.output_format;
   if (format != null && (format.type !== 'json_schema' || !format.schema || typeof format.schema !== 'object' || Array.isArray(format.schema))) {
     throw new Error('Unsupported output format: expected json_schema with an object schema');
   }
   const input: ResponsesInputItem[] = [];
   for (const message of body.messages) {
+    if (!isRecord(message)) throw new Error('Invalid message');
     const role = message.role;
     if (role !== 'user' && role !== 'assistant' && role !== 'system') throw new Error('Unsupported message role');
     for (const block of blocks(message.content)) {
@@ -338,12 +393,14 @@ export function toResponses(body: MessagesRequest, model: string): ResponsesRequ
           content: [{ type: message.role === 'assistant' ? 'output_text' : 'input_text', text: textOnly([block]) }] });
       } else if (block.type === 'image' && message.role === 'user') {
         input.push({ role: 'user', content: [imageInput(block)] });
+      } else if (block.type === 'document' && message.role === 'user') {
+        input.push({ role: 'user', content: documentInput(block) });
       } else if (block.type === 'tool_use' && message.role === 'assistant') {
-        if (!block.id || !block.name || !block.input || typeof block.input !== 'object') throw new Error('Invalid tool_use');
-        input.push({ type: 'function_call', call_id: block.id, name: block.name, arguments: JSON.stringify(block.input) });
+        if (!block.id || !block.name || !isRecord(block.input)) throw new Error('Invalid tool_use');
+        input.push({ type: 'function_call', call_id: callId(block.id), name: toolName(block.name), arguments: JSON.stringify(block.input) });
       } else if (block.type === 'tool_result' && message.role === 'user') {
         if (!block.tool_use_id) throw new Error('Missing tool result ID');
-        input.push({ type: 'function_call_output', call_id: block.tool_use_id,
+        input.push({ type: 'function_call_output', call_id: callId(block.tool_use_id),
           output: toolOutput(block) });
       } else if (block.type === 'thinking' && message.role === 'assistant') {
         if (!block.signature?.startsWith(SIGNATURE_PREFIX)) continue;
@@ -358,20 +415,29 @@ export function toResponses(body: MessagesRequest, model: string): ResponsesRequ
     }
   }
   const tools = (body.tools ?? []).map((tool): ResponsesTool => {
+    if (!isRecord(tool)) throw new Error('Invalid tool');
     if (tool.type && tool.type !== 'custom') throw new Error(`Unsupported server tool: ${tool.type}`);
-    if (typeof tool.name !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(tool.name) || !tool.input_schema) throw new Error('Invalid function tool');
-    return { type: 'function', name: tool.name, description: tool.description ?? '', parameters: tool.input_schema, strict: false };
+    if (typeof tool.name !== 'string' || !tool.name.trim() || !isRecord(tool.input_schema)) throw new Error('Invalid function tool');
+    if (tool.description !== undefined && typeof tool.description !== 'string') throw new Error('Invalid tool description');
+    return { type: 'function', name: toolName(tool.name), description: tool.description ?? '', parameters: tool.input_schema, strict: false };
   });
   const choice = body.tool_choice;
   const wanted = choice?.type ?? 'auto';
   if (wanted !== 'auto' && wanted !== 'any' && wanted !== 'none' && wanted !== 'tool') throw new Error('Unsupported tool choice');
-  const effort = body.output_config?.effort ?? 'medium';
+  if (wanted === 'tool' && (typeof choice?.name !== 'string' || !tools.some(t => t.name === toolName(choice.name!)))) throw new Error('Named tool choice must reference a declared tool');
+  if (choice?.disable_parallel_tool_use !== undefined && typeof choice.disable_parallel_tool_use !== 'boolean') throw new Error('Invalid parallel tool choice');
+  const thinking = body.thinking;
+  if (thinking && !['enabled', 'adaptive', 'disabled', 'auto'].includes(thinking.type)) throw new Error('Unsupported thinking configuration');
+  const budget = thinking?.budget_tokens;
+  if (budget !== undefined && (!Number.isSafeInteger(budget) || budget < 0)) throw new Error('Invalid thinking budget');
+  const effort = body.output_config?.effort ?? (thinking?.type === 'disabled' ? 'low' :
+    budget === undefined ? 'medium' : budget <= 1024 ? 'low' : budget <= 8192 ? 'medium' : budget <= 24576 ? 'high' : 'xhigh');
   if (!isEffort(effort)) throw new Error(`Unsupported reasoning effort: ${effort}`);
   return {
     model, instructions: textOnly(body.system ?? ''), input, tools,
     // Preserve the schema's meaning; OpenAI validates its supported strict subset.
     ...(format ? { text: { format: { type: 'json_schema' as const, name: 'claude_output', schema: format.schema, strict: true } } } : {}),
-    tool_choice: wanted === 'tool' ? { type: 'function', name: choice?.name } : wanted === 'any' ? 'required' : wanted,
+    tool_choice: wanted === 'tool' ? { type: 'function', name: toolName(choice!.name!) } : wanted === 'any' ? 'required' : wanted,
     parallel_tool_calls: !choice?.disable_parallel_tool_use,
     reasoning: { effort, summary: 'auto' }, include: ['reasoning.encrypted_content'],
     // Codex's subscription endpoint requires store:false and streamed responses.
@@ -384,132 +450,183 @@ export async function* readSse(stream: AsyncIterable<Uint8Array>): AsyncGenerato
   const decoder = new TextDecoder();
   let pending = '';
   let data: string[] = [];
+  let dataBytes = 0;
+  let totalBytes = 0;
+  const addData = (line: string) => {
+    dataBytes += Buffer.byteLength(line);
+    if (dataBytes > 8 * 1024 * 1024) throw new Error('OpenAI SSE event exceeds 8 MiB');
+    data.push(line);
+  };
   const parse = (): unknown => {
     const value = data.join('\n');
+    if (Buffer.byteLength(value) > 8 * 1024 * 1024) throw new Error('OpenAI SSE event exceeds 8 MiB');
     data = [];
+    dataBytes = 0;
     return value && value !== '[DONE]' ? JSON.parse(value) : null;
   };
   for await (const chunk of stream) {
+    totalBytes += chunk.byteLength;
+    if (totalBytes > 32 * 1024 * 1024) throw new Error('OpenAI response exceeds 32 MiB');
     pending += decoder.decode(chunk, { stream: true });
+    if (Buffer.byteLength(pending) > 8 * 1024 * 1024) throw new Error('OpenAI SSE buffer exceeds 8 MiB');
     let index;
     while ((index = pending.indexOf('\n')) !== -1) {
       const line = pending.slice(0, index).replace(/\r$/, '');
       pending = pending.slice(index + 1);
       if (!line) { const event = parse(); if (event) yield event; }
-      else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
+      else if (line.startsWith('data:')) addData(line.slice(5).replace(/^ /, ''));
     }
   }
   pending += decoder.decode();
-  if (pending.startsWith('data:')) data.push(pending.slice(5).trimStart());
+  if (pending.startsWith('data:')) addData(pending.slice(5).trimStart());
   const event = parse();
   if (event) yield event;
 }
 
-interface Slot {
-  index: number;
-  block: ResponseContentBlock;
-  stopped: boolean;
+interface OutputSlot {
+  item: ResponsesOutputItem;
+  text: string;
   arguments: string;
+  done: boolean;
+  block?: ResponseContentBlock;
+  index?: number;
+  emitted: number;
 }
 
-export async function fromResponses(stream: AsyncIterable<Uint8Array>, model: string, emit: Emit = () => {}): Promise<MessagesResponse> {
+export interface ResponseOptions {
+  toolNames?: ReadonlyMap<string, string>;
+  stopSequences?: readonly string[];
+}
+
+export async function fromResponses(stream: AsyncIterable<Uint8Array>, model: string, emit: Emit = () => {},
+    options: ResponseOptions = {}): Promise<MessagesResponse> {
   const content: ResponseContentBlock[] = [];
-  const slots = new Map<number, Slot>();
+  const slots = new Map<number, OutputSlot>();
   let message: MessagesResponse | undefined;
   let completed = false;
-  const start = (response: ResponsesResponse): MessagesResponse => {
-    if (!message) {
-      message = { id: response.id, type: 'message', role: 'assistant', model, content,
-        stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } };
-      emit('message_start', { message: { ...message, content: [] } });
+  let stopped: string | null = null;
+  let cursor = 0;
+  const start = (response: ResponsesResponse) => {
+    if (message) return;
+    message = { id: response.id, type: 'message', role: 'assistant', model, content,
+      stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } };
+    emit('message_start', { message: { ...message, content: [] } });
+  };
+  const finish = (stopReason: StopReason, usage?: ResponsesUsage | null) => {
+    if (!message) throw new Error('OpenAI stream omitted response.created');
+    const cached = usage?.input_tokens_details?.cached_tokens ?? 0;
+    message.usage = { input_tokens: Math.max(0, (usage?.input_tokens ?? 0) - cached),
+      output_tokens: usage?.output_tokens ?? 0, cache_read_input_tokens: cached, cache_creation_input_tokens: 0 };
+    message.stop_reason = stopReason;
+    message.stop_sequence = stopped;
+    emit('message_delta', { delta: { stop_reason: stopReason, stop_sequence: stopped }, usage: message.usage });
+    emit('message_stop', {});
+    completed = true;
+  };
+  // Emit one Claude block at a time. Parallel calls can finish out of order;
+  // their metadata/arguments are held until the preceding block has ended.
+  const drain = () => {
+    const ordered = [...slots.values()];
+    while (cursor < ordered.length && !stopped) {
+      const slot = ordered[cursor];
+      const item = slot.item;
+      if (item.type === 'function_call' && !slot.done) return;
+      if (!slot.block) {
+        if (item.type === 'function_call') {
+          if (!item.call_id || !item.name || typeof item.arguments !== 'string') throw new Error('Incomplete function call');
+          if (slot.arguments && slot.arguments !== item.arguments) throw new Error('OpenAI function arguments changed after streaming');
+          const input: unknown = JSON.parse(item.arguments);
+          if (!isRecord(input)) throw new Error('OpenAI function arguments must be an object');
+          const name = options.toolNames?.get(item.name) ?? item.name;
+          if (options.toolNames && !options.toolNames.has(item.name)) throw new Error('OpenAI returned an undeclared tool');
+          slot.block = { type: 'tool_use', id: callId(item.call_id), name, input };
+        } else if (item.type === 'reasoning') slot.block = { type: 'thinking', thinking: '', signature: '' };
+        else slot.block = { type: 'text', text: '' };
+        slot.index = content.length;
+        content.push(slot.block);
+        emit('content_block_start', { index: slot.index, content_block: slot.block.type === 'tool_use'
+          ? { ...slot.block, input: {} } : { ...slot.block } });
+      }
+      const index = slot.index!;
+      if (slot.block.type === 'tool_use') {
+        emit('content_block_delta', { index, delta: { type: 'input_json_delta', partial_json: JSON.stringify(slot.block.input) } });
+      } else {
+        let limit = slot.text.length;
+        if (slot.block.type === 'text') {
+          let matchAt = Infinity;
+          for (const stop of options.stopSequences ?? []) {
+            const at = slot.text.indexOf(stop);
+            if (at >= 0 && at < matchAt) { matchAt = at; stopped = stop; }
+          }
+          if (stopped) limit = matchAt;
+          else if (!slot.done) {
+            // Hold only a suffix that might become a stop string in a later delta.
+            for (const stop of options.stopSequences ?? []) for (let n = 1; n < stop.length; n++) {
+              if (slot.text.endsWith(stop.slice(0, n))) limit = Math.min(limit, slot.text.length - n);
+            }
+          }
+        }
+        const text = slot.text.slice(slot.emitted, limit);
+        if (text) emit('content_block_delta', { index, delta: slot.block.type === 'text'
+          ? { type: 'text_delta', text } : { type: 'thinking_delta', thinking: text } });
+        slot.emitted = limit;
+        if (slot.block.type === 'text') slot.block.text = slot.text.slice(0, limit);
+        else slot.block.thinking = slot.text.slice(0, limit);
+      }
+      if (!slot.done && !stopped) return;
+      if (item.type === 'reasoning' && slot.block.type === 'thinking') {
+        if (!isReasoningState(item)) throw new Error('OpenAI omitted encrypted reasoning state');
+        slot.block.signature = SIGNATURE_PREFIX + Buffer.from(JSON.stringify(item)).toString('base64url');
+        emit('content_block_delta', { index, delta: { type: 'signature_delta', signature: slot.block.signature } });
+      }
+      emit('content_block_stop', { index });
+      cursor++;
     }
-    return message;
-  };
-  const open = (key: number, block: ResponseContentBlock): Slot => {
-    const existing = slots.get(key);
-    if (existing) return existing;
-    const slot = { index: content.length, block, stopped: false, arguments: '' };
-    slots.set(key, slot);
-    content.push(block);
-    emit('content_block_start', { index: slot.index, content_block: { ...block } });
-    return slot;
-  };
-  const delta = (slot: Slot, value: BlockDelta) => emit('content_block_delta', { index: slot.index, delta: value });
-  const stop = (slot: Slot) => {
-    if (!slot.stopped) emit('content_block_stop', { index: slot.index });
-    slot.stopped = true;
   };
   for await (const event of readSse(stream)) {
     if (!isStreamEvent(event)) continue;
     if (event.type === 'response.created') start(event.response);
-    else if (event.type === 'response.output_item.added') {
-      if (!message) throw new Error('OpenAI stream omitted response.created');
-      const item = event.item;
-      // `kind` keeps the reported value: the declared union has no member for the
-      // output types this rejects.
-      const kind = item.type;
-      if (item.type === 'function_call') open(event.output_index, { type: 'tool_use', id: item.call_id, name: item.name, input: {} });
-      else if (item.type === 'reasoning') open(event.output_index, { type: 'thinking', thinking: '', signature: '' });
-      else if (item.type !== 'message') throw new Error(`Unsupported OpenAI output: ${kind}`);
-    } else if (event.type === 'response.output_text.delta' || event.type === 'response.refusal.delta') {
-      const slot = open(event.output_index, { type: 'text', text: '' });
-      if (slot.block.type !== 'text') throw new Error('OpenAI sent text for a non-text output');
-      slot.block.text += event.delta;
-      delta(slot, { type: 'text_delta', text: event.delta });
-    } else if (event.type === 'response.function_call_arguments.delta') {
-      const slot = slots.get(event.output_index);
-      if (!slot) throw new Error('Arguments without function call');
-      slot.arguments += event.delta;
-      delta(slot, { type: 'input_json_delta', partial_json: event.delta });
-    } else if (event.type === 'response.reasoning_summary_text.delta') {
-      const slot = slots.get(event.output_index);
-      if (!slot || slot.block.type !== 'thinking') throw new Error('Summary without reasoning item');
-      slot.block.thinking += event.delta;
-      delta(slot, { type: 'thinking_delta', thinking: event.delta });
-    } else if (event.type === 'response.output_item.done') {
-      const item = event.item;
-      let slot = slots.get(event.output_index);
-      if (item.type === 'message' && !slot) {
-        const text = (item.content ?? []).map(b => {
-          if (b.type === 'refusal') return b.refusal;
-          if (b.type === 'output_text') return b.text;
-          throw new Error(`Unsupported message output: ${b.type}`);
-        }).join('\n');
-        slot = open(event.output_index, { type: 'text', text: '' });
-        if (slot.block.type !== 'text') throw new Error('OpenAI sent text for a non-text output');
-        slot.block.text = text;
-        delta(slot, { type: 'text_delta', text });
-      }
-      if (!slot) throw new Error('Output item ended without starting');
-      if (item.type === 'function_call') {
-        if (slot.block.type !== 'tool_use') throw new Error('OpenAI ended a function call on a non-tool output');
-        if (!slot.arguments) delta(slot, { type: 'input_json_delta', partial_json: item.arguments });
-        slot.block.input = JSON.parse(item.arguments);
-      } else if (item.type === 'reasoning') {
-        if (slot.block.type !== 'thinking') throw new Error('OpenAI ended reasoning on a non-thinking output');
-        if (!item.encrypted_content) throw new Error('OpenAI omitted encrypted reasoning state');
-        slot.block.signature = SIGNATURE_PREFIX + Buffer.from(JSON.stringify(item)).toString('base64url');
-        delta(slot, { type: 'signature_delta', signature: slot.block.signature });
-      }
-      stop(slot);
+    else if (event.type === 'response.failed' || event.type === 'error') {
+      throw new Error(event.message ?? event.response?.error?.message ?? 'OpenAI stream failed');
     } else if (event.type === 'response.completed' || event.type === 'response.incomplete') {
-      const started = start(event.response);
+      start(event.response);
       if (event.type === 'response.incomplete' && event.response.incomplete_details?.reason !== 'max_output_tokens') {
         throw new Error(`OpenAI response incomplete: ${event.response.incomplete_details?.reason ?? 'unknown'}`);
       }
-      for (const slot of slots.values()) if (!slot.stopped) throw new Error('OpenAI completed with an unfinished content block');
-      const usage = event.response.usage ?? {};
-      const cached = usage.input_tokens_details?.cached_tokens ?? 0;
-      started.usage = { input_tokens: Math.max(0, (usage.input_tokens ?? 0) - cached),
-        output_tokens: usage.output_tokens ?? 0, cache_read_input_tokens: cached, cache_creation_input_tokens: 0 };
-      started.stop_reason = event.type === 'response.incomplete' ? 'max_tokens'
-        : content.some(b => b.type === 'tool_use') ? 'tool_use' : 'end_turn';
-      emit('message_delta', { delta: { stop_reason: started.stop_reason, stop_sequence: null }, usage: started.usage });
-      emit('message_stop', {});
-      completed = true;
+      if ([...slots.values()].some(slot => !slot.done)) throw new Error('OpenAI completed with an unfinished content block');
+      drain();
+      finish(event.type === 'response.incomplete' ? 'max_tokens' : content.some(b => b.type === 'tool_use') ? 'tool_use' : 'end_turn', event.response.usage);
       break;
-    } else if (event.type === 'error' || event.type === 'response.failed') {
-      throw new Error(event.message ?? event.response?.error?.message ?? 'OpenAI stream failed');
+    } else {
+      if (!message) throw new Error('OpenAI stream omitted response.created');
+      if (event.type === 'response.output_item.added') {
+        if (slots.has(event.output_index)) throw new Error('Duplicate OpenAI output item');
+        slots.set(event.output_index, { item: event.item, text: '', arguments: '', done: false, emitted: 0 });
+      } else {
+        const slot = slots.get(event.output_index);
+        if (!slot || slot.done) throw new Error('OpenAI event without an active output item');
+        if (event.type === 'response.output_item.done') {
+          if (slot.item.type !== event.item.type) throw new Error('OpenAI output item changed type');
+          slot.item = event.item;
+          slot.done = true;
+          if (event.item.type === 'message') {
+            const text = (event.item.content ?? []).map(b => b.type === 'refusal' ? b.refusal : b.text).join('');
+            if (slot.text && slot.text !== text) throw new Error('OpenAI text changed after streaming');
+            slot.text = text;
+          } else if (event.item.type === 'reasoning' && !slot.text && Array.isArray(event.item.summary)) {
+            slot.text = event.item.summary.map(part => (part as { text: string }).text).join('\n');
+          }
+        } else if (event.type === 'response.function_call_arguments.delta') {
+          if (slot.item.type !== 'function_call') throw new Error('Arguments without function call');
+          slot.arguments += event.delta;
+        } else {
+          const thinking = event.type === 'response.reasoning_summary_text.delta';
+          if (slot.item.type !== (thinking ? 'reasoning' : 'message')) throw new Error('OpenAI delta has the wrong output type');
+          slot.text += event.delta;
+        }
+      }
+      drain();
+      if (stopped) { finish('stop_sequence'); break; }
     }
   }
   if (!completed || !message) throw new Error('OpenAI stream ended before completion');

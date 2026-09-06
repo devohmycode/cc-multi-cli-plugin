@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { originalToolNames, toolName, callId as wireCallId } from '../../plugins/multi/scripts/lib/native-tools.ts';
+import { estimateInputTokens } from '../../plugins/multi/scripts/lib/native-tokens.ts';
 import { createNativeGateway, readCodexAuth, OPENAI_WORKERS } from '../../plugins/multi/scripts/lib/native-gateway.ts';
 import type { GatewayFetch } from '../../plugins/multi/scripts/lib/native-gateway.ts';
 import { toResponses, fromResponses, readSse, forAnthropic } from '../../plugins/multi/scripts/lib/native-responses.ts';
@@ -26,7 +28,7 @@ const stream = (list: SseEvent[]) => {
 };
 function events(item: SseEvent, deltas: SseEvent[] = []): SseEvent[] {
   return [
-    { type: 'response.created', response: { id: 'resp_test' } },
+    { type: 'response.created', response: { id: 'resp_test', usage: null } },
     { type: 'response.output_item.added', output_index: 0, item: { ...item, arguments: '' } },
     ...deltas.map(delta => ({ output_index: 0, ...delta })),
     { type: 'response.output_item.done', output_index: 0, item },
@@ -136,7 +138,7 @@ test('malformed images and output formats fail before any provider call', async 
   for (const format of [false, { type: 'text' }, { type: 'json_schema' }, { type: 'json_schema', schema: [] }]) {
     assert.equal((await call({ ...body, output_config: { format } })).status, 400);
   }
-  assert.equal((await call({ ...body, stop_sequences: ['STOP'] })).status, 400);
+  assert.equal((await call({ ...body, stop_sequences: [''] })).status, 400);
 });
 
 test('encrypted reasoning survives a tool round trip without a shared conversation cache', async () => {
@@ -194,7 +196,7 @@ async function gateway(t: TestContext, fetchImpl: GatewayFetch) {
   t.after(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(cwd, { recursive: true, force: true }); });
   const address = server.address();
   assert(address !== null && typeof address === 'object', 'Gateway port');
-  return (payload: unknown, headers: Record<string, string> = {}) => fetch(`http://127.0.0.1:${address.port}/v1/messages?beta=true`, {
+  return (payload: unknown, headers: Record<string, string> = {}, endpoint = '/v1/messages?beta=true') => fetch(`http://127.0.0.1:${address.port}${endpoint}`, {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-multi-gateway-token': 'local-test-secret', ...headers },
     body: typeof payload === 'string' ? payload : JSON.stringify(payload)
   });
@@ -318,11 +320,140 @@ test('malformed provider stream events fail by name; unknown event types are ign
   assert(created);
   await assert.rejects(fromResponses(stream([created, { type: 'response.output_text.delta', output_index: 0 }]), model),
     /malformed response\.output_text\.delta/);
-  await assert.rejects(fromResponses(stream([created, { type: 'response.output_item.added', output_index: 0, item: { type: 'function_call' } }]), model),
+  await assert.rejects(fromResponses(stream([created, { type: 'response.output_item.added', output_index: 0, item: { type: 'function_call', name: 42 } }]), model),
     /malformed response\.output_item\.added/);
   await assert.rejects(fromResponses(stream([{ type: 'response.created', response: {} }]), model), /malformed response\.created/);
   const result = await fromResponses(stream([{ type: 'response.in_progress', sequence_number: 1 }, ...textEvents]), model);
   const text = result.content[0];
   assert(text.type === 'text');
   assert.equal(text.text, 'Done');
+});
+
+test('long MCP names round-trip across tool definitions, calls, choices and fresh requests', async () => {
+  const name = 'mcp__provider_' + 'long_name_'.repeat(20);
+  const collision = toolName(name);
+  const request: MessagesRequest = { messages, tools: [
+    { name, input_schema: {} }, { name: collision, input_schema: {} }
+  ], tool_choice: { type: 'tool', name } };
+  const converted = toResponses(request, 'gpt');
+  assert(converted.tools.every(t => t.name.length <= 64));
+  assert.notEqual(converted.tools[0].name, converted.tools[1].name);
+  assert.deepEqual(converted.tool_choice, { type: 'function', name: converted.tools[0].name });
+  const reply = await fromResponses(stream(events({ type: 'function_call', call_id: 'call_1', name: converted.tools[0].name, arguments: '{}' })), model,
+    undefined, { toolNames: originalToolNames(request) });
+  assert.deepEqual(reply.content[0], { type: 'tool_use', id: 'call_1', name, input: {} });
+  const resumed = toResponses({ ...request, messages: [{ role: 'assistant', content: reply.content },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: 'done' }] }] }, 'gpt');
+  assert.equal((resumed.input[0] as { name: string }).name, converted.tools[0].name);
+  const longId = 'toolu_' + 'x'.repeat(150);
+  const history = toResponses({ messages: [
+    { role: 'assistant', content: [{ type: 'tool_use', id: longId, name, input: {} }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: longId, content: 'ok' }] }
+  ] }, 'gpt');
+  assert.equal(wireCallId(longId).length <= 64, true);
+  assert.equal(callId(history.input[0]), wireCallId(longId));
+  assert.equal(callId(history.input[1]), wireCallId(longId));
+});
+
+test('PDF, text documents and discovered tool references preserve tool-result association', () => {
+  const pdf = { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: Buffer.from('%PDF-1.4\nfixture').toString('base64') } };
+  const doc = { type: 'document', title: 'Notes', source: { type: 'text', media_type: 'text/plain', data: 'hello' } };
+  const converted = toResponses({ messages: [{ role: 'user', content: [pdf, doc,
+    { type: 'tool_result', tool_use_id: 'call_1', content: [pdf, { type: 'tool_reference', tool_name: 'Read' }] }] }] }, 'gpt');
+  assert.equal(contentOf(converted.input[0])[0].type, 'input_file');
+  assert.deepEqual(contentOf(converted.input[1]), [{ type: 'input_text', text: 'Document: Notes\nhello' }]);
+  assert.deepEqual(converted.input[2], { type: 'function_call_output', call_id: 'call_1', output: [
+    { type: 'input_file', filename: 'document.pdf', file_data: `data:application/pdf;base64,${pdf.source.data}` },
+    { type: 'input_text', text: 'Available tool: Read' }
+  ] });
+});
+
+test('parallel calls with delayed names emit complete, sequential Claude blocks', async () => {
+  const emitted: { type: string; value: StreamEventBody }[] = [];
+  const result = await fromResponses(stream([
+    { type: 'response.created', response: { id: 'r' } },
+    { type: 'response.output_item.added', output_index: 0, item: { type: 'function_call' } },
+    { type: 'response.output_item.added', output_index: 1, item: { type: 'function_call', call_id: 'b', name: 'Read', arguments: '' } },
+    { type: 'response.function_call_arguments.delta', output_index: 0, delta: '{"file_path":"first"}' },
+    { type: 'response.output_item.done', output_index: 1, item: { type: 'function_call', call_id: 'b', name: 'Read', arguments: '{"file_path":"second"}' } },
+    { type: 'response.output_item.done', output_index: 0, item: { type: 'function_call', call_id: 'a', name: 'Read', arguments: '{"file_path":"first"}' } },
+    { type: 'response.completed', response: { id: 'r' } }
+  ]), model, (type, value) => { emitted.push({ type, value }); });
+  assert.deepEqual(result.content.map(b => b.type === 'tool_use' && b.id), ['a', 'b']);
+  assert.deepEqual(emitted.map(e => e.type), ['message_start',
+    'content_block_start', 'content_block_delta', 'content_block_stop',
+    'content_block_start', 'content_block_delta', 'content_block_stop', 'message_delta', 'message_stop']);
+});
+
+test('stop sequences crossing deltas stop before exposing text or later tools', async () => {
+  const sent: string[] = [];
+  const result = await fromResponses(stream(events({ type: 'message', content: [{ type: 'output_text', text: 'hello STOP secret' }] }, [
+    { type: 'response.output_text.delta', delta: 'hello ST' },
+    { type: 'response.output_text.delta', delta: 'OP secret' }
+  ])), model, (_type, value) => { if ('delta' in value && 'text' in value.delta) sent.push(value.delta.text); }, { stopSequences: ['STOP'] });
+  assert.equal(sent.join(''), 'hello ');
+  assert.equal(textOf(result), 'hello ');
+  assert.equal(result.stop_reason, 'stop_sequence');
+  assert.equal(result.stop_sequence, 'STOP');
+  const ordinary = await fromResponses(stream(events({ type: 'message', content: [{ type: 'output_text', text: 'hello ST' }] }, [
+    { type: 'response.output_text.delta', delta: 'hello ST' }
+  ])), model, undefined, { stopSequences: ['STOP'] });
+  assert.equal(textOf(ordinary), 'hello ST', 'Flush a partial stop prefix at normal completion');
+});
+
+test('malformed nested output never becomes a successful answer or reusable reasoning state', async () => {
+  for (const item of [
+    { type: 'message', content: [{ type: 'output_text', text: { invalid: true } }] },
+    { type: 'reasoning', encrypted_content: 123 },
+    { type: 'reasoning', encrypted_content: 'cipher', summary: [{ type: 'summary_text', text: false }] },
+    { type: 'function_call', call_id: 'c', name: 'Read', arguments: '[]' }
+  ]) await assert.rejects(fromResponses(stream(events(item)), model));
+  for (const usage of [{ input_tokens: -1 }, { output_tokens: 'oops' }, { input_tokens_details: { cached_tokens: null } }]) {
+    await assert.rejects(fromResponses(stream([...textEvents.slice(0, -1), { type: 'response.completed', response: { id: 'r', usage } }]), model), /malformed/);
+  }
+});
+
+test('count_tokens is local, includes schemas, and labels its estimate', async t => {
+  const call = await gateway(t, () => assert.fail('Token counting must not call either provider'));
+  const response = await call(body, {}, '/v1/messages/count_tokens');
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('x-multi-token-count'), 'estimate');
+  const count = await response.json() as { input_tokens: number };
+  assert(Number.isSafeInteger(count.input_tokens) && count.input_tokens > 0);
+  const plain = estimateInputTokens(toResponses({ messages }, 'gpt'));
+  const schema = estimateInputTokens(toResponses({ ...body, tools: [{ name: 'Read', input_schema: { description: 'extra '.repeat(1000) } }] }, 'gpt'));
+  assert(schema > plain + 500);
+});
+
+test('HTTP failures retain status and retry-after without returning private upstream bodies', async t => {
+  for (const status of [400, 401, 403, 404, 429, 503]) {
+    const call = await gateway(t, async () => new Response('secret provider diagnostic', { status, headers: { 'retry-after': '17' } }));
+    const response = await call(body);
+    assert.equal(response.status, status);
+    assert.equal(response.headers.get('retry-after'), '17');
+    assert(!(await response.text()).includes('secret provider diagnostic'));
+  }
+});
+
+test('invalid request shapes fail locally and legacy thinking budgets respect explicit effort', async t => {
+  const call = await gateway(t, () => assert.fail('Invalid requests must not reach a provider'));
+  for (const invalid of [null, [], { model: 12 }, { ...body, messages: [null] },
+    { ...body, messages: [{ role: 'user', content: [null] }] },
+    { ...body, tools: [null] }, { ...body, tools: {} }, { ...body, stream: 'yes' },
+    { ...body, tool_choice: { type: 'tool', name: 'missing' } }]) {
+    assert.equal((await call(invalid)).status, 400);
+  }
+  assert.equal(toResponses({ ...body, thinking: { type: 'enabled', budget_tokens: 16000 } }, 'gpt').reasoning.effort, 'high');
+  assert.equal(toResponses({ ...body, thinking: { type: 'enabled', budget_tokens: 16000 }, output_config: { effort: 'max' } }, 'gpt').reasoning.effort, 'max');
+});
+
+test('multiple text parts, unknown events, and oversized SSE frames have explicit outcomes', async () => {
+  const result = await fromResponses(stream(events({ type: 'message', content: [
+    { type: 'output_text', text: 'first' }, { type: 'output_text', text: 'second' }
+  ] }, [{ type: 'response.output_text.delta', delta: 'first' }, { type: 'response.output_text.delta', delta: 'second' }])), model);
+  assert.equal(textOf(result), 'firstsecond');
+  async function* oversized() { yield new TextEncoder().encode('data: ' + 'x'.repeat(8 * 1024 * 1024)); }
+  await assert.rejects(async () => { for await (const _ of readSse(oversized())) {} }, /exceeds 8 MiB/);
+  await assert.rejects(fromResponses(stream(events({ type: 'function_call', call_id: 'c', name: 'notDeclared', arguments: '{}' })), model,
+    undefined, { toolNames: new Map([['Read', 'Read']]) }), /undeclared tool/);
 });

@@ -1,4 +1,6 @@
 import http from 'node:http';
+import { originalToolNames } from './native-tools.ts';
+import { estimateInputTokens } from './native-tokens.ts';
 import type { Server } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { timingSafeEqual, randomUUID } from 'node:crypto';
@@ -67,11 +69,20 @@ export interface GatewayOptions {
 
 /** Rejected before any provider call; answered as HTTP 400 rather than 502. */
 class BadRequest extends Error {}
+class UpstreamFailure extends Error {
+  status: number;
+  retryAfter: string | null;
+  constructor(status: number, retryAfter: string | null) {
+    super(`OpenAI returned HTTP ${status}.${status === 401 ? ' Renew the Codex login.' : ''}`);
+    this.status = status;
+    this.retryAfter = retryAfter;
+  }
+}
 
 const reason = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export async function readCodexAuth(authFile: string): Promise<CodexAuthHeaders> {
@@ -124,9 +135,11 @@ export function createNativeGateway({ token, authFile, fetchImpl = fetch, onEven
         chunks.push(chunk);
       }
       const raw = Buffer.concat(chunks);
-      let body: MessagesRequest;
-      try { body = raw.length ? JSON.parse(raw.toString('utf8')) : {}; }
-      catch { res.writeHead(400); return res.end('Invalid JSON'); }
+      let parsed: unknown;
+      try { parsed = raw.length ? JSON.parse(raw.toString('utf8')) : {}; }
+      catch { throw new BadRequest('Invalid JSON'); }
+      if (!isRecord(parsed) || (parsed.model !== undefined && typeof parsed.model !== 'string')) throw new BadRequest('Expected an object with a string model');
+      const body: MessagesRequest = parsed;
       const external = typeof body.model === 'string' && body.model.startsWith('multi/') ? body.model : null;
       const agentId = header(req.headers['x-claude-code-agent-id']);
       onEvent({ route: external ? 'openai' : 'anthropic', model: body.model, agentId: agentId ?? null, path: url.pathname });
@@ -135,9 +148,14 @@ export function createNativeGateway({ token, authFile, fetchImpl = fetch, onEven
         try {
           const model = Object.values(MODELS).find(model => external === `multi/openai/${model}`);
           if (!model) throw new Error('Unknown native OpenAI model');
-          if (url.pathname !== '/v1/messages') throw new Error('Token counting is not supported for native OpenAI workers');
+          if (!['/v1/messages', '/v1/messages/count_tokens'].includes(url.pathname) || req.method !== 'POST') throw new Error('External models require POST /v1/messages or /v1/messages/count_tokens');
           request = toResponses(body, model);
         } catch (error) { throw new BadRequest(reason(error)); }
+        if (url.pathname === '/v1/messages/count_tokens') {
+          res.writeHead(200, { 'content-type': 'application/json', 'x-multi-token-count': 'estimate' });
+          return res.end(JSON.stringify({ input_tokens: estimateInputTokens(request) }));
+        }
+        const toolNames = originalToolNames(body);
         onEvent({ route: 'openai-request', agentId, model: request.model, effort: request.reasoning.effort });
         const headers = { ...await readCodexAuth(authFile), 'content-type': 'application/json', accept: 'text/event-stream',
           originator: 'cc_multi_native', 'session_id': String(agentId ?? header(req.headers['x-claude-code-session-id']) ?? fallbackSession) };
@@ -146,7 +164,7 @@ export function createNativeGateway({ token, authFile, fetchImpl = fetch, onEven
           // Do not print upstream bodies or credentials in gateway diagnostics.
           onEvent({ route: 'openai', status: upstream.status });
           await upstream.body?.cancel();
-          throw new Error(`OpenAI returned HTTP ${upstream.status}.${upstream.status === 401 ? ' Renew the Codex login.' : ''}`);
+          throw new UpstreamFailure(upstream.status, upstream.headers.get('retry-after'));
         }
         if (!upstream.body) throw new Error('OpenAI returned no response stream.');
         if (body.stream) {
@@ -154,7 +172,8 @@ export function createNativeGateway({ token, authFile, fetchImpl = fetch, onEven
           res.flushHeaders();
           heartbeat = setInterval(() => emit('ping', {}), 15000);
         }
-        const result = await fromResponses(upstream.body, external, body.stream ? emit : undefined);
+        const result = await fromResponses(upstream.body, external, body.stream ? emit : undefined, { toolNames, stopSequences: body.stop_sequences });
+        if (result.stop_reason === 'stop_sequence') abort.abort();
         onEvent({ route: 'openai', agentId, stopReason: result.stop_reason,
           tools: result.content.filter(b => b.type === 'tool_use').map(b => b.name) });
         if (!body.stream) res.writeHead(200, { 'content-type': 'application/json' });
@@ -180,9 +199,12 @@ export function createNativeGateway({ token, authFile, fetchImpl = fetch, onEven
     } catch (error) {
       abort.abort();
       if (res.destroyed) return;
-      const failure = { type: 'error', error: { type: 'api_error', message: `Native gateway: ${reason(error)}` } };
+      const status = error instanceof BadRequest ? 400 : error instanceof UpstreamFailure ? error.status : 502;
+      const errorTypes: Record<number, string> = { 400: 'invalid_request_error', 401: 'authentication_error', 403: 'permission_error', 404: 'not_found_error', 429: 'rate_limit_error', 503: 'overloaded_error' };
+      const failure = { type: 'error', error: { type: errorTypes[status] ?? 'api_error', message: `Native gateway: ${reason(error)}` } };
+      if (error instanceof UpstreamFailure && error.retryAfter && !res.headersSent) res.setHeader('retry-after', error.retryAfter);
       if (res.headersSent) { emit('error', { error: failure.error }); res.end(); }
-      else { res.writeHead(error instanceof BadRequest ? 400 : 502, { 'content-type': 'application/json' }); res.end(JSON.stringify(failure)); }
+      else { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(failure)); }
     } finally { clearInterval(heartbeat); }
   });
 }

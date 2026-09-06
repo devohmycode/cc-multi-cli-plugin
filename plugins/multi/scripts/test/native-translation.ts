@@ -42,6 +42,45 @@ try {
     assert.deepEqual(answer, { user_colour: 'red', tool_colour: 'blue', nonce });
     console.log(`PASS: ${legacy ? 'legacy' : 'modern'} structured output + user/tool-result images on Luna.`);
   }
+  // A minimal valid PDF with a fresh nonce exercises actual document ingestion.
+  const content = `BT /F1 18 Tf 72 720 Td (Document nonce: ${nonce}) Tj ET`;
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n` +
+    offsets.slice(1).map(offset => `${String(offset).padStart(10, '0')} 00000 n \n`).join('') +
+    `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  const longName = 'mcp__synthetic_document_test__' + 'long_tool_name_'.repeat(8);
+  const response = await fetch(`http://127.0.0.1:${address.port}/v1/messages`, {
+    method: 'POST', signal: AbortSignal.timeout(180000),
+    headers: { 'content-type': 'application/json', 'x-multi-gateway-token': token },
+    body: JSON.stringify({ model: 'multi/openai/gpt-5.6-luna', stream: false,
+      system: 'Read the document and call the provided tool with its document nonce.',
+      output_config: { effort: 'low' },
+      tools: [{ name: longName, input_schema: { type: 'object', properties: { nonce: { type: 'string' } }, required: ['nonce'], additionalProperties: false } }],
+      tool_choice: { type: 'tool', name: longName },
+      messages: [{ role: 'user', content: [{ type: 'document', source: {
+        type: 'base64', media_type: 'application/pdf', data: Buffer.from(pdf).toString('base64')
+      } }] }]
+    })
+  });
+  const result: MessagesResponse = JSON.parse(await response.text());
+  assert.equal(response.status, 200, JSON.stringify(result));
+  const call = result.content.find(block => block.type === 'tool_use');
+  assert(call && call.name === longName, 'Restore the original MCP tool name');
+  assert.deepEqual(call.input, { nonce });
+  console.log('PASS: PDF input + long MCP name + named tool choice on Luna.');
 } finally {
   server.closeAllConnections();
   await new Promise<void>(resolve => server.close(() => resolve()));

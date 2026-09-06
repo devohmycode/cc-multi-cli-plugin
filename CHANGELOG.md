@@ -6,15 +6,23 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
-### Removed
+### Compaction regression testing
 
-- **The slash-command delegation system is gone.** `/codex:*`, `/cursor:*`, `/opencode:*`, and `/multi:*` commands, their forwarder subagents and skills, the `multi-cli-companion.mjs` dispatcher, the Codex app-server broker, workspace job/state storage, and the session-lifecycle and stop-review-gate hooks were deleted, along with the `codex`, `cursor`, and `opencode` command-only plugin slices and their tests. The native gateway is the product. The Cursor and OpenCode adapters, the ACP client, and `lib/process.mjs` are kept as unwired transport references for the planned Cursor bridge (Cursor first, then OpenCode); nothing else imports them. `npm run test:live` is gone with the companion; the opt-in gateway reproducers under `plugins/multi/scripts/test/` are run by path. `README.md`, `ARCHITECTURE.md`, `AGENTS.md`, `PRIVACY.md`, and `NOTICE` describe the gateway and no longer document the removed interface.
+- Added `npm run test:live:compaction`: a parameterized live contract for actual manual, repeated, and automatic compaction boundaries, retained conversation-only facts, post-compaction native edits, fresh-process saved-session resume, and switching back to Claude. Uses synthetic fixtures, bounded waits, and versioned JSON reports; the offline suite remains offline.
+- Passed on Luna with Claude Code 2.1.263, including an automatic boundary at 70,397 tokens. Full-window stress and subagent compaction remain outside this main-session baseline.
 
-### Changed
+### OpenAI gateway compatibility
 
-- **The native gateway is TypeScript, on a Node 24 baseline.** `native-model-gateway.ts`, `lib/native-gateway.ts`, and `lib/native-responses.ts` (plus their unit test and the three opt-in live reproducers) are strict TypeScript with declared Anthropic Messages / OpenAI Responses protocol types; Node runs them directly by stripping types, so there is no build step, loader, or new runtime dependency. Start the launcher with `node plugins/multi/scripts/native-model-gateway.ts`. `npm test` now runs `tsc --noEmit` before the test suite, `engines.node` is `>=24.12.0` (the floor for stable type stripping), and CI runs the same command on Node 24.
+- Added deterministic long-tool-name and call-ID aliases, base64 PDF/plain-text documents, tool-result document and tool-reference handling, and a local token-count estimate using `js-tiktoken`.
+- Hardened streaming for parallel calls, delayed function metadata, nullable initial usage, malformed nested content, and bounded SSE buffers. Tool arguments are validated before emission; provider errors preserve HTTP status and Retry-After. Added local stop-sequence enforcement and explicit-effort-first legacy thinking-budget mapping.
+- Extended offline tests and the synthetic live translation check to cover PDF ingestion and a long MCP name. Provider-hosted tools, exact media/billing token counts, provider output caps, and authentication stores outside Codex's auth.json remain outside the implemented route.
 
-- **Provider stream events are shape-checked at the boundary.** A known Responses event with a missing or mistyped field (`delta`, `output_index`, `item`, `response.id`) now fails with `OpenAI sent a malformed <type> event` instead of leaking `undefined` text or a raw TypeError; unknown event types are still ignored. Empty-string Codex credentials are refused locally again instead of being sent upstream.
+### Migration status
+
+- The native gateway and its tests now use strict TypeScript on Node ≥ 24.12. `npm test` runs type checking and offline tests; native live checks use `.ts` entrypoints. The branch also removed the old companion/command system and retained Cursor/OpenCode/ACP/process references.
+- Restored our pre-migration documentation and execution boundaries, with current TypeScript paths and removed-code sections marked historical. Next work remains OpenAI gateway completion, then Cursor; no fixed order is imposed on the other targets.
+
+### Added
 
 - **Native GPT image inputs and structured output.** User images and image-bearing tool results now translate to Responses image inputs; base64 and HTTP(S) sources are supported without gateway-side URL fetching. Modern `output_config.format` and legacy `output_format` JSON schemas translate to strict Responses output without schema rewriting. Includes offline validation/ordering contracts and a synthetic live image/schema check. Corrected the README's non-Claude gateway support statement using Boris Cherny's explicit clarification.
 

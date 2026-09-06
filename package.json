@@ -10,6 +10,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && node --test \"test/unit/**/*.test.mjs\" \"test/unit/**/*.test.ts\"",
+    "test:live:compaction": "node plugins/multi/scripts/test/native-compaction.ts",
     "build:acp-vendor": "node scripts/build-acp-vendor.mjs"
   },
   "devDependencies": {
@@ -18,5 +19,8 @@
     "esbuild": "^0.28.0",
     "typescript": "^7.0.2",
     "zod": "^4.4.3"
+  },
+  "dependencies": {
+    "js-tiktoken": "1.0.21"
   }
 }
