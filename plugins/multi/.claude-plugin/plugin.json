@@ -1,6 +1,6 @@
 {
   "name": "multi",
-  "description": "Hub plugin for cc-multi-cli-plugin: contains the companion runtime, subagents, setup wizard, and customization skills.",
+  "description": "Native model gateway for Claude Code: serves external models over a localhost endpoint so they run as models and native workers in one session, with Claude passthrough preserved.",
   "version": "0.1.2",
   "author": {
     "name": "greenpolo",
@@ -9,8 +9,8 @@
   "license": "Apache-2.0",
   "keywords": [
     "claude-code",
-    "multi-cli",
-    "orchestration",
-    "meta"
+    "gateway",
+    "openai",
+    "orchestration"
   ]
 }

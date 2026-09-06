@@ -5,45 +5,18 @@
     "url": "https://github.com/greenpolo"
   },
   "metadata": {
-    "description": "Marketplace for cc-multi-cli-plugin — delegation to Codex, Cursor, and OpenCode CLIs from Claude Code.",
+    "description": "Marketplace for cc-multi-cli-plugin — a native model gateway that runs external models inside one Claude Code session.",
     "version": "0.1.2"
   },
   "plugins": [
     {
       "name": "multi",
-      "description": "Hub — companion runtime, subagents, setup wizard, customization skills. Install first.",
+      "description": "Native model gateway: runs external models as Claude Code models and workers in the native tool loop.",
       "version": "0.1.2",
       "author": {
         "name": "greenpolo"
       },
       "source": "./plugins/multi"
-    },
-    {
-      "name": "codex",
-      "description": "Adds /codex:execute, /codex:rescue, /codex:review, /codex:adversarial-review. Requires multi.",
-      "version": "0.1.2",
-      "author": {
-        "name": "greenpolo"
-      },
-      "source": "./plugins/codex"
-    },
-    {
-      "name": "cursor",
-      "description": "Adds /cursor:delegate, /cursor:research, /cursor:explore. Requires multi.",
-      "version": "0.1.2",
-      "author": {
-        "name": "greenpolo"
-      },
-      "source": "./plugins/cursor"
-    },
-    {
-      "name": "opencode",
-      "description": "Adds /opencode:delegate, /opencode:research, /opencode:explore. Requires multi.",
-      "version": "0.1.2",
-      "author": {
-        "name": "greenpolo"
-      },
-      "source": "./plugins/opencode"
     }
   ]
 }
