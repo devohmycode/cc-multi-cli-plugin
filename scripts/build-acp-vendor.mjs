@@ -6,7 +6,7 @@
  * the npm package.
  *
  * Output: plugins/multi/scripts/lib/acp/vendor/acp-sdk.bundle.mjs
- *   - format=esm, platform=node, target=node18 (the SDK is ESM-only, Node 18+)
+ *   - format=esm, platform=node, target=node24 (the SDK is ESM-only)
  *   - external: node:* builtins only (everything else, incl. zod, is inlined)
  *   - a banner comment records the exact @agentclientprotocol/sdk version that
  *     built it; a drift-gate unit test asserts this matches package-lock.json.
@@ -66,7 +66,7 @@ async function main() {
     bundle: true,
     format: "esm",
     platform: "node",
-    target: "node18",
+    target: "node24",
     // Only Node builtins stay external; zod + the SDK are inlined.
     external: ["node:*"],
     legalComments: "none",

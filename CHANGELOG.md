@@ -6,7 +6,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
-### Added
+### Changed
+
+- **The native gateway is TypeScript, on a Node 24 baseline.** `native-model-gateway.ts`, `lib/native-gateway.ts`, and `lib/native-responses.ts` (plus their unit test and the three opt-in live reproducers) are strict TypeScript with declared Anthropic Messages / OpenAI Responses protocol types; Node runs them directly by stripping types, so there is no build step, loader, or new runtime dependency. Start the launcher with `node plugins/multi/scripts/native-model-gateway.ts`. `npm test` now runs `tsc --noEmit` before the test suite, `engines.node` is `>=24.12.0` (the floor for stable type stripping), and CI runs the same command on Node 24.
 
 - **Native GPT image inputs and structured output.** User images and image-bearing tool results now translate to Responses image inputs; base64 and HTTP(S) sources are supported without gateway-side URL fetching. Modern `output_config.format` and legacy `output_format` JSON schemas translate to strict Responses output without schema rewriting. Includes offline validation/ordering contracts and a synthetic live image/schema check. Corrected the README's non-Claude gateway support statement using Boris Cherny's explicit clarification.
 

@@ -54,7 +54,7 @@ below is launched separately from a checkout.
 From a checkout, start a new Claude Code session with:
 
 ```sh
-node plugins/multi/scripts/native-model-gateway.mjs
+node plugins/multi/scripts/native-model-gateway.ts
 ```
 
 Run `/model` to select GPT-6 Astra or GPT-5.6 Sol, Terra, or Luna as the **main
@@ -136,13 +136,13 @@ through a proxy is supported, while noting that harness prompting and tools are
 model-specific ([statement](https://x.com/bcherny/status/2086183356795060396)).
 
 Offline checks run with `npm test`. The opt-in integration check
-`node plugins/multi/scripts/test/native-model-gateway.mjs openai-luna-high` uses both
+`node plugins/multi/scripts/test/native-model-gateway.ts openai-luna-high` uses both
 subscriptions to delegate a real native Read/Edit task in a temporary directory
 and asserts the upstream model and reasoning level. Omit the name to test Astra
 at medium effort.
-`node plugins/multi/scripts/test/native-main-switch.mjs` tests Claude → GPT main
+`node plugins/multi/scripts/test/native-main-switch.ts` tests Claude → GPT main
 → native delegation → Claude in one conversation with generated fixtures.
-`node plugins/multi/scripts/test/native-translation.mjs` tests modern and legacy
+`node plugins/multi/scripts/test/native-translation.ts` tests modern and legacy
 JSON schemas plus user/tool-result images against Luna, using only synthetic
 fixtures and the Codex subscription.
 

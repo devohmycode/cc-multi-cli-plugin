@@ -108,10 +108,10 @@ or blanket approval for every subscription use case.
 
 ## Existing native model gateway
 
-`plugins/multi/scripts/native-model-gateway.mjs` launches Claude with session-local
+`plugins/multi/scripts/native-model-gateway.ts` launches Claude with session-local
 model-picker settings, named OpenAI workers, and a localhost gateway.
-`lib/native-gateway.mjs` separates Claude passthrough from registered GPT routes;
-`lib/native-responses.mjs` handles Messages/Responses translation and opaque
+`lib/native-gateway.ts` separates Claude passthrough from registered GPT routes;
+`lib/native-responses.ts` handles Messages/Responses translation and opaque
 reasoning state. See the [README](README.md#experimental-native-openai-models)
 for usage, tested behavior, and limitations. This code is the starting point for
 the harness bridge, not an implementation of that bridge already.

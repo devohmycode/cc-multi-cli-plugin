@@ -45,9 +45,9 @@ instructions. Keep new scratch research in gitignored `.agent/`.
 
 ## Current code map
 
-- `plugins/multi/scripts/native-model-gateway.mjs`: experimental gateway launcher,
+- `plugins/multi/scripts/native-model-gateway.ts`: experimental gateway launcher,
   model-picker settings, and native worker registration.
-- `plugins/multi/scripts/lib/native-gateway.mjs` and `native-responses.mjs`:
+- `plugins/multi/scripts/lib/native-gateway.ts` and `native-responses.ts`:
   provider routing and Messages/Responses translation.
 - `plugins/multi/scripts/multi-cli-companion.mjs` and `lib/commands/`: existing
   companion dispatcher and command handlers.

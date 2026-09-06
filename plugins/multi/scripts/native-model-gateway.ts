@@ -3,11 +3,29 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { createNativeGateway, MODELS, OPENAI_WORKERS, readCodexAuth } from './lib/native-gateway.mjs';
+import { createNativeGateway, MODELS, OPENAI_WORKERS, readCodexAuth } from './lib/native-gateway.ts';
+import type { GatewayEvent } from './lib/native-gateway.ts';
+import type { Effort } from './lib/native-responses.ts';
+
+/** One `--agents` entry: a native OpenAI worker in the Claude Code harness. */
+interface AgentDefinition {
+  description: string;
+  prompt: string;
+  model: string;
+  tools: string[];
+  effort: Effort;
+}
+
+/** One `/model` entry the launched session offers. */
+interface ModelOption {
+  model: string;
+  label: string;
+  description: string;
+}
 
 const args = process.argv.slice(2);
 if (args[0] === '--help') {
-  console.log('Usage: node native-model-gateway.mjs [-- <claude arguments>]\nLaunch Claude with GPT models in /model and native OpenAI workers, using existing Claude and Codex subscription logins.');
+  console.log('Usage: node native-model-gateway.ts [-- <claude arguments>]\nLaunch Claude with GPT models in /model and native OpenAI workers, using existing Claude and Codex subscription logins.');
   process.exit(0);
 }
 if (args[0] === '--') args.shift();
@@ -19,18 +37,20 @@ const authFile = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.c
 await readCodexAuth(authFile);
 const token = randomBytes(32).toString('hex');
 const server = createNativeGateway({ token, authFile,
-  onEvent: process.env.MULTI_NATIVE_TRACE === '1' ? event => process.stderr.write(`[native] ${JSON.stringify(event)}\n`) : undefined });
-await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-const agents = Object.fromEntries(Object.entries(OPENAI_WORKERS).map(([name, { model, effort }]) => [name, {
+  onEvent: process.env.MULTI_NATIVE_TRACE === '1' ? (event: GatewayEvent) => process.stderr.write(`[native] ${JSON.stringify(event)}\n`) : undefined });
+await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+const address = server.address();
+if (address === null || typeof address === 'string') throw new Error('Gateway did not bind a local port.');
+const agents: Record<string, AgentDefinition> = Object.fromEntries(Object.entries(OPENAI_WORKERS).map(([name, { model, effort }]) => [name, {
     description: `${model}, ${effort} reasoning. Native coding, investigation, and review.`,
     prompt: 'You are an OpenAI coding agent running inside Claude Code. Use the provided native tools to complete the delegated task. Follow its scope and permissions. Keep required shell commands in the foreground (run_in_background: false), with an appropriate timeout, and wait for their exit status before reporting completion. A background launch is not a completed task. Report the result, verification, and any unresolved issues. Do not invoke external coding CLIs.',
     model: `multi/openai/${model}`, tools: ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write'], effort
 }]));
-const settings = { modelPicker: { options: Object.values(MODELS).map(model => ({
+const settings: { modelPicker: { options: ModelOption[] } } = { modelPicker: { options: Object.values(MODELS).map(model => ({
   model: `multi/openai/${model}`, label: model, description: 'OpenAI subscription · native Claude Code harness'
 })) } };
 const child = spawn('claude', ['--settings', JSON.stringify(settings), '--agents', JSON.stringify(agents), ...args], { stdio: 'inherit', env: {
-  ...process.env, ANTHROPIC_BASE_URL: `http://127.0.0.1:${server.address().port}`,
+  ...process.env, ANTHROPIC_BASE_URL: `http://127.0.0.1:${address.port}`,
   ANTHROPIC_CUSTOM_HEADERS: [process.env.ANTHROPIC_CUSTOM_HEADERS, `x-multi-gateway-token: ${token}`].filter(Boolean).join('\n')
 } });
 const shutdown = () => { server.closeAllConnections(); server.close(); };
