@@ -202,7 +202,7 @@ function extractAssistantText(event) {
 
 /**
  * Map a stream-json event to a progress event for the companion's onStream sink.
- * task.mjs forwards only `phase` events to the user, so tool-call starts become
+ * the gateway/bridge consumer forwards only `phase` events to the user, so tool-call starts become
  * phase pings ("things happening"); assistant deltas become message_chunks
  * (filtered as token noise downstream but available for richer sinks).
  *
@@ -614,7 +614,7 @@ export function resolveCursorModel(availableIds, requested) {
 
 /**
  * Map a Cursor ACP session/update to the SAME progress events the headless
- * onStream sink consumes (phase / message_chunk), so task.mjs's streamForwarder
+ * onStream sink consumes (phase / message_chunk), so a consumer's stream forwarder
  * is unchanged.
  *
  * @returns {{ type: string, [k: string]: any } | null}

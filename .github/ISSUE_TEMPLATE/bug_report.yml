@@ -37,9 +37,9 @@ body:
       label: What happened?
       description: What did you run, what did you expect, what did you get?
       placeholder: |
-        I ran `/cursor:delegate fix the bug in foo.js`.
-        I expected Cursor to edit foo.js and report what it changed.
-        Instead the subagent returned "Cursor delegate failed: no output" after 8 minutes.
+        I ran `node plugins/multi/scripts/native-model-gateway.ts` and asked openai-luna-high to fix foo.js.
+        I expected the worker to edit foo.js and report what it changed.
+        Instead the worker failed with "OpenAI returned HTTP 400" after 8 minutes.
     validations:
       required: true
 
@@ -47,7 +47,7 @@ body:
     id: trace
     attributes:
       label: ACP_TRACE output (if applicable)
-      description: Re-run with `ACP_TRACE=1 node ...multi-cli-companion.mjs ... 2>&1` and paste the stderr.
+      description: Re-run with `MULTI_NATIVE_TRACE=1` (gateway) or `ACP_TRACE=1` (ACP transport) and paste the stderr.
       render: shell
 
   - type: input

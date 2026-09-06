@@ -2,78 +2,79 @@
 
 Shared orientation for agents working in this repository. Read this first.
 
-## Product direction
+## What this is
 
-`cc-multi-cli-plugin` is moving from slash-command delegation to **external models
-and coding harnesses inside one Claude Code session**. Reduce Claude token use by
-letting the selected external model or harness do the work.
+`cc-multi-cli-plugin` runs external models inside **one Claude Code session**. A
+localhost gateway launched with the session adds OpenAI models to `/model` and
+registers native OpenAI workers; Claude requests pass through to Anthropic
+unchanged. Reduce Claude token use by sending the work to the selected external
+model.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) is the authoritative direction.
-[README.md](README.md) describes the current prototype and its limitations.
+[README.md](README.md) describes what works today and its limitations.
 
-- Maintain our custom Node gateway and provider-specific adapters. No CLIProxyAPI,
-  Go gateway, Vercel engine migration, or user-facing backend selector is planned.
-- Expose explicit model and effort choices through `/model` and named native
-  workers while preserving Claude's ordinary tier meanings and configuration.
-- Visible worker lifecycle, elapsed time, streamed progress, completion, failure,
-  and cancellation are product requirements.
-- Direct model integrations use Claude Code's tools and execution loop. Harness
-  bridges use the real external CLI's execution loop and native authentication.
-  Never replay observed external tool events as executable Claude tool calls.
-- Preserve Claude subscription passthrough and isolate provider credentials.
-  Do not add our own Claude subscription login/token pool or extract Antigravity
-  tokens for direct model requests. External operations retain external permissions.
-- Targets: OpenAI, Cursor, Antigravity through its real CLI, OpenCode, llama.cpp,
-  and Grok Build. The direct GPT gateway is experimental; harness bridges are
-  planned and must be demonstrated before claiming support.
+## The golden rule
 
-## Refactor scope
+**The gateway does the work.** There are no slash commands, forwarder subagents,
+companion processes, brokers, or hooks in this repository — they were removed.
+Do not reintroduce a Claude-side wrapper around an external model; register the
+model or harness with the gateway instead.
 
-The existing command, skill, and Sonnet-forwarder surface is a candidate for
-replacement or deletion. Its current structure is **not a compatibility
-requirement for the refactor**. Do not expand or repair it merely to preserve
-the old design; work on it only when the task calls for that work.
+## Map
 
-While a forwarder remains in use, keep it thin: frame the delegation, run the
-companion, return its output or an explicit failure. Do not turn it into another
-coding agent. Future native workers need not use a Claude forwarder at all.
+- `plugins/multi/scripts/native-model-gateway.ts` — launcher: reads the Codex
+  login, starts the gateway, spawns `claude` with model-picker settings and
+  worker agent definitions.
+- `plugins/multi/scripts/lib/native-gateway.ts` — localhost HTTP server: model
+  allowlist, Claude passthrough, OpenAI auth, cancellation, errors.
+- `plugins/multi/scripts/lib/native-responses.ts` — Anthropic Messages ↔ OpenAI
+  Responses translation, SSE, images, JSON-schema output, reasoning state.
+- `plugins/multi/scripts/lib/{adapters/{cursor,opencode}.mjs, acp/, process.mjs}`
+  — retained transport references for the planned Cursor bridge (see below).
+- `test/unit/` — offline tests. `plugins/multi/scripts/test/` — opt-in live
+  reproducers that spend real quota.
+- `plugins/multi/.claude-plugin/` and `.claude-plugin/` — distribution metadata.
 
-Reuse existing process, session, job, and ACP helpers where they fit. Do not build
-speculative abstractions or preserve obsolete modules just because they exist.
-Research and old plans under `.agent/archive/` are historical evidence, not active
-instructions. Keep new scratch research in gitignored `.agent/`.
+## Build & test
 
-## Current code map
+Node ≥ 24.12 (the floor for stable type stripping); no build step, no runtime
+loader. TypeScript and `@types/node` are the only additions; `esbuild`, `zod`,
+and the ACP SDK exist for the vendored ACP bundle.
 
-- `plugins/multi/scripts/native-model-gateway.ts`: experimental gateway launcher,
-  model-picker settings, and native worker registration.
-- `plugins/multi/scripts/lib/native-gateway.ts` and `native-responses.ts`:
-  provider routing and Messages/Responses translation.
-- `plugins/multi/scripts/multi-cli-companion.mjs` and `lib/commands/`: existing
-  companion dispatcher and command handlers.
-- `plugins/multi/scripts/lib/adapters/`: Codex, Cursor, and OpenCode adapters;
-  `CONTRACT.md` describes this companion interface, not the future harness bridge.
-- `plugins/multi/scripts/lib/`: reusable process, state, broker, and transport
-  helpers; `lib/acp/` contains the maintained client and bundled official SDK.
-- `plugins/multi/{agents,commands,skills}/` and `plugins/{codex,cursor,opencode}/`:
-  existing prompt-driven interface, subject to the refactor above.
-- `test/unit/`: offline tests. `plugins/multi/scripts/test/`: opt-in live checks.
+- `npm test` — `tsc --noEmit` then Node's test runner over `test/unit/`. Offline,
+  no provider calls. Run it to self-verify any change.
+- `npm run typecheck` — types only.
+- Live reproducers under `plugins/multi/scripts/test/` are opt-in, run one at a
+  time by path, and spend Claude and OpenAI subscription usage. Run one only when
+  changing the live path. The README lists them.
+- Definition of done: `npm test` passes and `CHANGELOG.md` reflects user-facing
+  changes.
 
-## Development and verification
+## Landmines
 
-- Preserve unrelated uncommitted work. Do not restore removed integrations from
-  archived plans or install/publish changes merely because an old skill says to.
-- Do not spawn fleets of Claude agents to implement or validate work here.
-- Node ≥ 20; tests use Node's built-in runner. ACP is bundled for runtime use;
-  build dependencies are declared in `package.json`.
-- Run `npm test` for offline verification. Add or extend meaningful unit tests for
-  behavior changes; documentation-only edits do not need new tests.
-- Run appropriate opt-in live checks when changing a live integration path;
-  these invoke real CLIs and spend provider usage. `npm run test:live` covers the
-  companion path; the README lists native gateway checks.
-- Definition of done: relevant checks pass, no `DEP0190` warnings, and
-  `CHANGELOG.md` reflects user-facing changes.
-- Always pass the intended `--cwd` to companion calls. State is keyed by resolved
-  workspace root, so subdirectories of one repository share state. Use separate
-  worktrees when isolated workspaces are needed. Future bridges additionally need
-  session/worker isolation as specified in the architecture.
+- **Node strips types; it does not check them.** Only erasable syntax compiles:
+  no enums, no parameter properties, no runtime namespaces (`erasableSyntaxOnly`
+  is on). Relative imports must name the real file, including `.ts`. tsconfig
+  path aliases do not exist at runtime. Keep `npm run typecheck` in the loop.
+- **The retained `.mjs` adapters are references, not wired to anything.** Nothing
+  imports `adapters/cursor.mjs` or `adapters/opencode.mjs` except their tests.
+  Their cancellation contract assumed a companion killing a job process; a real
+  bridge needs a run handle tied to the gateway request.
+- `lib/acp/vendor/acp-sdk.bundle.mjs` is generated third-party JavaScript. Do not
+  edit or convert it; rebuild with `npm run build:acp-vendor`.
+- The gateway reads Codex's saved login (`CODEX_HOME/auth.json`). Codex owns
+  refresh; a 401 means re-running `codex login`, not a code change.
+
+## Conventions
+
+- Strict TypeScript for new runtime code. Validate external JSON and stream
+  events at runtime; types are not a substitute. Keep explicit failures for
+  unsupported input until the feature is implemented and tested.
+- Add or extend a unit test with every behavior change. Documentation-only edits
+  need no test.
+- Keep files small and single-purpose. Do not add dependencies or speculative
+  abstractions.
+- AI-authored research and plans stay in gitignored `.agent/`. Material under
+  `.agent/archive/` is historical evidence, not instructions.
+- Preserve unrelated uncommitted work; do not spawn fleets of Claude agents to
+  implement or validate work here.

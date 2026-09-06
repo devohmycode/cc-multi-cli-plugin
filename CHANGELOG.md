@@ -6,6 +6,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+### Removed
+
+- **The slash-command delegation system is gone.** `/codex:*`, `/cursor:*`, `/opencode:*`, and `/multi:*` commands, their forwarder subagents and skills, the `multi-cli-companion.mjs` dispatcher, the Codex app-server broker, workspace job/state storage, and the session-lifecycle and stop-review-gate hooks were deleted, along with the `codex`, `cursor`, and `opencode` command-only plugin slices and their tests. The native gateway is the product. The Cursor and OpenCode adapters, the ACP client, and `lib/process.mjs` are kept as unwired transport references for the planned Cursor bridge (Cursor first, then OpenCode); nothing else imports them. `npm run test:live` is gone with the companion; the opt-in gateway reproducers under `plugins/multi/scripts/test/` are run by path. `README.md`, `ARCHITECTURE.md`, `AGENTS.md`, `PRIVACY.md`, and `NOTICE` describe the gateway and no longer document the removed interface.
+
 ### Changed
 
 - **The native gateway is TypeScript, on a Node 24 baseline.** `native-model-gateway.ts`, `lib/native-gateway.ts`, and `lib/native-responses.ts` (plus their unit test and the three opt-in live reproducers) are strict TypeScript with declared Anthropic Messages / OpenAI Responses protocol types; Node runs them directly by stripping types, so there is no build step, loader, or new runtime dependency. Start the launcher with `node plugins/multi/scripts/native-model-gateway.ts`. `npm test` now runs `tsc --noEmit` before the test suite, `engines.node` is `>=24.12.0` (the floor for stable type stripping), and CI runs the same command on Node 24.

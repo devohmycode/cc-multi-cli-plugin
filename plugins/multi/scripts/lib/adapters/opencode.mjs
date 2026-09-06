@@ -247,7 +247,7 @@ export function streamToolKind(event) {
 
 /**
  * Map an NDJSON event to a progress event for the companion's onStream sink.
- * task.mjs forwards only `phase` events to the user, so tool_use / step_start
+ * the gateway/bridge consumer forwards only `phase` events to the user, so tool_use / step_start
  * become phase pings; text becomes a message_chunk (richer sinks only).
  *
  * @returns {{ type: string, [k: string]: any } | null}
@@ -659,7 +659,7 @@ const inflightAcpTurns = new Map();
 
 /**
  * Map an ACP session/update to the SAME progress events the headless onStream
- * sink already consumes (phase / message_chunk), so task.mjs's streamForwarder is
+ * sink already consumes (phase / message_chunk), so a consumer's stream forwarder is
  * unchanged. agent_message_chunk → message_chunk; tool_call updates → phase.
  *
  * @returns {{ type: string, [k: string]: any } | null}

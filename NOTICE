@@ -5,29 +5,22 @@ This product includes software developed by:
 
 - OpenAI (https://openai.com), from the codex-plugin-cc project
   (https://github.com/openai/codex-plugin-cc), licensed under Apache 2.0.
-  Files in scripts/ and the shared companion runtime architecture are
-  derived from this work.
+  Parts of the retained runtime under plugins/multi/scripts/ are derived from
+  this work.
 
 - sakibsadmanshajib (https://github.com/sakibsadmanshajib), from the
   gemini-plugin-cc project
   (https://github.com/sakibsadmanshajib/gemini-plugin-cc), licensed under
-  Apache 2.0. The ACP transport layer for Gemini is derived from this work.
+  Apache 2.0. The ACP transport layer (plugins/multi/scripts/lib/acp/) is
+  derived from this work.
 
 - blowmage (https://github.com/blowmage), from the cursor-agent-acp-npm
   project (https://github.com/blowmage/cursor-agent-acp-npm), licensed under
   MIT. The Cursor ACP adapter is informed by this work.
 
-The following files are forked from OpenAI's codex-plugin-cc project
-(https://github.com/openai/codex-plugin-cc), licensed under Apache 2.0, and
-adapted to route through this plugin's multi-cli-companion runtime:
-
-- plugins/codex/commands/rescue.md and plugins/codex/commands/review.md
-- plugins/multi/agents/codex-rescue.md
-- plugins/multi/skills/codex-cli-runtime/, plugins/multi/skills/gpt-6-prompting/ (upstream name: gpt-5-4-prompting),
-  and plugins/multi/skills/codex-result-handling/
-- plugins/multi/schemas/review-output.schema.json
-- plugins/multi/prompts/adversarial-review.md and
-  plugins/multi/prompts/stop-review-gate.md
+plugins/multi/scripts/lib/acp/vendor/acp-sdk.bundle.mjs is a generated bundle of
+the official Agent Client Protocol SDK (https://agentclientprotocol.com,
+Apache 2.0) and its dependencies, including zod (https://zod.dev, MIT).
 
 This plugin is a community project, not affiliated with Anthropic, OpenAI,
 Google, GitHub, or Cursor.
