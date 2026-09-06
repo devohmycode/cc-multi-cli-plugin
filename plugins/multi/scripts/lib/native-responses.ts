@@ -37,7 +37,7 @@ export interface ContentBlock {
 }
 
 export interface RequestMessage {
-  role: 'user' | 'assistant' | 'system';
+  role: string;
   content: string | ContentBlock[];
 }
 
@@ -49,7 +49,7 @@ export interface Tool {
 }
 
 export interface ToolChoice {
-  type: 'auto' | 'any' | 'none' | 'tool';
+  type: string;
   name?: string;
   disable_parallel_tool_use?: boolean;
 }
@@ -299,10 +299,11 @@ export function toResponses(body: MessagesRequest, model: string): ResponsesRequ
   }
   const input: ResponsesInputItem[] = [];
   for (const message of body.messages) {
-    if (!['user', 'assistant', 'system'].includes(message.role)) throw new Error('Unsupported message role');
+    const role = message.role;
+    if (role !== 'user' && role !== 'assistant' && role !== 'system') throw new Error('Unsupported message role');
     for (const block of blocks(message.content)) {
       if (block.type === 'text') {
-        input.push({ role: message.role === 'system' ? 'developer' : message.role,
+        input.push({ role: role === 'system' ? 'developer' : role,
           content: [{ type: message.role === 'assistant' ? 'output_text' : 'input_text', text: textOnly([block]) }] });
       } else if (block.type === 'image' && message.role === 'user') {
         input.push({ role: 'user', content: [imageInput(block)] });
@@ -331,15 +332,15 @@ export function toResponses(body: MessagesRequest, model: string): ResponsesRequ
     return { type: 'function', name: tool.name, description: tool.description ?? '', parameters: tool.input_schema, strict: false };
   });
   const choice = body.tool_choice;
-  if (choice && !['auto', 'any', 'none', 'tool'].includes(choice.type)) throw new Error('Unsupported tool choice');
+  const wanted = choice?.type ?? 'auto';
+  if (wanted !== 'auto' && wanted !== 'any' && wanted !== 'none' && wanted !== 'tool') throw new Error('Unsupported tool choice');
   const effort = body.output_config?.effort ?? 'medium';
   if (!isEffort(effort)) throw new Error(`Unsupported reasoning effort: ${effort}`);
   return {
     model, instructions: textOnly(body.system ?? ''), input, tools,
     // Preserve the schema's meaning; OpenAI validates its supported strict subset.
     ...(format ? { text: { format: { type: 'json_schema' as const, name: 'claude_output', schema: format.schema, strict: true } } } : {}),
-    tool_choice: choice?.type === 'tool' ? { type: 'function', name: choice.name }
-      : choice?.type === 'any' ? 'required' : choice?.type ?? 'auto',
+    tool_choice: wanted === 'tool' ? { type: 'function', name: choice?.name } : wanted === 'any' ? 'required' : wanted,
     parallel_tool_calls: !choice?.disable_parallel_tool_use,
     reasoning: { effort, summary: 'auto' }, include: ['reasoning.encrypted_content'],
     // Codex's subscription endpoint requires store:false and streamed responses.

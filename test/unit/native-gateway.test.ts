@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createNativeGateway, OPENAI_WORKERS } from '../../plugins/multi/scripts/lib/native-gateway.ts';
+import { createNativeGateway, readCodexAuth, OPENAI_WORKERS } from '../../plugins/multi/scripts/lib/native-gateway.ts';
 import type { GatewayFetch } from '../../plugins/multi/scripts/lib/native-gateway.ts';
 import { toResponses, fromResponses, readSse, forAnthropic } from '../../plugins/multi/scripts/lib/native-responses.ts';
 import type { MessagesRequest, MessagesResponse, RequestMessage, ResponsesInputContent, ResponsesInputItem,
@@ -299,4 +299,16 @@ test('a dropped downstream connection aborts external inference', async t => {
   await response.body?.cancel();
   await new Promise<void>(resolve => upstreamSignal.addEventListener('abort', () => resolve(), { once: true }));
   assert(upstreamSignal.aborted);
+});
+
+test('an auth.json without usable ChatGPT credentials fails before any upstream call', async t => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'native-auth-test-'));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const authFile = path.join(cwd, 'auth.json');
+  for (const tokens of [{ access_token: '', account_id: 'account-test' }, { access_token: 'openai-secret', account_id: '' }, {}]) {
+    await writeFile(authFile, JSON.stringify({ auth_mode: 'chatgpt', tokens }));
+    await assert.rejects(readCodexAuth(authFile), /require a Codex ChatGPT login/);
+  }
+  await writeFile(authFile, JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'openai-secret', account_id: 'account-test' } }));
+  assert.deepEqual(await readCodexAuth(authFile), { authorization: 'Bearer openai-secret', 'chatgpt-account-id': 'account-test' });
 });
