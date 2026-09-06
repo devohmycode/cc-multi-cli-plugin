@@ -5,7 +5,7 @@
     "url": "https://github.com/greenpolo"
   },
   "metadata": {
-    "description": "Marketplace for cc-multi-cli-plugin — delegation to Codex, Cursor, Antigravity, and OpenCode CLIs from Claude Code.",
+    "description": "Marketplace for cc-multi-cli-plugin — delegation to Codex, Cursor, and OpenCode CLIs from Claude Code.",
     "version": "0.1.2"
   },
   "plugins": [
@@ -35,15 +35,6 @@
         "name": "greenpolo"
       },
       "source": "./plugins/cursor"
-    },
-    {
-      "name": "antigravity",
-      "description": "Adds /antigravity:research and /antigravity:explore (read-only; Gemini 3.7 Flash via Google's headless agy CLI). EXPERIMENTAL. Requires multi and the agy CLI installed + signed in.",
-      "version": "0.1.2",
-      "author": {
-        "name": "greenpolo"
-      },
-      "source": "./plugins/antigravity"
     },
     {
       "name": "opencode",

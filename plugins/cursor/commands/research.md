@@ -12,7 +12,7 @@ Raw user request:
 $ARGUMENTS
 
 - Default foreground; research is usually a single turn. Pass `--background` for a deep/long investigation.
-- Pass `--model` through; default is Cursor's Auto model.
+- Pass `--model` through; default is Cursor's Auto model (Grok is in the Cursor pool: `--model grok-4.6`).
 - If the request has no question, ask what to research.
 
 Return the subagent's output verbatim.

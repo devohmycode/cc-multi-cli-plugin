@@ -1,5 +1,10 @@
 # Adapter contract
 
+This is the existing **companion CLI** contract. It is reusable transport
+infrastructure for the planned harness bridges described in
+[ARCHITECTURE.md](../../../../../ARCHITECTURE.md); it does not define Claude's
+model API or require every integration to use a forwarding subagent.
+
 Every CLI adapter in this directory exports a single `adapter` object with the
 shape below. The companion's registry (`multi-cli-companion.mjs`) consumes only
 this object, so any module that conforms is a drop-in CLI backend.

@@ -1,12 +1,20 @@
 ---
-name: gpt-5-4-prompting
-description: Internal guidance for composing Codex and GPT-5.4 prompts for coding, review, diagnosis, and research tasks inside the Codex Claude Code plugin
+name: gpt-6-prompting
+description: Internal guidance for composing Codex / GPT-6 Astra prompts for coding, review, diagnosis, and research tasks inside the Codex Claude Code plugin
 user-invocable: false
 ---
 
-# GPT-5.4 Prompting
+# GPT-6 Prompting
 
-Use this skill when `codex:codex-rescue` needs to ask Codex or another GPT-5.4-based workflow for help.
+Use this skill when `codex:codex-rescue` needs to ask Codex (GPT-6 Astra by default) for help.
+
+GPT-6 Astra specifics (from OpenAI's "Using GPT-6 Astra" guide — https://developers.openai.com/api/docs/guides/latest-model):
+- It asks a clarifying question more readily than GPT-5.x when input could change the result. Headless runs cannot answer, so state the decision policy up front: "proceed on the most reasonable interpretation; list assumptions at the end."
+- It follows instructions in skills and AGENTS.md more literally. Say that the task text takes precedence over any file guidance when they conflict.
+- It defaults to lists and tables. Ask for prose (or a specific output contract) when that is what the caller wants.
+- It under-delegates. For parallelizable work at `--effort ultra` (the only effort that spawns subagents), say so explicitly.
+- It over-tests small changes. For reversible, low-impact edits, say "no test run needed".
+- `--effort` accepts `low|medium|high|xhigh|max|ultra`; `none`/`minimal` are rejected (HTTP 400).
 
 Prompt Codex like an operator, not a collaborator. Keep prompts compact and block-structured with XML tags. State the task, the output contract, the follow-through defaults, and the small set of extra constraints that matter.
 

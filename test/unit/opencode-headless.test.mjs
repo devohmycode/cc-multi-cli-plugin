@@ -93,6 +93,13 @@ test("buildHeadlessArgs: prompt is NEVER in argv (delivered on stdin)", () => {
   ]);
 });
 
+test("buildHeadlessArgs: --effort maps to --variant verbatim; absent/blank → no flag", () => {
+  const args = buildHeadlessArgs({ role: "delegate", effort: "high" });
+  assert.equal(args[args.indexOf("--variant") + 1], "high");
+  assert.ok(!buildHeadlessArgs({ role: "delegate" }).includes("--variant"));
+  assert.ok(!buildHeadlessArgs({ role: "delegate", effort: "  " }).includes("--variant"));
+});
+
 test("buildHeadlessArgs: research → --agent oc-research, no skip-perms", () => {
   const args = buildHeadlessArgs({ role: "research" });
   assert.equal(args[args.indexOf("--agent") + 1], "oc-research");

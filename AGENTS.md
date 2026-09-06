@@ -1,58 +1,79 @@
 # AGENTS.md
 
-Orientation for AI agents (Claude, Codex, Cursor) working in this repo. **Read this first.**
+Shared orientation for agents working in this repository. Read this first.
 
-## What this is
+## Product direction
 
-`cc-multi-cli-plugin` is a Claude Code plugin that **offloads heavy coding work to external CLIs** — Codex, Cursor (headless `agent -p`), Antigravity, and OpenCode (headless `opencode run --format json`) — so the orchestrating Claude session spends as few tokens as possible. The plugin's entire value is *token reduction by delegation*. Keep that goal central to every change.
+`cc-multi-cli-plugin` is moving from slash-command delegation to **external models
+and coding harnesses inside one Claude Code session**. Reduce Claude token use by
+letting the selected external model or harness do the work.
 
-## The golden rule
+[ARCHITECTURE.md](ARCHITECTURE.md) is the authoritative direction.
+[README.md](README.md) describes the current prototype and its limitations.
 
-Claude does as little thinking as possible; the external CLI does the work.
+- Maintain our custom Node gateway and provider-specific adapters. No CLIProxyAPI,
+  Go gateway, Vercel engine migration, or user-facing backend selector is planned.
+- Expose explicit model and effort choices through `/model` and named native
+  workers while preserving Claude's ordinary tier meanings and configuration.
+- Visible worker lifecycle, elapsed time, streamed progress, completion, failure,
+  and cancellation are product requirements.
+- Direct model integrations use Claude Code's tools and execution loop. Harness
+  bridges use the real external CLI's execution loop and native authentication.
+  Never replay observed external tool events as executable Claude tool calls.
+- Preserve Claude subscription passthrough and isolate provider credentials.
+  Do not add our own Claude subscription login/token pool or extract Antigravity
+  tokens for direct model requests. External operations retain external permissions.
+- Targets: OpenAI, Cursor, Antigravity through its real CLI, OpenCode, llama.cpp,
+  and Grok Build. The direct GPT gateway is experimental; harness bridges are
+  planned and must be demonstrated before claiming support.
 
-- The per-command subagents (`plugins/multi/agents/codex-*.md`) are **thin forwarders**: they build exactly one companion command, run it, and return stdout unchanged. They must not read files, reason about the task, or "help."
-- Forwarder models are tuned by role. Forwarders that **frame/route** the prompt — `codex-execute`, `codex-rescue`, and the cursor/antigravity ones — run on **Sonnet**, because shaping the task well (model/effort choice, prompt framing) materially improves what the external CLI then produces (this mirrors the official `codex-plugin-cc` rescue subagent). Forwarders that do **no framing** and only bridge to the companion get **no subagent at all**: their slash command runs the companion directly from the main loop via `Bash(node:*)` (`/codex:review`, `/codex:adversarial-review`), which is strictly cheaper than a forwarder — this mirrors `codex-plugin-cc`'s `commands/review.md`. Keep the remaining forwarders thin: never add file reading or task reasoning.
-- Do **not** spawn fleets of Claude subagents to do or validate work in this repo — that defeats the plugin's purpose. Validate with `npm test` (offline) or by delegating to a CLI.
+## Refactor scope
 
-## The request chain
+The existing command, skill, and Sonnet-forwarder surface is a candidate for
+replacement or deletion. Its current structure is **not a compatibility
+requirement for the refactor**. Do not expand or repair it merely to preserve
+the old design; work on it only when the task calls for that work.
 
-```
-/codex:<cmd>  →  multi:codex-<role> (framing forwarder, Sonnet) — or, for review, no subagent at all
-              →  multi-cli-companion.mjs <subcommand> --cli <name>
-              →  lib/adapters/<name>.mjs  →  (codex app-server broker | cursor headless `agent -p` | antigravity headless `agy -p` | opencode headless `opencode run --format json`)  →  external CLI
-```
+While a forwarder remains in use, keep it thin: frame the delegation, run the
+companion, return its output or an explicit failure. Do not turn it into another
+coding agent. Future native workers need not use a Claude forwarder at all.
 
-See `ARCHITECTURE.md` for the full picture and the job / state / broker model.
+Reuse existing process, session, job, and ACP helpers where they fit. Do not build
+speculative abstractions or preserve obsolete modules just because they exist.
+Research and old plans under `.agent/archive/` are historical evidence, not active
+instructions. Keep new scratch research in gitignored `.agent/`.
 
-## Build & test
+## Current code map
 
-No dependencies; uses Node's built-in test runner (Node ≥ 20; repo runs on 25).
+- `plugins/multi/scripts/native-model-gateway.mjs`: experimental gateway launcher,
+  model-picker settings, and native worker registration.
+- `plugins/multi/scripts/lib/native-gateway.mjs` and `native-responses.mjs`:
+  provider routing and Messages/Responses translation.
+- `plugins/multi/scripts/multi-cli-companion.mjs` and `lib/commands/`: existing
+  companion dispatcher and command handlers.
+- `plugins/multi/scripts/lib/adapters/`: Codex, Cursor, and OpenCode adapters;
+  `CONTRACT.md` describes this companion interface, not the future harness bridge.
+- `plugins/multi/scripts/lib/`: reusable process, state, broker, and transport
+  helpers; `lib/acp/` contains the maintained client and bundled official SDK.
+- `plugins/multi/{agents,commands,skills}/` and `plugins/{codex,cursor,opencode}/`:
+  existing prompt-driven interface, subject to the refactor above.
+- `test/unit/`: offline tests. `plugins/multi/scripts/test/`: opt-in live checks.
 
-- `npm test` — fast, **offline** unit tests. Run this to self-verify any change. No CLI calls, no tokens.
-- `npm run test:live` — end-to-end; **spawns real Codex** (costs tokens + time). Run only when touching the live path.
+## Development and verification
 
-**Definition of done** for a change: `npm test` passes, no `DEP0190` warnings, and `CHANGELOG.md` updated for user-facing changes.
-
-## Map
-
-- `plugins/multi/` — the hub plugin: `agents/` (forwarders), `commands/` (slash cmds), `skills/` (forwarder contracts), `schemas/`, `prompts/`, `hooks/`.
-- `plugins/multi/scripts/multi-cli-companion.mjs` — CLI entrypoint; dispatches subcommands (`task`, `review`, `adversarial-review`, `status`, `result`, `cancel`, `setup`).
-- `plugins/multi/scripts/lib/adapters/` — one adapter per CLI. Interface in `CONTRACT.md`.
-- `plugins/multi/scripts/lib/` — shared runtime: broker lifecycle, app-server, job control, render, git. The ACP client layer lives in `lib/acp/` (`client.mjs` = `runAcpTurn` on the official SDK, `resolve.mjs`, `diagnostics.mjs`); a legacy `lib/acp-client.mjs` predates it and is slated for deletion.
-- `plugins/{codex,cursor,antigravity,opencode}/` — per-CLI command slices that forward into `multi`.
-- `test/` — `unit/` (offline) + `fixtures/` (sandbox helper). `test:live` reuses `plugins/multi/scripts/test/`.
-
-## Landmines
-
-- **Broker lifecycle**: the Codex app-server broker is a detached per-cwd daemon, reused across tasks. The SessionEnd hook reaps the session's *primary*-cwd broker; brokers for any other cwd self-terminate after an idle window (`CODEX_COMPANION_BROKER_IDLE_MS`, default 600000 ms — see `app-server-broker.mjs` + `lib/broker-lifecycle.mjs` → `shouldIdleShutdown`). Set the env to `0` to disable idle shutdown.
-- **State is per-cwd**: jobs and brokers key off the working directory; always pass `--cwd`. Parallel agents should use separate worktrees / cwds to stay isolated.
-- **Cursor uses headless `agent -p` by default** (ACP is opt-in via `MULTI_TRANSPORT_CURSOR=acp`): on headless the prompt is delivered on stdin (newline-safe), models pass through as flat `--model` names (default `auto`), roles map to flags (`delegate`→agent+`--force --trust`, `research`/`explore`→`--mode ask --force`), and cancel is the generic process-tree kill. `--until-done` loops `--resume` turns. **Cursor's shell is slow/unreliable on Windows** (host-PATH/WSL, open upstream), so `/cursor:delegate` defers build/test verification to the caller (Claude) — file writes and web/codebase reads are unaffected.
-- **OpenCode uses headless `opencode run --format json` by default** (ACP is opt-in via `MULTI_TRANSPORT_OPENCODE=acp`): on headless the prompt is on stdin, NDJSON event stream on stdout. Read-only roles (`research`, `explore`) are enforced via injected oc-* primary agents with write/edit/bash denied (no `--read-only` flag). Write roles use `--dangerously-skip-permissions`. `--until-done` is supported; `--effort` is not. Default model: `opencode/claude-opus-5` (Zen). **Token-offload caveat:** `anthropic/*` models = zero offload (same Claude bill). Use `opencode/*`, `openai/*`, `google/*`, etc. for real offload. Set `OPENCODE_CLI_DEFAULT_MODEL` or `OPENCODE_CLI_PATH` for overrides.
-- **ACP transport** (`lib/acp/client.mjs`, official `@agentclientprotocol/sdk`): Cursor + OpenCode have dual-transport adapters selecting ACP vs headless per turn from `MULTI_TRANSPORT_<CLI>`. ACP gives in-protocol model select (`set_config_option` vs the live options list), read-only via `set_mode`/deny-env, and `session/cancel` (OpenCode mislabels cancel as `end_turn`, so the client treats cancel-requested+ended as cancelled). Inactivity watchdog covers the handshake; `MULTI_ACP_INACTIVITY_MS`/`MULTI_ACP_OVERALL_MS` tune it. Codex (ASP) and Antigravity (`agy`) have no ACP path.
-- **Forwarders only have `Bash`** (review additionally `git`) — by design. Don't add tools.
-
-## Conventions
-
-- Keep files small and single-purpose. Smaller files = parallel agents don't collide. Splitting the two monoliths — `multi-cli-companion.mjs`, `lib/adapters/codex.mjs` — is ongoing; the pure option normalizers were extracted to `lib/task-options.mjs` as the first step. Continue by pulling out one cohesive, independently-testable unit at a time and verifying with `npm test`.
-- Add or extend a unit test with every behavior change. Pin contracts in tests, not in a smart model's head — this is what lets the thin forwarders (all `model: sonnet`) and offloaded CLIs stay correct.
-- AI-authored research/plans stay local: put scratch in `.agent/` (gitignored). `*_RESEARCH.md` and `/docs/superpowers/` are already gitignored.
+- Preserve unrelated uncommitted work. Do not restore removed integrations from
+  archived plans or install/publish changes merely because an old skill says to.
+- Do not spawn fleets of Claude agents to implement or validate work here.
+- Node ≥ 20; tests use Node's built-in runner. ACP is bundled for runtime use;
+  build dependencies are declared in `package.json`.
+- Run `npm test` for offline verification. Add or extend meaningful unit tests for
+  behavior changes; documentation-only edits do not need new tests.
+- Run appropriate opt-in live checks when changing a live integration path;
+  these invoke real CLIs and spend provider usage. `npm run test:live` covers the
+  companion path; the README lists native gateway checks.
+- Definition of done: relevant checks pass, no `DEP0190` warnings, and
+  `CHANGELOG.md` reflects user-facing changes.
+- Always pass the intended `--cwd` to companion calls. State is keyed by resolved
+  workspace root, so subdirectories of one repository share state. Use separate
+  worktrees when isolated workspaces are needed. Future bridges additionally need
+  session/worker isolation as specified in the architecture.

@@ -1,11 +1,9 @@
 /**
  * Diagnostic-message sanitizer for the ACP turn runner (lib/acp/client.mjs).
  *
- * Copied verbatim from the legacy `lib/acp-diagnostics.mjs` (the only function
- * the runner needs) so the slice-1 ACP layer has no dependency on the
- * pre-retreat files slated for deletion. Keeps diagnostics bounded, strips ANSI
- * / control bytes, and collapses whitespace — diagnostics carry methods, tool
- * names, and errors only, never prompt content.
+ * Keeps diagnostics bounded, strips ANSI / control bytes, and collapses
+ * whitespace — diagnostics carry methods, tool names, and errors only, never
+ * prompt content.
  */
 
 /** Hard cap on a single sanitized diagnostic line. */

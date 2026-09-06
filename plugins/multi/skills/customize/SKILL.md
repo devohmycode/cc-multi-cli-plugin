@@ -1,13 +1,19 @@
 ---
 name: customize
-description: Rewire which CLI handles which role in cc-multi-cli-plugin, OR diagnose/work around an upstream CLI quirk via env vars and config files. Use when the user asks to swap CLIs, change a subagent's target CLI, add or disable a subagent or command, restrict a CLI to read-only, hardcode a model, or change how a role frames its prompt — and also when a CLI is misbehaving (hangs, missing tools, broken release) and the user needs operator escape hatches like CURSOR_AGENT_PATH or AGY_CLI_PATH or OPENCODE_CLI_PATH, or per-CLI MCP config tuning. Works for any CLI in the marketplace — the four default CLIs (Codex, Cursor, Antigravity, OpenCode) and any additional CLIs the user added via the multi-cli-anything skill. Trigger phrases include "swap Codex and Cursor", "make Antigravity the researcher", "disable cursor-explore", "restrict Codex to read-only", "change which CLI handles implementation", "add /<cli>:<command>", "only install the plugins I need", "hardcode a model for <some-role>", "change the framing for <role>", "cursor is hanging / broken / stuck", "pin an older cursor build".
+description: Rewire which CLI handles which role in cc-multi-cli-plugin, OR diagnose/work around an upstream CLI quirk via env vars and config files. Use when the user asks to swap CLIs, change a subagent's target CLI, add or disable a subagent or command, restrict a CLI to read-only, hardcode a model, or change how a role frames its prompt — and also when a CLI is misbehaving (hangs, missing tools, broken release) and the user needs operator escape hatches like CURSOR_AGENT_PATH or OPENCODE_CLI_PATH, or per-CLI MCP config tuning. Works for any CLI in the marketplace — the three default CLIs (Codex, Cursor, OpenCode) and any additional CLIs the user added via the multi-cli-anything skill. Trigger phrases include "swap Codex and Cursor", "make OpenCode the researcher", "disable cursor-explore", "restrict Codex to read-only", "change which CLI handles implementation", "add /<cli>:<command>", "only install the plugins I need", "hardcode a model for <some-role>", "change the framing for <role>", "cursor is hanging / broken / stuck", "pin an older cursor build".
 ---
 
 # Customize cc-multi-cli-plugin
 
+**Scope:** the workflows below customize existing companion commands and
+forwarders. For gateway model selection or external harness bridges, follow the
+repository's [ARCHITECTURE.md](../../../../ARCHITECTURE.md). Those integrations
+need not use a forwarding subagent or another plugin; preserve the direct GPT
+path and the agreed custom Node gateway direction.
+
 cc-multi-cli-plugin is a **multi-plugin marketplace**: one hub plugin (`multi`) plus one thin plugin per AI CLI the user has wired up. Customization is explicit file edits across those plugins. **There is no runtime config layer and no `buildPrompt()` function** — a CLI's behavior is assembled from a few small, separate files, and you edit the one that owns the thing you want to change.
 
-**This skill is CLI-agnostic.** Every instruction below works for any CLI in the marketplace — the four shipped defaults (Codex, Cursor, Antigravity, OpenCode) and any CLIs added later via the `multi-cli-anything` skill (Aider, etc.). Concrete examples use specific CLI names for clarity; apply the same pattern to any CLI.
+**This skill is CLI-agnostic.** Every instruction below works for any CLI in the marketplace — the three shipped defaults (Codex, Cursor, OpenCode) and any CLIs added later via the `multi-cli-anything` skill (Aider, etc.). Concrete examples use specific CLI names for clarity; apply the same pattern to any CLI.
 
 ## The four moving parts every customization touches
 
@@ -22,8 +28,8 @@ A `/<cli>:<action>` invocation flows through four artifacts. Each owns one conce
 
 Two facts that the old `buildPrompt()` model got wrong and that you must internalize:
 
-- **Prompt *shape* lives in the subagent `.md`, not the adapter.** Each write-role forwarder (e.g. `cursor-delegate.md`, `codex-execute.md`) contains a fenced **framing block** ("You are Cursor in agent mode…") that it prepends to the user's task. To change how a role frames its prompt, edit that block. Read-only forwarders (`antigravity-researcher`, `opencode-explore`) usually have little or no framing — and a forwarder with *no* framing at all shouldn't exist: give the slash command `allowed-tools: Bash(node:*)` and let the main loop run the companion directly (see `plugins/codex/commands/review.md`).
-- **Role *behavior* (read vs write, CLI flags) lives in the adapter** — and is done differently per CLI. Codex switches on a sandbox (`read-only` vs `danger-full-access`) selected by the `--write` flag in `lib/commands/task.mjs`; Cursor maps roles to headless flags in `buildHeadlessArgs()` plus a `READ_ONLY_ROLES` set in `cursor.mjs`; Antigravity is always read-only; OpenCode maps roles in `buildHeadlessArgs()` plus `READ_ONLY_ROLES` in `opencode.mjs` (no `--read-only` flag — enforced via env injection). Verify the specific CLI's mechanism before editing (Step 2).
+- **Prompt *shape* lives in the subagent `.md`, not the adapter.** Each write-role forwarder (e.g. `cursor-delegate.md`, `codex-execute.md`) contains a fenced **framing block** ("You are Cursor in agent mode…") that it prepends to the user's task. To change how a role frames its prompt, edit that block. Read-only forwarders (`cursor-research`, `opencode-explore`) usually have little or no framing — and a forwarder with *no* framing at all shouldn't exist: give the slash command `allowed-tools: Bash(node:*)` and let the main loop run the companion directly (see `plugins/codex/commands/review.md`).
+- **Role *behavior* (read vs write, CLI flags) lives in the adapter** — and is done differently per CLI. Codex switches on a sandbox (`read-only` vs `danger-full-access`) selected by the `--write` flag in `lib/commands/task.mjs`; Cursor maps roles to headless flags in `buildHeadlessArgs()` plus a `READ_ONLY_ROLES` set in `cursor.mjs`; OpenCode maps roles in `buildHeadlessArgs()` plus `READ_ONLY_ROLES` in `opencode.mjs` (no `--read-only` flag — enforced via env injection). Verify the specific CLI's mechanism before editing (Step 2).
 
 ## Step 0 — Locate the plugin repo
 
@@ -50,13 +56,13 @@ cat $REPO/plugins/multi/scripts/lib/adapters/registry.mjs   # which adapters are
 cat $REPO/.claude-plugin/marketplace.json               # marketplace registration
 ```
 
-The output is ground truth for what exists. Planning against it avoids the "subagent not found" / "unknown CLI" class of bug. (As shipped: Codex roles `execute`/`rescue`/`review`/`adversarial-review`; Cursor roles `delegate`/`research`/`explore`; Antigravity roles `research`/`explore`; OpenCode roles `delegate`/`research`/`explore`. The Antigravity subagent files are named `antigravity-researcher`/`antigravity-explorer`; OpenCode subagents are named `opencode-delegate`/`opencode-researcher`/`opencode-explorer`. Confirm against your own `ls` — don't assume.)
+The output is ground truth for what exists. Planning against it avoids the "subagent not found" / "unknown CLI" class of bug. (As shipped: Codex roles `execute`/`rescue`/`review`/`adversarial-review`; Cursor roles `delegate`/`research`/`explore`; OpenCode roles `delegate`/`research`/`explore`. OpenCode subagents are named `opencode-delegate`/`opencode-researcher`/`opencode-explorer`. Confirm against your own `ls` — don't assume.)
 
 ## Step 2 — Verify CLI-specific strings BEFORE hardcoding them
 
 Before hardcoding any CLI-specific string (model IDs, effort levels, sandbox/mode names, flag names) as a default, verify it. Do not ask the user to confirm these — Claude can look them up faster.
 
-**The verification-trap:** CLIs often accept version-qualified IDs (`-preview`, `-beta`, `-exp` suffixes). Dropping the suffix produces a runtime 4xx. A model ID like `gpt-5.6` vs `gpt-5.6-terra` is not interchangeable, and Gemini-family IDs (which Antigravity surfaces) have historically used `-preview` suffixes that 404 when dropped. Every CLI has analogous traps.
+**The verification-trap:** CLIs often accept version-qualified IDs (`-preview`, `-beta`, `-exp` suffixes). Dropping the suffix produces a runtime 4xx. A model ID like `gpt-5.6` vs `gpt-5.6-terra` is not interchangeable. Every CLI has analogous traps.
 
 ### Pick ONE source proportional to the question. Stop when confident.
 
@@ -114,7 +120,7 @@ All examples use `<cli>`, `<cli-a>`, `<cli-b>`, `<role>`, `<action>` as placehol
 
 **Pick the right template (this is what the old `buildPrompt` model hid):**
 - A **write/agentic role** (implement, edit, refactor) → copy a write forwarder like `cursor-delegate.md` or `codex-execute.md`. These carry a **prompt-framing block** and run on **Sonnet**.
-- A **read-only role** (research, explore, review) → copy a read forwarder like `cursor-research.md`, `antigravity-researcher.md`, or `opencode-researcher.md`. These have little/no framing. If the role needs **no** framing at all, skip the subagent entirely and dispatch from the slash command (copy `plugins/codex/commands/review.md`).
+- A **read-only role** (research, explore, review) → copy a read forwarder like `cursor-research.md` or `opencode-researcher.md`. These have little/no framing. If the role needs **no** framing at all, skip the subagent entirely and dispatch from the slash command (copy `plugins/codex/commands/review.md`).
 
 Every forwarder MUST keep `skills:\n  - multi-cli-runtime` in its frontmatter — that's the shared flag/failure contract. Don't drop it.
 
@@ -156,7 +162,6 @@ Two layers, both in `plugins/multi/agents/<cli>-<role>.md`:
 - **Body / Bash invocation** — make the forwarder pass the right read-only flag so the *external CLI* can't write:
   - **Codex:** ensure the invocation passes `--read-only` (not `--write`). The companion maps that to Codex's `read-only` sandbox.
   - **Cursor:** read-only is role-driven — `research`/`explore` already run `--mode ask --force` (no writes). To force an otherwise-write role read-only, ensure its role name is in `READ_ONLY_ROLES` in `cursor.mjs` (change type #7), or route it through a read-only role.
-  - **Antigravity:** already read-only on every role; nothing to restrict.
 
 `plugins/multi/scripts/lib/adapters/<cli>.mjs` is the source of truth for which restriction flags that CLI's adapter actually forwards — consult it before writing one in.
 
@@ -181,7 +186,7 @@ to:
 
 **Illustrative:** pinning `/cursor:research` to a specific Cursor model (e.g. `gpt-5.5-medium`). Step 2 verification confirms the exact flat id (Cursor takes flat names like `gpt-5.5-medium`, not bracketed forms) before you type it. Forgetting a required version suffix is the most common way to ship a broken forwarder.
 
-The same pattern works for `--effort` (Codex only), or any CLI-specific flag. **Exception — Antigravity:** its headless `agy` path ignores `--model` (fixed to Gemini 3.7 Flash), so there is no per-forwarder model pin for it.
+The same pattern works for `--effort` (Codex and OpenCode), or any CLI-specific flag.
 
 ### 7. Change how a role behaves — its framing, or its read/write flags
 
@@ -194,7 +199,6 @@ Edit the **framing block inside the forwarder** `plugins/multi/agents/<cli>-<rol
 Edit the **adapter** `plugins/multi/scripts/lib/adapters/<cli>.mjs` — but the mechanism is CLI-specific, so verify first:
 - **Cursor:** roles map to headless flags in `buildHeadlessArgs()`, and which roles are read-only is the `READ_ONLY_ROLES` set. To make a new role read-only, add it to that set (e.g. add `"reviewer"` so a `cursor-review` role runs `--mode ask`). Touch only these role-mapping pieces — the spawn/parse code is the transport; breaking it breaks the CLI.
 - **Codex:** there is no per-role flag map; read vs write is the sandbox chosen from `--write`/`--read-only` in `lib/commands/task.mjs`. You change a Codex role's behavior by what the forwarder passes, not by editing the adapter.
-- **Antigravity:** read-only only; no role→flag map to change.
 - **OpenCode:** roles map to flags in `buildHeadlessArgs()` and the `READ_ONLY_ROLES` set in `opencode.mjs`. OpenCode has **no `--read-only` flag** — for read-only roles the adapter injects a custom oc-* primary agent via `OPENCODE_CONFIG_CONTENT` with write/edit/bash denied, plus an `OPENCODE_PERMISSION` deny floor. **`--effort` is NOT supported** by OpenCode (it is silently ignored by the adapter). `--until-done` IS supported. To add a new read-only role, add it to `READ_ONLY_ROLES` in `opencode.mjs` — everything else follows automatically.
 
 If you're unsure which of (a)/(b) the user means, the rule of thumb: wording/instructions/output-format → (a), the subagent `.md`; "let it write" / "keep it read-only" / "use ask mode" → (b), the adapter or the forwarder's flags.
@@ -204,10 +208,9 @@ If you're unsure which of (a)/(b) the user means, the rule of thumb: wording/ins
 When a CLI misbehaves upstream — a broken release, a regression, an obscure config requirement — these knobs give the user direct control without code changes. The adapter code reads them automatically; surface the relevant one in your answer when an upstream bug is the root cause.
 
 - **`CURSOR_AGENT_PATH=<absolute-path>`** — point the Cursor adapter at a specific `agent` binary (e.g. an older cached build under `~/AppData/Local/cursor-agent/versions/<version>/`). Useful when a new Cursor release regresses and the user wants to pin a known-good one. `findCursorBinary()` checks this before `where`/`which` and the Windows fallback path.
-- **`AGY_CLI_PATH=<absolute-path>`** — point the Antigravity adapter at a specific `agy` binary (`findAgyBinary()` checks it before PATH and the Windows fallback `$LOCALAPPDATA/agy/bin/agy.exe`). The operator requirement is that `agy` is installed and signed in (run `agy` once interactively); if it isn't, the adapter reports "not signed in." `agy` headless does **not** honor `--model` (Gemini 3.7 Flash only).
 - **`OPENCODE_CLI_PATH=<absolute-path>`** — point the OpenCode adapter at a specific `opencode` binary. `findOpencodeBinary()` checks this first; if unset it resolves the bare name `opencode` and lets `process.mjs` `resolveWindowsCommand` pick the `.cmd` shim on Windows. Never resolves to `opencode.exe` (the stale bun build).
 - **`OPENCODE_CLI_DEFAULT_MODEL=<model-id>`** — override the default model for all OpenCode calls (default: `opencode/claude-opus-5`). Use a Zen model (`opencode/*`) or an OpenAI/Google/Copilot/Ollama model to get real token offload. **Avoid `anthropic/*` models** — they reuse your Claude Code subscription and provide zero offload.
-- **Per-CLI MCP config files** — when a CLI doesn't pick up MCP servers the way you expect, populate the CLI's own config: Cursor reads `~/.cursor/mcp.json`; Codex reads `~/.codex/config.toml`; Antigravity's `agy` reads MCP servers from its Gemini-CLI config `~/.gemini/settings.json`; **OpenCode reads MCP servers from its own `opencode.json`** (use OpenCode's interactive wizard to configure these — the `/multi:setup` wizard does NOT manage `opencode.json`). Use these as the fallback when a server is "missing."
+- **Per-CLI MCP config files** — when a CLI doesn't pick up MCP servers the way you expect, populate the CLI's own config: Cursor reads `~/.cursor/mcp.json`; Codex reads `~/.codex/config.toml`; **OpenCode reads MCP servers from its own `opencode.json`** (use OpenCode's interactive wizard to configure these — the `/multi:setup` wizard does NOT manage `opencode.json`). Use these as the fallback when a server is "missing."
 
 ### Switching a CLI's transport (headless ↔ ACP)
 
@@ -216,7 +219,7 @@ Cursor and OpenCode can run over two transports. **Headless** (`agent -p` / `ope
 - **`MULTI_TRANSPORT_CURSOR=acp|headless`** (default `headless`)
 - **`MULTI_TRANSPORT_OPENCODE=acp|headless`** (default `headless`)
 
-Read at invoke time, so they can live in `~/.claude/settings.json` `env`, a shell export, or be flipped per session. With no flag set, behavior is identical to the headless default. **Codex and Antigravity have no ACP path** (Codex exposes no native ACP; `agy` doesn't implement it) — leave them on their native transports. ACP-only knobs: `MULTI_ACP_INACTIVITY_MS` / `MULTI_ACP_OVERALL_MS` override the watchdog windows (a CLI that spawns then hangs silently is caught by the inactivity watchdog, which covers the handshake too). When a CLI is on the ACP path, read-only roles are enforced via the agent's own mechanism (Cursor: `session/set_mode` → `ask`; OpenCode: the same `OPENCODE_PERMISSION` deny floor as headless), and model pinning goes through `session/set_config_option` against the live options list — so the per-forwarder model-pin and read-only customizations above work on either transport.
+Read at invoke time, so they can live in `~/.claude/settings.json` `env`, a shell export, or be flipped per session. With no flag set, behavior is identical to the headless default. **Codex has no ACP path** (it exposes no native ACP) — leave it on its native transport. ACP-only knobs: `MULTI_ACP_INACTIVITY_MS` / `MULTI_ACP_OVERALL_MS` override the watchdog windows (a CLI that spawns then hangs silently is caught by the inactivity watchdog, which covers the handshake too). When a CLI is on the ACP path, read-only roles are enforced via the agent's own mechanism (Cursor: `session/set_mode` → `ask`; OpenCode: the same `OPENCODE_PERMISSION` deny floor as headless), and model pinning goes through `session/set_config_option` against the live options list — so the per-forwarder model-pin and read-only customizations above work on either transport.
 
 ### Diagnosing a CLI that hangs or returns nothing
 
@@ -224,8 +227,7 @@ The shipped CLIs are driven headlessly, so the first diagnostic is always the ca
 
 - **`2>&1` on the companion call** (the forwarders already append it) surfaces the CLI's stderr — the single most useful signal. A bad model id, an auth failure, or a sandbox block all print there.
 - **Cursor specifics:** `agent --version` — a few early-2026 builds predate the headless MCP-tools fix; the adapter warns when it detects a known-bad build (`KNOWN_BROKEN_CURSOR_VERSIONS` in `cursor.mjs`). Cursor's **shell tool is slow/unreliable on Windows** (host-PATH/WSL, open upstream), which is why `/cursor:delegate` defers build/test verification to the caller — file writes and web/codebase reads are unaffected. For write roles the adapter parses Cursor's documented `--output-format stream-json` events; a run that emits no `result` event with a non-zero exit is almost always a startup error visible in stderr.
-- **Antigravity specifics:** `agy`'s headless stdout is empty upstream (google-antigravity/antigravity-cli#318; `--output-format stream-json` on agy >=1.1.8 is the coming workaround), so the adapter recovers the answer from the on-disk transcript JSONL. If a run returns nothing, check that `agy --version` works and that `~/.gemini/oauth_creds.json` exists (signed in). A `.tmp→.pb` "Access denied" line in agy's own log is benign on Windows and does not block the transcript.
-- **`ACP_TRACE=1`:** traces the ACP JSON-RPC wire to stderr. Useful only when a CLI is actually running over ACP — i.e. Cursor or OpenCode with `MULTI_TRANSPORT_<CLI>=acp` set (see the transport-toggle section below), or a user-added ACP CLI. On the default headless path (and for Codex/Antigravity, which have no ACP) it's a no-op.
+- **`ACP_TRACE=1`:** traces the ACP JSON-RPC wire to stderr. Useful only when a CLI is actually running over ACP — i.e. Cursor or OpenCode with `MULTI_TRANSPORT_<CLI>=acp` set (see the transport-toggle section below), or a user-added ACP CLI. On the default headless path (and for Codex, which has no ACP) it's a no-op.
 
 ## What NOT to touch (unless adding a new transport)
 
@@ -233,8 +235,8 @@ These are shared infrastructure; `multi-cli-anything` is the skill for extending
 
 - `plugins/multi/scripts/multi-cli-companion.mjs` (the ~100-line dispatcher) and `plugins/multi/scripts/lib/commands/*.mjs` (`task`, `review`, `jobs`, `setup`, `shared`) — the command handlers.
 - `plugins/multi/scripts/lib/adapters/registry.mjs` — the adapter registry (you edit this only to *add* a CLI, via `multi-cli-anything`).
-- `plugins/multi/scripts/lib/job-control.mjs`, `state.mjs`, `render.mjs`, `workspace.mjs`, `tracked-jobs.mjs`, `app-server.mjs`, and the ACP client layer `lib/acp/` (`client.mjs`, `resolve.mjs`, `diagnostics.mjs`). (A legacy `lib/acp-client.mjs` also exists, predating the `lib/acp/` layer and slated for deletion — don't touch or build on it either.)
-- The existing adapters' transport code (`codex*.mjs`, `cursor.mjs`, `antigravity.mjs`, `opencode.mjs`) — except the role-mapping pieces called out in change type #7.
+- `plugins/multi/scripts/lib/job-control.mjs`, `state.mjs`, `render.mjs`, `workspace.mjs`, `tracked-jobs.mjs`, `app-server.mjs`, and the ACP client layer `lib/acp/` (`client.mjs`, `resolve.mjs`, `diagnostics.mjs`).
+- The existing adapters' transport code (`codex*.mjs`, `cursor.mjs`, `opencode.mjs`) — except the role-mapping pieces called out in change type #7.
 - `plugins/multi/hooks/hooks.json` (unless adding a new hook).
 
 ## Verify after edits — YOU (Claude) run the refresh, not the user

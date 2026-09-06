@@ -205,7 +205,6 @@ test("buildTaskRunMetadata detects the stop-gate review marker when not resuming
 test("buildTaskRunMetadata labels titles per cli", () => {
   assert.equal(buildTaskRunMetadata({ prompt: "do work", cli: "codex" }).title, "Codex Task");
   assert.equal(buildTaskRunMetadata({ prompt: "do work", cli: "cursor" }).title, "Cursor Task");
-  assert.equal(buildTaskRunMetadata({ prompt: "do work", cli: "antigravity" }).title, "Antigravity Task");
   assert.equal(buildTaskRunMetadata({ prompt: "do work", cli: "opencode" }).title, "OpenCode Task");
 });
 

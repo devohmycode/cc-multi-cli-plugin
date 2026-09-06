@@ -29,7 +29,7 @@ Judge the task kind and pass it as `--task-kind`. The companion turns the kind i
 
 When uncertain: a numbered acceptance list or named files → `spec`; prose like "figure out a good way to…" → `open-ended`.
 
-Add `--effort` only to override the default when the size clearly warrants it: `minimal` (typo, one-line change), `low` (small bounded fix in one file), `high` (multi-file refactor, novel algorithm, must be right first time), `xhigh` (architectural overhaul, multi-hour autonomous work). Otherwise leave it off.
+Add `--effort` only to override the default when the size clearly warrants it: `low` (typo, one-line change, small bounded fix in one file), `high` (multi-file refactor, novel algorithm, must be right first time), `xhigh` (architectural overhaul, multi-hour autonomous work). Otherwise leave it off.
 
 If the user explicitly passed `--model` or `--effort`, pass their value through — the companion honors it over the kind defaults.
 

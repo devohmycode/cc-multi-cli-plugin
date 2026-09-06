@@ -5,8 +5,11 @@
 
 import { splitRawArgumentString } from "./args.mjs";
 
+// Mirrors the Codex catalog's per-model `supported_reasoning_levels` union.
+// `none`/`minimal` were dropped: no served model advertises them and gpt-6-astra
+// returns HTTP 400 for both. `ultra` = max reasoning + automatic subagent delegation.
 export const VALID_REASONING_EFFORTS = new Set([
-  "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"
+  "low", "medium", "high", "xhigh", "max", "ultra"
 ]);
 export const MODEL_ALIASES = new Map();
 
@@ -41,11 +44,14 @@ export function normalizeReasoningEffort(effort) {
 // open-ended handoff?") stays with the forwarder subagent, which passes it as
 // --task-kind; the kind → model/effort mapping is deterministic and lives here
 // so no model has to evaluate a lookup table at dispatch time.
+// GPT-6 ships as a single slug (gpt-6-astra, the catalog default), so both kinds
+// currently route to it; the table stays so a future split (as 5.6 did into
+// sol/terra/luna) is a one-line change here, not a forwarder-prompt edit.
 export const TASK_KIND_DEFAULTS = new Map([
   // Rigorous execution of an already-decided shape.
-  ["spec", { model: "gpt-5.6-terra", effort: "medium" }],
+  ["spec", { model: "gpt-6-astra", effort: "medium" }],
   // Agentic work with latitude to choose the approach.
-  ["open-ended", { model: "gpt-5.6-sol", effort: "medium" }]
+  ["open-ended", { model: "gpt-6-astra", effort: "medium" }]
 ]);
 
 /**

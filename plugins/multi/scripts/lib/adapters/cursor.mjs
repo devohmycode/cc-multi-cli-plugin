@@ -27,9 +27,8 @@ import { execSync } from "node:child_process";
 import readline from "node:readline";
 import process from "node:process";
 
-import { spawnCommand } from "../process.mjs";
-import { buildSpawnEnvironment } from "../acp-client.mjs";
-import { sanitizeDiagnosticMessage } from "../acp-diagnostics.mjs";
+import { buildSpawnEnvironment, spawnCommand } from "../process.mjs";
+import { sanitizeDiagnosticMessage } from "../acp/diagnostics.mjs";
 import { runAcpTurn } from "../acp/client.mjs";
 import { resolveCursorAcp } from "../acp/resolve.mjs";
 

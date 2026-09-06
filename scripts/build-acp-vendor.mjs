@@ -28,7 +28,8 @@ const repoRoot = join(here, "..");
 
 // The SDK version we bundle — read from the installed package so the banner can
 // never drift from what esbuild actually inlined.
-const sdkPkgPath = require.resolve("@agentclientprotocol/sdk/package.json");
+// (sdk >=1.0 no longer exports ./package.json, so resolve the entry and walk up.)
+const sdkPkgPath = join(dirname(require.resolve("@agentclientprotocol/sdk")), "..", "package.json");
 const sdkVersion = JSON.parse(read(sdkPkgPath, "utf8")).version;
 
 const outDir = join(repoRoot, "plugins", "multi", "scripts", "lib", "acp", "vendor");

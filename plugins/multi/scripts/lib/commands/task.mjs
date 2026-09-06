@@ -7,7 +7,6 @@ import process from "node:process";
 import { normalizeReasoningEffort, normalizeRequestedModel, resolveTaskRouting } from "../task-options.mjs";
 import { firstMeaningfulLine, shorten } from "../text.mjs";
 import * as cursor from "../adapters/cursor.mjs";
-import * as antigravity from "../adapters/antigravity.mjs";
 import * as opencode from "../adapters/opencode.mjs";
 import { getAdapter } from "../adapters/registry.mjs";
 import {
@@ -339,6 +338,7 @@ export async function executeTaskRun(request) {
 
       const turnResult = await opencode.adapter.invoke(workspaceRoot, turnPrompt, {
         model: request.model ?? undefined,
+        effort: request.effort ?? undefined,
         role: request.role ?? "delegate",
         write: Boolean(request.write),
         sessionId: turnResumeId,
@@ -410,65 +410,6 @@ export async function executeTaskRun(request) {
       jobTitle: taskMetadata.title,
       jobClass: "task",
       write: Boolean(request.write)
-    };
-  }
-
-  // ── Antigravity dispatch path ───────────────────────────────────────────────
-  // When --cli antigravity is used, invoke Google's `agy` CLI in headless print
-  // mode and read the answer back from the conversation transcript (read-only
-  // research/explore roles; agy's stdout is empty under non-TTY — see the adapter).
-  if (cli === "antigravity") {
-    const agAvail = antigravity.adapter.isAvailable();
-    if (!agAvail.available) {
-      throw new Error(`Antigravity is not available: ${agAvail.detail}`);
-    }
-
-    if (!request.prompt) {
-      throw new Error("Provide a prompt for Antigravity tasks.");
-    }
-
-    const prompt = request.prompt.trim() || "";
-
-    const result = await antigravity.adapter.invoke(workspaceRoot, prompt, {
-      model: request.model ?? undefined,
-      role: request.role ?? "researcher",
-      write: false,
-      onStream: request.onProgress
-        ? (event) => {
-            if (event.type === "phase") {
-              request.onProgress({ message: event.message, phase: event.message });
-            }
-          }
-        : undefined
-    });
-
-    const rawOutput = typeof result.text === "string" ? result.text : "";
-    const failureMessage = formatAdapterError(result.error);
-    const exitStatus = 0;
-
-    const rendered = renderTaskResult(
-      { rawOutput, failureMessage, reasoningSummary: [] },
-      { title: taskMetadata.title, jobId: request.jobId ?? null, write: false }
-    );
-
-    const payload = {
-      status: exitStatus,
-      threadId: result.sessionId ?? null,
-      rawOutput,
-      touchedFiles: (result.fileChanges ?? []).map((fc) => fc.path),
-      reasoningSummary: []
-    };
-
-    return {
-      exitStatus,
-      threadId: result.sessionId ?? null,
-      turnId: null,
-      payload,
-      rendered,
-      summary: firstMeaningfulLine(rawOutput, firstMeaningfulLine(failureMessage, `${taskMetadata.title} finished.`)),
-      jobTitle: taskMetadata.title,
-      jobClass: "task",
-      write: false
     };
   }
 
@@ -646,7 +587,6 @@ export function buildTaskRunMetadata({ prompt, resumeLast = false, cli = "codex"
   }
 
   const cliLabel = cli === "cursor" ? "Cursor"
-                 : cli === "antigravity" ? "Antigravity"
                  : cli === "opencode" ? "OpenCode"
                  : "Codex";
   const title = resumeLast ? `${cliLabel} Resume` : `${cliLabel} Task`;
@@ -836,9 +776,6 @@ export async function handleTask(argv, context = {}) {
   }
   const untilDone = Boolean(options["until-done"]);
   const maxTurns = normalizeMaxTurns(options["max-turns"]);
-  if (untilDone && cli === "antigravity") {
-    throw new Error("--until-done is not supported for the antigravity CLI.");
-  }
   if (maxTurns != null && !untilDone) {
     throw new Error("--max-turns requires --until-done.");
   }

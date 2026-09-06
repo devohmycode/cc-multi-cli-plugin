@@ -25,7 +25,8 @@ test("normalizeRequestedModel returns null for empty/nullish input", () => {
 
 test("normalizeReasoningEffort accepts valid levels (case-insensitive)", () => {
   assert.equal(normalizeReasoningEffort("HIGH"), "high");
-  assert.equal(normalizeReasoningEffort("minimal"), "minimal");
+  assert.equal(normalizeReasoningEffort("ultra"), "ultra");
+  assert.throws(() => normalizeReasoningEffort("minimal"), /Unsupported reasoning effort/);
   assert.equal(normalizeReasoningEffort("MAX"), "max");
   assert.equal(normalizeReasoningEffort("ultra"), "ultra");
 });
@@ -56,11 +57,11 @@ test("MODEL_ALIASES has no aliases (spark removed; slugs pass through)", () => {
 
 test("resolveTaskRouting maps task kinds to codex model/effort defaults", () => {
   assert.deepEqual(resolveTaskRouting({ kind: "spec" }), {
-    model: "gpt-5.6-terra",
+    model: "gpt-6-astra",
     effort: "medium"
   });
   assert.deepEqual(resolveTaskRouting({ kind: " Open-Ended " }), {
-    model: "gpt-5.6-sol",
+    model: "gpt-6-astra",
     effort: "medium"
   });
 });
@@ -72,7 +73,7 @@ test("resolveTaskRouting lets explicit model/effort win over the kind defaults",
   );
   // Partial override: only the unset side gets the default.
   assert.deepEqual(resolveTaskRouting({ kind: "open-ended", effort: "high" }), {
-    model: "gpt-5.6-sol",
+    model: "gpt-6-astra",
     effort: "high"
   });
 });

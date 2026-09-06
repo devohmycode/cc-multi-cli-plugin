@@ -16,33 +16,31 @@ Present the resulting status (it reflects the new review-gate state) and do not 
 
 ---
 
-You are running the setup wizard for cc-multi-cli-plugin. Work through these steps in order, using your native tools. Do NOT invoke subagents. Do NOT run the plugin's companion scripts (except the review-gate short-circuit above and the Antigravity detection probe noted in Step 1).
+You are running the setup wizard for cc-multi-cli-plugin. Work through these steps in order, using your native tools. Do NOT invoke subagents. Do NOT run the plugin's companion scripts (except the review-gate short-circuit above).
 
 If the user passed `--dry-run` anywhere in $ARGUMENTS, enumerate changes but make NO writes.
 
 ## Step 1 — Detect installed CLIs
 
-This plugin supports four CLIs: **Codex**, **Cursor**, **Antigravity**, and **OpenCode**.
+This plugin supports three CLIs: **Codex**, **Cursor**, and **OpenCode**.
 
 Run each probe via Bash:
 
 - `codex --version`
 - Cursor: the binary is named `agent` (not `cursor-agent`). Try `agent --version` first. On Windows the installer does NOT add it to PATH — always fall back to `$LOCALAPPDATA/cursor-agent/agent.cmd --version` (a.k.a. `C:/Users/<name>/AppData/Local/cursor-agent/agent.cmd`). Remember whichever path works; use it throughout the rest of setup.
-- Antigravity: the binary is `agy` (Google's Antigravity CLI). Try `agy --version`. On Windows the installer drops it at `$LOCALAPPDATA/agy/bin/agy.exe` and may not add it to PATH. The companion's setup probe (`node "${CLAUDE_PLUGIN_ROOT}/scripts/multi-cli-companion.mjs" setup --json`) reports whether `agy` is detected. (EXPERIMENTAL; read-only research/explore only.)
 - OpenCode: the binary is `opencode`. Try `opencode --version`. On Windows, npm installs a `.cmd` shim; a stale bun `opencode.exe` in PATH may shadow it — the adapter resolves only the `.cmd` shim, never the `.exe`. Install via `npm install -g opencode-ai`.
 
 Tabulate which succeed. For each failure, tell the user the install command:
 
 - Codex: `npm install -g @openai/codex`
 - Cursor: `curl https://cursor.com/install -fsS | bash` (Unix) or `irm 'https://cursor.com/install?win32=true' | iex` (Windows PowerShell). After install, the binary lives at `$LOCALAPPDATA/cursor-agent/agent.cmd` on Windows and is not on PATH.
-- Antigravity: install the **`agy` CLI** from https://antigravity.google, then run `agy` once interactively to sign in with your Google account. The desktop app is not required.
 - OpenCode: `npm install -g opencode-ai`.
 
 Continue only with the CLIs that are installed. Do not block on missing ones.
 
-**No CLIs detected:** if none of Codex, Cursor, `agy`, or `opencode` is installed, ABORT setup before any further step. Do not prompt for API keys, do not install plugins, do not configure MCPs. Print:
+**No CLIs detected:** if none of Codex, Cursor, or `opencode` is installed, ABORT setup before any further step. Do not prompt for API keys, do not install plugins, do not configure MCPs. Print:
 
-> *"None of Codex, Cursor, Antigravity, or OpenCode is available. Install at least one (commands above) and re-run `/multi:setup`. Nothing was changed."*
+> *"None of Codex, Cursor, or OpenCode is available. Install at least one (commands above) and re-run `/multi:setup`. Nothing was changed."*
 
 Then exit. The wizard has no productive work without at least one CLI to configure.
 
@@ -62,7 +60,6 @@ For each detected CLI, check the current install state FIRST, then act:
 
    - Codex → `claude plugin install codex@cc-multi-cli-plugin` (adds `/codex:execute`, `/codex:rescue`, `/codex:review`, `/codex:adversarial-review`)
    - Cursor → `claude plugin install cursor@cc-multi-cli-plugin` (adds `/cursor:delegate`, `/cursor:research`, `/cursor:explore`)
-   - Antigravity → `claude plugin install antigravity@cc-multi-cli-plugin` (adds `/antigravity:research`, `/antigravity:explore`)
    - OpenCode → `claude plugin install opencode@cc-multi-cli-plugin` (adds `/opencode:delegate`, `/opencode:research`, `/opencode:explore`)
 
    When announcing what each install will provide, list the actual `commands/*.md` files in that plugin directory rather than the static list above (which can drift).
@@ -77,7 +74,7 @@ For each detected CLI, check the current install state FIRST, then act:
 
 ## Step 1.7 — Offer to add CLI binaries to the user's PATH (optional)
 
-**Purpose:** Pure UX. The plugin works regardless — each adapter resolves binaries via absolute path. This step is for users who want to type `agent` / `codex` / `agy` from any terminal without typing a full path. (Antigravity's `agy` may also not be on PATH on Windows; the same optional PATH treatment applies.)
+**Purpose:** Pure UX. The plugin works regardless — each adapter resolves binaries via absolute path. This step is for users who want to type `agent` / `codex` from any terminal without typing a full path.
 
 **For each installed CLI with a command-line binary** (Codex, Cursor), do this check:
 
@@ -141,10 +138,9 @@ For each installed CLI, check auth:
 
 - Codex: `codex login status` (NOT `codex whoami` — that doesn't exist)
 - Cursor: invoke the resolved binary path from Step 1 (NOT a literal `agent status`). On Windows that's typically `"C:/Users/<n>/AppData/Local/cursor-agent/agent.cmd" status`. Quote the path. Use the variable you stashed in Step 1 throughout the rest of the file — never assume `agent` is on PATH.
-- Antigravity: sign in by running `agy` once interactively (it opens a Google OAuth browser flow; creds are stored in the OS keyring / `~/.gemini`). The companion's setup probe reports whether `agy` appears signed in; if not, tell the user to run `agy` once and sign in.
 - OpenCode: `opencode auth list` (authenticated iff exit 0 and output contains a `●` provider bullet). If not authenticated, run `opencode auth login` for the desired provider. **Token-offload warning:** if the user configures an `anthropic/*` model, those calls hit the same Claude billing as Claude Code — zero token offload. Real offload comes from `opencode/*` (Zen), `openai/*`, `google/*`, `github-copilot/*`, or `ollama/*` models. The adapter default is `opencode/claude-opus-5` (Zen, billed separately). **MCP note:** OpenCode reads MCP servers from its own `opencode.json` config, NOT from the wizard-managed files. OpenCode's interactive wizard (`opencode` run normally) can configure MCP servers; the `/multi:setup` wizard does NOT manage OpenCode's `opencode.json`. Remind the user to wire Exa/Context7 into OpenCode via `opencode`'s own MCP setup if they want those tools available there.
 
-If unauthenticated, give the exact login command (or, for Antigravity, "run `agy` once and sign in"; for OpenCode, "run `opencode auth login`") and use `AskUserQuestion` to ask whether to pause for the user to log in or skip that CLI.
+If unauthenticated, give the exact login command (for OpenCode, "run `opencode auth login`") and use `AskUserQuestion` to ask whether to pause for the user to log in or skip that CLI.
 
 ## Step 3 — Collect API keys (Exa required, Context7 optional)
 
@@ -271,7 +267,6 @@ For each installed, authenticated CLI, do the following:
 1. **Locate the config file.**
    - Codex: `~/.codex/config.toml` (create if missing with `[mcp_servers]` section)
    - Cursor: `~/.cursor/mcp.json` (create if missing as `{ "mcpServers": {} }`)
-   - Antigravity (`agy`): MCP servers live in `agy`'s own Gemini-CLI config (`~/.gemini/settings.json` → `mcpServers`), not a wizard-managed file. Skip Antigravity in this step (and in Steps 5–6's MCP verification/inventory). The Exa/Context7 wiring below applies only to Codex and Cursor.
 
 2. **Back up the existing file ONLY when an edit is about to happen.** Defer this step until after the audit (substep 3 below) determines that an edit IS required. Skipping the backup when no edit will land avoids stomping on a perfectly-good `.bak` for nothing.
 
@@ -392,7 +387,7 @@ Do NOT run slow "ask the CLI to invoke a tool" probes — those take 30s-2min pe
 - If the user skipped Exa, neither `exa` nor any Exa-purpose server should be expected.
 - If the user opted to consolidate dual credentials, only the canonical entries should be present.
 
-For each MCP-configured CLI, compare the probe output against the intended-state list. Report `✓ matches intended state` or `✗ drift` per CLI. (Antigravity has no wizard-managed MCP config — it is not verified here.)
+For each MCP-configured CLI, compare the probe output against the intended-state list. Report `✓ matches intended state` or `✗ drift` per CLI.
 
 | CLI | Probe command |
 |---|---|
@@ -426,8 +421,6 @@ Locations to scan (read-only; report findings; don't modify):
 - `~/.claude/.mcp.json` — Claude Code's own MCP config (UNMANAGED — user maintains this)
 - Any project-local `.mcp.json` files in commonly-used directories (cwd at minimum; report only)
 
-(Antigravity has no wizard-managed config file, so it does not appear in this inventory.)
-
 For each file containing an Exa or Context7 key, show: file path, which key (Exa or Context7), key fingerprint (last 6 chars), and whether it's managed by this wizard. If the same key family has different fingerprints across files, flag it as drift.
 
 Then print the concise summary. Include the list of files that now embed the API keys — useful when the user wants to rotate a key later.
@@ -438,7 +431,6 @@ cc-multi-cli-plugin setup complete.
 Per-CLI status:
   ✓ Codex: configured (exa, context7)
   ⚠ Cursor: skipped — not authenticated (run `agent status`)
-  ⚠ Antigravity: `agy` not detected — install the agy CLI and run `agy` once to sign in (no MCP config managed by this wizard)
   ⚠ OpenCode: detected but MCP config not managed — configure Exa/Context7 via OpenCode's own wizard; run `opencode auth list` to verify auth
 
 Drift cleaned this run:
@@ -465,7 +457,7 @@ Tracking file:
    and by future /multi:uninstall to know what to remove cleanly.)
 
 Next steps:
-  - Try `/codex:execute <task>`, `/cursor:delegate <task>`, `/antigravity:research <topic>`, or `/opencode:delegate <task>`.
+  - Try `/codex:execute <task>`, `/cursor:delegate <task>`, or `/opencode:delegate <task>`.
   - Re-run `/multi:setup` anytime to reconfigure (idempotent: audits + reconciles drift, skips no-ops).
 ```
 

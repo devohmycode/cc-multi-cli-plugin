@@ -48,9 +48,8 @@ import { execSync } from "node:child_process";
 import readline from "node:readline";
 import process from "node:process";
 
-import { spawnCommand } from "../process.mjs";
-import { buildSpawnEnvironment } from "../acp-client.mjs";
-import { sanitizeDiagnosticMessage } from "../acp-diagnostics.mjs";
+import { buildSpawnEnvironment, spawnCommand } from "../process.mjs";
+import { sanitizeDiagnosticMessage } from "../acp/diagnostics.mjs";
 import { runAcpTurn } from "../acp/client.mjs";
 import { resolveOpenCodeAcp } from "../acp/resolve.mjs";
 
@@ -132,11 +131,16 @@ export function readOnlyAgentName(role) {
  * Build the `opencode` argv (prompt is delivered on stdin, NEVER here — the
  * win32 .cmd shim throws on newline args).
  *
- * @param {{ role?: string, model?: string, sessionId?: string|null, cwd?: string }} [opts]
+ * @param {{ role?: string, model?: string, effort?: string|null, sessionId?: string|null, cwd?: string }} [opts]
  * @returns {string[]}
  */
-export function buildHeadlessArgs({ role = "delegate", model, sessionId, cwd } = {}) {
+export function buildHeadlessArgs({ role = "delegate", model, effort, sessionId, cwd } = {}) {
   const args = ["run", "--format", headlessOutputFormat(role), "--model", resolveModel(model)];
+  if (effort && String(effort).trim()) {
+    // `--variant` = provider-specific reasoning effort (e.g. high, max). Passed
+    // through verbatim; OpenCode validates it against the selected model.
+    args.push("--variant", String(effort).trim());
+  }
   if (cwd && String(cwd).trim()) {
     // Pin OpenCode's working directory (cursor's --workspace analog). NOTE: when
     // cwd is INSIDE a git repo, OpenCode resolves writes to the repo ROOT (its
@@ -542,6 +546,7 @@ export async function runHeadlessOpencodeTurn(cwd, prompt, options = {}) {
   const args = buildHeadlessArgs({
     role,
     model: options.model,
+    effort: options.effort,
     sessionId: options.sessionId,
     cwd
   });

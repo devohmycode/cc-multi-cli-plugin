@@ -21,11 +21,10 @@ async function buildSetupReport(cwd, actionsTaken = []) {
   const authStatus = await getCodexAuthStatus(cwd);
   const config = getConfig(workspaceRoot);
 
-  // Per-CLI detection via each adapter's isAvailable(). Reflects the live
-  // provider set (codex, cursor, antigravity); drives the report's CLI list so
-  // it never drifts from the ADAPTERS registry. Cursor/Antigravity detection is
-  // best-effort and must never throw — guard each probe.
-  const cliOrder = ["codex", "cursor", "antigravity"];
+  // Per-CLI detection via each adapter's isAvailable(), keyed straight off the
+  // ADAPTERS registry so the report can never drift from the provider set.
+  // Detection is best-effort and must never throw — guard each probe.
+  const cliOrder = Object.keys(ADAPTERS);
   const clis = cliOrder.map((name) => {
     // ADAPTERS[name] is the adapter module namespace; its `.adapter` object
     // carries the uniform isAvailable() probe (same shape dispatch uses).
@@ -57,10 +56,6 @@ async function buildSetupReport(cwd, actionsTaken = []) {
   if (codexStatus.available && !authStatus.loggedIn && authStatus.requiresOpenaiAuth) {
     nextSteps.push("Run `!codex login`.");
     nextSteps.push("If browser login is blocked, retry with `!codex login --device-auth` or `!codex login --with-api-key`.");
-  }
-  const antigravityCli = clis.find((entry) => entry.name === "antigravity");
-  if (antigravityCli && !antigravityCli.available) {
-    nextSteps.push("Antigravity: install the `agy` CLI (https://antigravity.google) and run `agy` once interactively to sign in. Read-only research/explore only (EXPERIMENTAL).");
   }
   if (!config.stopReviewGate) {
     nextSteps.push("Optional: run `/multi:setup --enable-review-gate` to require a fresh review before stop.");

@@ -23,7 +23,7 @@ adapted to route through this plugin's multi-cli-companion runtime:
 
 - plugins/codex/commands/rescue.md and plugins/codex/commands/review.md
 - plugins/multi/agents/codex-rescue.md
-- plugins/multi/skills/codex-cli-runtime/, plugins/multi/skills/gpt-5-4-prompting/,
+- plugins/multi/skills/codex-cli-runtime/, plugins/multi/skills/gpt-6-prompting/ (upstream name: gpt-5-4-prompting),
   and plugins/multi/skills/codex-result-handling/
 - plugins/multi/schemas/review-output.schema.json
 - plugins/multi/prompts/adversarial-review.md and

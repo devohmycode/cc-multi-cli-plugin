@@ -1,6 +1,6 @@
 ---
 description: Delegate execution of a specific plan or plan step to Codex
-argument-hint: "[--plan <path>] [--background|--wait] [--resume|--fresh] [--model <model>] [--effort <low|medium|high|xhigh>] <plan step or addendum>"
+argument-hint: "[--plan <path>] [--background|--wait] [--resume|--fresh] [--model <model>] [--effort <low|medium|high|xhigh|max|ultra>] <plan step or addendum>"
 allowed-tools: Bash(node:*), AskUserQuestion, Agent
 ---
 
