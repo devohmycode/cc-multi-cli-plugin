@@ -1,6 +1,6 @@
 # Privacy Policy — cc-multi-cli-plugin
 
-_Last updated: 2026-09-05_
+_Last updated: 2026-09-06_
 
 ## TL;DR
 
@@ -12,6 +12,9 @@ The direct GPT gateway sends conversation context to OpenAI and forwards
 Claude-bound requests to Anthropic. Switching models can therefore send earlier
 conversation content to the newly selected provider. Each provider applies its
 own privacy policy.
+The Cursor SDK route sends the selected conversation, session instructions, tool
+schemas, and tool results to Cursor. Cursor retains its own SDK telemetry and
+privacy controls; absence of author-operated telemetry does not disable those.
 
 ## What the plugin does not do
 
@@ -22,8 +25,11 @@ own privacy policy.
 
 ## What gets stored on your machine
 
-The current gateway processes requests in memory and writes no state files of its
-own. Earlier companion versions kept the following local files; removing the
+The gateway keeps request/callback state in memory. Its launcher writes a
+temporary, owner-only model-picker settings file under the system temporary
+directory (`multi-native-settings-*`) and removes it on normal shutdown. A crash
+can leave that file behind; it contains model options, not credentials or prompts.
+Earlier companion versions kept the following local files; removing the
 code does not remove existing data. Provider-owned files still apply. These files
 may contain task content or credentials; local storage does not mean the corresponding task content is
 never sent to a provider.
@@ -34,6 +40,11 @@ never sent to a provider.
 - **Job diagnostics** in that workspace directory's `jobs/<id>.log` — progress, errors, and logged output can include task content.
 - **Broker files** — `broker.json` in the workspace state directory points to a temporary broker session directory containing process/socket information and diagnostics.
 - **Provider-owned files** — Claude Code and external CLIs maintain their own credentials and transcripts. The direct GPT gateway reads Codex's existing `auth.json`; it does not create a separate OpenAI login store.
+- **Cursor SDK files** — the official browser login saves an expiring user API key
+  in `~/.cursor/sdk/auth.json`. The SDK maintains local agent/checkpoint/event
+  storage, which can contain the supplied Claude transcript and tool results.
+  Closing the gateway or deleting temporary live-test fixtures does not delete
+  these provider-owned records. The bridge's callback map/retry cache is in memory.
 
 These paths document existing data from earlier versions, not a commitment to
 retain their storage design in future harness bridges.
@@ -50,6 +61,7 @@ apply their own privacy policies:
 |---|---|---|
 | `/codex:execute`, `/codex:review`, `/codex:adversarial-review`, `/codex:rescue` | OpenAI | https://openai.com/policies/privacy-policy |
 | Experimental GPT `/model` choices and native OpenAI workers | OpenAI, through the existing Codex ChatGPT login | https://openai.com/policies/privacy-policy |
+| Experimental Cursor `/model` choices and native workers | Cursor, through the official SDK login or supplied SDK API key | https://cursor.com/privacy |
 | `/cursor:delegate`, `/cursor:research`, `/cursor:explore` | Cursor (Anysphere) | https://cursor.com/privacy |
 | `/opencode:delegate`, `/opencode:research`, `/opencode:explore` | OpenCode (SST) / configured model provider | https://opencode.ai/docs (and the routed provider's policy) |
 | Exa MCP (web search) | Exa | https://exa.ai/privacy-policy |
@@ -62,7 +74,9 @@ retain task content locally. The native gateway processes requests in memory and
 does not rewrite Claude's stored transcript. Its optional `MULTI_NATIVE_TRACE`
 diagnostics report routing, model/effort, status, and tool names without prompt
 bodies or credentials. Claude credentials are not forwarded to OpenAI; the GPT
-route reads the existing Codex login and leaves refresh to Codex.
+route reads the existing Codex login and leaves refresh to Codex. Claude and Codex
+credentials are not supplied to Cursor's SDK. Only our callback tools are enabled;
+ambient Cursor settings and MCP servers are not loaded by this route.
 
 External harness bridges for Antigravity and Grok Build are planned, not active
 data routes. As bridges are implemented, their real CLIs will handle provider

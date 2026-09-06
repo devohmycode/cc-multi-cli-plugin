@@ -20,17 +20,21 @@ There are two execution paths behind that experience:
 2. **External harness integration:** the real provider CLI or supported agent SDK
    owns execution and native authentication. Our bridge translates its public
    progress stream and final result for display inside Claude Code. This path
-   is planned; it has not yet been demonstrated end to end in our gateway.
+   remains the fallback for integrations that execute tools externally. Cursor's
+   SDK bridge is a more direct variant: its inference loop requests our custom
+   callbacks, which wait while Claude executes the corresponding native tools.
+   That variant passed the authenticated Composer 2.5 callback, main-model and
+   worker Read/Edit, cancellation, and saved-history switching contract.
 
 ```text
 Claude Code: /model, named workers, native subagent lifecycle
                          |
                   Our Node gateway
-                   /             \
-      direct model adapter     external harness bridge (planned)
-              |                         |
-      provider/local server    real provider CLI or agent SDK
-      Claude executes tools    external harness executes tools
+               /          |                   \
+     direct adapter   SDK callback bridge   CLI bridge (planned)
+           |                |                      |
+    provider/server    official Cursor SDK      real CLI
+      Claude tools        Claude tools         CLI tools
 ```
 
 The backend mechanism is chosen by the integration. Users should not need to
@@ -45,7 +49,7 @@ each provider's current capabilities; do not silently substitute another model.
 | Target | Intended route | Current state in this checkout |
 | --- | --- | --- |
 | OpenAI | Direct model adapter using the saved Codex login | Main-model switching and native GPT workers work as an experimental gateway; compatibility gaps remain. |
-| Cursor | Real CLI; investigate supported SDK controls for a harness bridge | Headless/ACP transport references are retained; gateway harness bridge is not implemented. |
+| Cursor | Official SDK with asynchronous callbacks into Claude's tool loop | Experimental: Composer 2.5 passed live callback, main-model and worker Read/Edit, cancellation, and Cursor → Claude → Cursor with saved history. Other models and compaction unverified. |
 | Antigravity | Real `agy` CLI with its native login and documented streaming | Future harness bridge; the old transcript-recovery adapter was removed. |
 | OpenCode | Real CLI delegation; direct Zen endpoints where appropriate | Headless/ACP transport references are retained; direct Zen gateway integration is not implemented. |
 | Local models via llama.cpp | Prefer its Anthropic-compatible Messages endpoint | Planned; validate model/tool/template compatibility before adding translation. |
@@ -68,6 +72,10 @@ preserving the old interface unless a task specifically calls for it.
   replay them as actionable Claude `tool_use` blocks: that could execute an edit
   or command twice. Start with attributed text progress; native tool-row rendering
   and interactive approval bridging require separate proof.
+- A supported SDK's **unexecuted callback request** can instead become Claude
+  `tool_use`: return Claude's result to the waiting callback. Disable independent
+  execution tools and ambient MCP/settings on that route. This is the Cursor
+  implementation; it does not turn observed external actions into new tool calls.
 - Claude Code permissions govern Claude-executed tools. External operations must
   use the external harness's permissions; displaying them in Claude does not
   transfer enforcement. Do not silently widen permissions to make a bridge work.
@@ -82,19 +90,27 @@ preserving the old interface unless a task specifically calls for it.
 
 ### Next work
 
-Finish the missing OpenAI gateway features first, using existing translators as
-references while keeping our own engine and authentication boundaries. Then build
-the Cursor integration. The remaining targets have no fixed implementation order.
+Verify and harden the Cursor SDK integration against its live contract, preserving
+the existing OpenAI route. The remaining targets have no fixed implementation order.
 
 ### First harness-bridge proof
 
-Build one Cursor-backed route using the real CLI's public stream. Exercise
+Build one Cursor-backed route using the official SDK and pending custom-tool callbacks. Exercise
 it both as a `/model` choice and as a native worker, without a Sonnet forwarder.
 Verify streamed output, a visible running worker and elapsed time, completion,
 cancellation, explicit failures, and isolation between workers. Check that an
-external edit executes once. Then verify conversation continuation and switching
-back to Claude. Until this passes, these are acceptance criteria, not shipped
-capabilities. Native tool cards and approval UI are later fidelity work.
+Claude-executed edit occurs once and permission denials reach Cursor. Then verify
+conversation continuation and switching back to Claude. Composer 2.5 now passes
+the live callback, Read/Edit, cancellation, and switching baseline. Permission
+denial/isolation/retry behavior has offline coverage; UI timing and compaction
+need additional live checks before claiming full fidelity.
+
+The Cursor bridge keeps pending callbacks and retry responses in memory. After
+completion or restart it reconstructs an SDK agent from Claude's authoritative
+transcript, including completed tool results. It does not restore SDK checkpoints.
+The SDK persists its own local agent data. Abandoned callback waits are bounded;
+there is no immediate cancellation signal between Messages requests. See README
+for exact limits and the current validation status.
 
 Reuse our existing process, job, session, and ACP helpers where they fit. Keep
 hardening the direct OpenAI adapter against its documented limitations. There is
@@ -113,12 +129,14 @@ or blanket approval for every subscription use case.
 ## Existing native model gateway
 
 `plugins/multi/scripts/native-model-gateway.ts` launches Claude with session-local
-model-picker settings, named OpenAI workers, and a localhost gateway.
-`lib/native-gateway.ts` separates Claude passthrough from registered GPT routes;
+model-picker settings, named external workers, and a localhost gateway.
+`lib/native-gateway.ts` separates Claude passthrough from registered GPT/Cursor routes;
 `lib/native-responses.ts` handles Messages/Responses translation and opaque
 reasoning state. See the [README](README.md#experimental-native-openai-models)
 for usage, tested behavior, and limitations. This code is the starting point for
-the harness bridge, not an implementation of that bridge already.
+the SDK bridge. `native-cursor.ts` owns callback exchanges; `native-cursor-models.ts`
+builds model/worker choices from the account catalog. The retained headless/ACP
+adapters remain references, not an optional Cursor backend.
 
 ## Earlier companion implementation — historical reference
 

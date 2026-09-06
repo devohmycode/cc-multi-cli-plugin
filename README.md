@@ -10,7 +10,8 @@
 
 cc-multi-cli-plugin is being refactored to bring external models and coding
 harnesses into one Claude Code session. The checkout contains an experimental
-direct GPT gateway in TypeScript and retained Cursor/OpenCode transport references.
+direct GPT gateway and an experimental Cursor SDK bridge in TypeScript, plus
+retained Cursor/OpenCode transport references.
 The earlier command-based delegation system was removed in the TypeScript branch.
 
 ## Direction: one session, multiple models and harnesses
@@ -21,11 +22,13 @@ rows, elapsed time, live progress, completion, and cancellation are central to
 the experience, alongside preserving each provider's supported authentication.
 
 The direct GPT path below already works experimentally: Claude Code executes its
-tools. After OpenAI hardening, the next step is a **Cursor harness bridge**: a provider's real CLI
-executes the task while our gateway streams its progress and answer into Claude
-Code. For example, a future "Gemini via Antigravity" selection would run the
-actual Antigravity harness. This bridge is planned, not available yet; native
-tool-card and approval rendering remain unproven.
+tools. The **Cursor SDK bridge** also hands tool execution to Claude: Cursor's
+custom-tool callbacks pause while Claude applies permissions and returns results.
+Cursor retains its own inference loop and system prompt. This route is implemented
+with offline coverage and a live Composer 2.5 contract covering Claude main-model
+and native-worker Read/Edit, cancellation, and switching back to Claude.
+A future "Gemini via Antigravity" selection would run the actual Antigravity
+harness; that separate integration remains planned.
 
 Our targets are OpenAI, Cursor, Antigravity, OpenCode, local models through
 llama.cpp, and Grok Build. We will maintain our adapters and reuse existing
@@ -38,8 +41,8 @@ current status, execution boundaries, and the first bridge milestone.
 
 ## Requirements
 
-Node ≥ 24.12, Claude Code signed in normally, and Codex signed in with its ChatGPT
-login. From a checkout, run `npm install` for development dependencies. `npm test`
+Node ≥ 24.12 and Claude Code signed in normally. Enable OpenAI with Codex's ChatGPT
+login, or Cursor with the SDK login below, or both. From a checkout, run `npm install` for dependencies. `npm test`
 runs type checking and offline tests. Node runs the gateway's TypeScript directly.
 
 ## Experimental native OpenAI models
@@ -134,7 +137,7 @@ local stop is unavailable and reported as zero. The subscription endpoint does n
 accept a per-request output-token cap. Codex owns token refresh; renew its login
 if the gateway reports 401. Credential stores that do not expose `auth.json` are
 not supported yet. Direct OpenCode Zen integration and external harness-backed
-workers for Cursor, Antigravity, and Grok Build are not implemented; neither is
+workers for Antigravity and Grok Build are not implemented; neither is
 the llama.cpp route.
 The full built-in tool definitions are accepted, but this is not complete feature
 parity: unsupported content also prevents switching an existing conversation
@@ -185,6 +188,78 @@ preserve status and `Retry-After`; inference is not automatically replayed by th
 gateway. Exit Claude normally
 to stop its gateway. Plain `claude` launches independently of this experimental
 launcher; use session-only model selection to keep your saved default separate.
+
+## Experimental Cursor SDK bridge
+
+Sign in once through Cursor's official SDK browser flow, then launch normally:
+
+```sh
+node plugins/multi/scripts/native-model-gateway.ts --cursor-login
+node plugins/multi/scripts/native-model-gateway.ts --cursor-models
+node plugins/multi/scripts/native-model-gateway.ts
+```
+
+The launcher discovers models and presets available to your Cursor account and
+adds them to `/model`, labeled **via Cursor**, alongside Claude and any signed-in
+OpenAI choices. Named workers cover base models and reasoning-only presets;
+other parameter combinations remain model-picker choices. `--cursor-models`
+prints exact model IDs and any registered worker names. Ask
+Claude to delegate to one of those workers, or select its model for the main
+conversation. These settings belong to the launched session; the earlier note
+about Claude's persistent `/model` selection still applies.
+
+The SDK login stores a named, expiring user key in `~/.cursor/sdk/auth.json`.
+It is separate from Cursor's app/CLI login and uses Cursor's documented user-plan
+billing. The SDK also accepts `CURSOR_API_KEY`; that key's account determines
+billing. The SDK owns credential handling; the bridge never extracts private
+Cursor session tokens. See [Cursor's SDK documentation](https://cursor.com/docs/sdk/typescript).
+
+Only our custom callback tools are enabled. Cursor's filesystem, shell, subagent,
+and other built-in execution tools are disabled, and ambient settings/MCP servers
+are excluded. A callback yields a fresh Claude `tool_use` request **before any
+action executes**. Claude handles permission, runs the tool, and returns its
+result to the waiting callback. Observed Cursor tool activity is never replayed
+as an executable action. Tool schemas and long-name aliases are passed dynamically.
+
+`/effort` selects an exact advertised `effort`/`reasoning_effort` value where the
+model has one; unsupported values fail explicitly. Catalog presets retain their
+own parameters. Models without an effort parameter do not acquire one, and
+legacy Claude thinking budgets are not mapped onto Cursor. Cursor's own system
+prompt remains active; Claude's session instructions and transcript are supplied
+as conversation context because full prompt replacement is account-gated.
+
+The SDK run stays alive across tool-result HTTP exchanges. Completed turns, new
+user messages, restart, and compaction begin a fresh SDK agent from Claude's
+provided history. We do not resume opaque SDK checkpoints or promise identical
+behavior to a raw model API. In-memory retry responses are retained for up to ten
+minutes/256 requests. Output is capped at 32 MiB per SDK run, with at most 32
+active runs per gateway. Session and worker scopes plus tool IDs isolate results;
+modified conversation branches cannot settle another branch's callback.
+Disconnects during inference and gateway shutdown cancel the run. A callback
+waiting between HTTP requests expires after ten minutes: the Messages protocol
+does not notify the gateway immediately when a user abandons a permission prompt.
+
+Initial limitations: strict structured output, forced tool choice, stop strings,
+PDF attachments, and per-response generation caps are unsupported. Token counts
+and displayed Messages usage are estimates, not Cursor billing figures. Images
+are supported as prompt attachments and base64 callback results; remote images
+inside a live callback result are rejected. Composer 2.5 passed real callback
+execution, cancellation while awaiting a result, main-model and native-worker
+Read/Edit, and Cursor → Claude → Cursor with saved history and fresh gateways.
+Other Cursor models, automated UI/timer assertions, and Cursor compaction are
+not covered by that baseline.
+
+The official SDK currently brings an `undici` 5.x dependency with unresolved
+`npm audit` advisories. No incompatible dependency override has been applied.
+Recheck upstream SDK releases before treating this prototype as release-ready.
+
+`npm run test:live:cursor -- <model-or-worker>` checks a real SDK callback round
+trip, cancellation, Cursor as Claude's main model with native Read/Edit, switching
+to Claude and back through saved-session resume, and a Claude parent delegating
+to a Cursor worker. It spends Cursor and Claude usage on temporary fixtures and
+leaves synthetic transcripts in Claude's and Cursor's normal stores. Without an
+argument it chooses an advertised Composer model, failing
+if none is available. The ordinary `npm test` suite remains offline.
 
 ## Earlier commands and skills (historical)
 

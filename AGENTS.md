@@ -20,12 +20,16 @@ letting the selected external model or harness do the work.
 - Direct model integrations use Claude Code's tools and execution loop. Harness
   bridges use the real external CLI's execution loop and native authentication.
   Never replay observed external tool events as executable Claude tool calls.
+- Cursor uses the official SDK with only our custom MCP callbacks enabled.
+  These forward **unexecuted** tool requests to Claude and await results; Claude
+  permissions apply. Do not enable Cursor's independent tools or ambient settings.
 - Preserve Claude subscription passthrough and isolate provider credentials.
   Do not add our own Claude subscription login/token pool or extract Antigravity
   tokens for direct model requests. External operations retain external permissions.
 - Targets: OpenAI, Cursor, Antigravity through its real CLI, OpenCode, llama.cpp,
-  and Grok Build. The direct GPT gateway is experimental; harness bridges are
-  planned and must be demonstrated before claiming support.
+  and Grok Build. The direct GPT gateway and Cursor SDK bridge are experimental;
+  Cursor's Composer 2.5 live baseline passes. Other models and Cursor compaction
+  are unverified; other provider bridges are planned.
 
 ## Refactor scope
 
@@ -48,10 +52,12 @@ instructions. Keep new scratch research in gitignored `.agent/`.
 ## Current code map
 
 - `plugins/multi/scripts/native-model-gateway.ts`: experimental gateway launcher,
-  model-picker settings, and native worker registration.
+  model-picker settings, and native OpenAI/Cursor worker registration.
 - `plugins/multi/scripts/lib/native-gateway.ts` and `native-responses.ts`:
   provider routing and Messages/Responses translation. `native-tools.ts` handles
   stable tool aliases; `native-tokens.ts` provides local count estimates.
+- `native-cursor.ts`: SDK callback lifecycle, retry cache, streaming, and isolation.
+  `native-cursor-models.ts`: account catalog selections and native worker names.
 - `plugins/multi/scripts/lib/adapters/`: retained Cursor/OpenCode transport
   references, with their tests; they are not wired into the gateway yet.
 - `plugins/multi/scripts/lib/acp/` and `lib/process.mjs`: retained transport and
@@ -72,6 +78,8 @@ instructions. Keep new scratch research in gitignored `.agent/`.
 - Run appropriate opt-in live checks when changing a live integration path;
   these invoke real CLIs and spend provider usage. The README lists native gateway
   checks; the old companion `test:live` script was removed.
+- `npm run test:live:cursor` exercises real SDK callbacks and Claude main/subagent
+  Read/Edit. Requires the official SDK login (`--cursor-login` on the launcher).
 - Definition of done: relevant checks pass, no `DEP0190` warnings, and
   `CHANGELOG.md` reflects user-facing changes.
 - Future bridges need session/worker/provider/workspace isolation as specified in
