@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { originalToolNames } from './native-tools.ts';
 import { estimateInputTokens } from './native-tokens.ts';
+import type { CursorBridge } from './native-cursor.ts';
 import type { Server } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { timingSafeEqual, randomUUID } from 'node:crypto';
@@ -39,7 +40,7 @@ export interface CodexAuthHeaders {
 
 /** What the gateway reports to `onEvent`; routing only, never credentials or bodies. */
 export interface GatewayEvent {
-  route: 'anthropic' | 'openai' | 'openai-request';
+  route: 'anthropic' | 'openai' | 'openai-request' | 'cursor';
   model?: string;
   agentId?: string | null;
   path?: string;
@@ -65,6 +66,7 @@ export interface GatewayOptions {
   fetchImpl?: GatewayFetch;
   onEvent?: (event: GatewayEvent) => void;
   timeoutMs?: number;
+  cursor?: CursorBridge;
 }
 
 /** Rejected before any provider call; answered as HTTP 400 rather than 502. */
@@ -109,7 +111,7 @@ function header(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value.join(', ') : value;
 }
 
-export function createNativeGateway({ token, authFile, fetchImpl = fetch, onEvent = () => {}, timeoutMs = 180000 }: GatewayOptions): Server {
+export function createNativeGateway({ token, authFile, fetchImpl = fetch, onEvent = () => {}, timeoutMs = 180000, cursor }: GatewayOptions): Server {
   if (!token) throw new Error('Gateway token required');
   const fallbackSession = randomUUID();
   return http.createServer(async (req, res) => {
@@ -142,8 +144,32 @@ export function createNativeGateway({ token, authFile, fetchImpl = fetch, onEven
       const body: MessagesRequest = parsed;
       const external = typeof body.model === 'string' && body.model.startsWith('multi/') ? body.model : null;
       const agentId = header(req.headers['x-claude-code-agent-id']);
-      onEvent({ route: external ? 'openai' : 'anthropic', model: body.model, agentId: agentId ?? null, path: url.pathname });
-      if (external) {
+      const isCursor = external?.startsWith('multi/cursor/');
+      onEvent({ route: isCursor ? 'cursor' : external ? 'openai' : 'anthropic', model: body.model, agentId: agentId ?? null, path: url.pathname });
+      if (isCursor) {
+        let inputTokens: number;
+        try {
+          if (!cursor) throw new Error('Cursor SDK is not signed in. Run the launcher with --cursor-login first.');
+          if (!['/v1/messages', '/v1/messages/count_tokens'].includes(url.pathname) || req.method !== 'POST') throw new Error('Cursor requires POST /v1/messages or /v1/messages/count_tokens');
+          inputTokens = cursor.validate(body);
+        } catch (error) { throw new BadRequest(reason(error)); }
+        if (url.pathname === '/v1/messages/count_tokens') {
+          res.writeHead(200, { 'content-type': 'application/json', 'x-multi-token-count': 'estimate' });
+          return res.end(JSON.stringify({ input_tokens: inputTokens }));
+        }
+        if (body.stream) {
+          res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+          res.flushHeaders();
+          heartbeat = setInterval(() => emit('ping', {}), 15000);
+        }
+        const metadata = isRecord(parsed.metadata) ? parsed.metadata.user_id : undefined;
+        const scope = JSON.stringify([header(req.headers['x-claude-code-session-id']) ?? metadata ?? fallbackSession, agentId ?? 'main']);
+        const result = await cursor!.handle(body, scope, signal, body.stream ? emit : undefined);
+        onEvent({ route: 'cursor', agentId, model: body.model, stopReason: result.stop_reason,
+          tools: result.content.filter(b => b.type === 'tool_use').map(b => b.name) });
+        if (!body.stream) res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(body.stream ? undefined : JSON.stringify(result));
+      } else if (external) {
         let request;
         try {
           const model = Object.values(MODELS).find(model => external === `multi/openai/${model}`);

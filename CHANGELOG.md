@@ -6,6 +6,13 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+### Experimental Cursor SDK bridge
+
+- Added the official `@cursor/sdk` integration, browser login, account model/preset discovery, `/model` entries, and named Cursor workers alongside Claude and OpenAI. No private Cursor token extraction or backend selector.
+- Cursor custom-tool callbacks pause before execution and return native Claude tool requests. Claude handles permissions and supplies results; Cursor's independent execution tools and ambient settings/MCP servers are disabled.
+- Added streamed output, bounded callback waits/output, cancellation, in-memory retry deduplication, worker isolation, and transcript-based reconstruction after completed turns/restart. Added offline coverage and `test:live:cursor`; Composer 2.5 passed real callbacks, cancellation, Claude main/subagent Read/Edit, and Cursor → Claude → Cursor with saved history. Other models and Cursor compaction remain unverified.
+- Model-picker settings use a temporary file to avoid command-line size limits. Named workers cover base models and reasoning-only presets; all advertised combinations remain available as model choices. The official SDK's unresolved transitive `undici` audit findings are recorded in README.
+
 ### Compaction regression testing
 
 - Added `npm run test:live:compaction`: a parameterized live contract for actual manual, repeated, and automatic compaction boundaries, retained conversation-only facts, post-compaction native edits, fresh-process saved-session resume, and switching back to Claude. Uses synthetic fixtures, bounded waits, and versioned JSON reports; the offline suite remains offline.

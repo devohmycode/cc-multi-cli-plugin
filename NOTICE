@@ -29,3 +29,7 @@ The local token estimator uses js-tiktoken (https://github.com/dqbd/tiktoken),
 licensed under MIT, with OpenAI tiktoken encoding data. Translator compatibility
 behavior was researched against CLIProxyAPI; no gateway engine or authentication
 implementation from that project is included.
+
+The Cursor integration depends on the official @cursor/sdk package (Anysphere).
+That dependency has its own LICENSE.md and Cursor terms; this repository's
+Apache 2.0 license does not relicense the SDK. No SDK implementation is vendored.

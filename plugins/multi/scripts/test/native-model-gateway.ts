@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { OPENAI_WORKERS } from '../lib/native-gateway.ts';
+import { cursorModelOptions } from '../lib/native-cursor-models.ts';
 
 /** The Claude Code stream-json events this reproducer inspects. */
 interface ClaudeEvent {
@@ -23,7 +24,9 @@ interface ClaudeEvent {
 interface TraceEvent { route?: string; model?: string; effort?: string }
 
 const worker = process.argv[2] ?? 'openai-native';
-assert(Object.hasOwn(OPENAI_WORKERS, worker), 'Pass a registered native worker name');
+const cursor = worker.startsWith('cursor-')
+  ? cursorModelOptions(await (await import('@cursor/sdk')).Cursor.models.list()).find(option => option.nativeWorker && option.worker === worker) : undefined;
+assert(cursor || Object.hasOwn(OPENAI_WORKERS, worker), 'Pass a registered native worker name (--cursor-models lists Cursor workers)');
 const launcher = fileURLToPath(new URL('../native-model-gateway.ts', import.meta.url));
 const cwd = await mkdtemp(path.join(os.tmpdir(), 'native-live-smoke-'));
 const nonce = randomBytes(6).toString('hex');
@@ -54,13 +57,14 @@ try {
   assert.equal(content, `beta ${nonce}\n`);
   assert(results.some(e => !e.is_error && e.result?.includes(nonce)));
   assert(diagnostics.includes('"route":"anthropic","status":200'));
-  const { model, effort } = OPENAI_WORKERS[worker];
-  assert(diagnostics.includes(`"model":"multi/openai/${model}"`));
+  const { model, effort } = cursor ? { model: cursor.model, effort: undefined } : OPENAI_WORKERS[worker];
+  const routeModel = cursor ? model : `multi/openai/${model}`;
+  assert(diagnostics.includes(`"model":"${routeModel}"`));
   const requests: TraceEvent[] = diagnostics.split('\n').filter(line => line.startsWith('[native] '))
-    .map(line => JSON.parse(line.slice('[native] '.length))).filter((event: TraceEvent) => event.route === 'openai-request');
+    .map(line => JSON.parse(line.slice('[native] '.length))).filter((event: TraceEvent) => event.route === (cursor ? 'cursor' : 'openai-request'));
   assert(requests.length >= 3, 'Expected external tool calls and completion');
-  assert(requests.every(request => request.model === model && request.effort === effort), 'Wrong upstream model or effort');
+  assert(requests.every(request => request.model === model && (cursor || request.effort === effort)), 'Wrong upstream model or effort');
   assert(diagnostics.includes('"tools":["Read"]'));
   assert(diagnostics.includes('"tools":["Edit"]'));
-  console.log(`PASS: real Claude parent + ${worker} (${model}, ${effort}) + native Read/Edit + completion.`);
+  console.log(`PASS: real Claude parent + ${worker} (${model}${effort ? ', ' + effort : ''}) + native Read/Edit + completion.`);
 } finally { await rm(cwd, { recursive: true, force: true }); }
