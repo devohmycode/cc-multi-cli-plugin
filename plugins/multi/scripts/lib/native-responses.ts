@@ -198,8 +198,8 @@ export type ResponseStreamEvent =
   | { type: 'response.reasoning_summary_text.delta'; output_index: number; delta: string }
   | { type: 'response.completed'; response: ResponsesResponse }
   | { type: 'response.incomplete'; response: ResponsesResponse }
-  | { type: 'response.failed'; response?: ResponsesResponse; message?: string }
-  | { type: 'error'; response?: ResponsesResponse; message?: string };
+  | { type: 'response.failed'; response?: Pick<ResponsesResponse, 'error'>; message?: string }
+  | { type: 'error'; response?: Pick<ResponsesResponse, 'error'>; message?: string };
 
 /** Provider reasoning state, round-tripped through an opaque Claude signature. */
 export interface ReasoningState {
@@ -214,8 +214,39 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function isOutputItem(value: unknown): value is ResponsesOutputItem {
+  if (!isRecord(value) || typeof value.type !== 'string') return false;
+  if (value.type === 'function_call') {
+    return typeof value.call_id === 'string' && typeof value.name === 'string' && typeof value.arguments === 'string';
+  }
+  if (value.type === 'message') return value.content === undefined || Array.isArray(value.content);
+  return true; // reasoning fields are checked where used; unknown item types are rejected by the caller
+}
+
+const hasIndex = (value: Record<string, unknown>): boolean => typeof value.output_index === 'number';
+const hasDelta = (value: Record<string, unknown>): boolean => hasIndex(value) && typeof value.delta === 'string';
+const hasResponse = (value: Record<string, unknown>): boolean => isRecord(value.response) && typeof value.response.id === 'string';
+const STREAM_SHAPES: Readonly<Record<string, (value: Record<string, unknown>) => boolean>> = {
+  'response.created': hasResponse,
+  'response.completed': hasResponse,
+  'response.incomplete': hasResponse,
+  'response.output_item.added': value => hasIndex(value) && isOutputItem(value.item),
+  'response.output_item.done': value => hasIndex(value) && isOutputItem(value.item),
+  'response.output_text.delta': hasDelta,
+  'response.refusal.delta': hasDelta,
+  'response.function_call_arguments.delta': hasDelta,
+  'response.reasoning_summary_text.delta': hasDelta,
+  'response.failed': () => true,
+  'error': () => true,
+};
+
+/** False for event types the translation ignores; throws for a known type with a bad shape. */
 function isStreamEvent(value: unknown): value is ResponseStreamEvent {
-  return isRecord(value) && typeof value.type === 'string';
+  if (!isRecord(value) || typeof value.type !== 'string') return false;
+  const shape = STREAM_SHAPES[value.type];
+  if (!shape) return false;
+  if (!shape(value)) throw new Error(`OpenAI sent a malformed ${value.type} event`);
+  return true;
 }
 
 function isReasoningState(value: unknown): value is ReasoningState {

@@ -312,3 +312,17 @@ test('an auth.json without usable ChatGPT credentials fails before any upstream 
   await writeFile(authFile, JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'openai-secret', account_id: 'account-test' } }));
   assert.deepEqual(await readCodexAuth(authFile), { authorization: 'Bearer openai-secret', 'chatgpt-account-id': 'account-test' });
 });
+
+test('malformed provider stream events fail by name; unknown event types are ignored', async () => {
+  const created = textEvents[0];
+  assert(created);
+  await assert.rejects(fromResponses(stream([created, { type: 'response.output_text.delta', output_index: 0 }]), model),
+    /malformed response\.output_text\.delta/);
+  await assert.rejects(fromResponses(stream([created, { type: 'response.output_item.added', output_index: 0, item: { type: 'function_call' } }]), model),
+    /malformed response\.output_item\.added/);
+  await assert.rejects(fromResponses(stream([{ type: 'response.created', response: {} }]), model), /malformed response\.created/);
+  const result = await fromResponses(stream([{ type: 'response.in_progress', sequence_number: 1 }, ...textEvents]), model);
+  const text = result.content[0];
+  assert(text.type === 'text');
+  assert.equal(text.text, 'Done');
+});

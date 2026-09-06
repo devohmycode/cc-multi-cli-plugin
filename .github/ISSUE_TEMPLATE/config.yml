@@ -1,8 +1,1 @@
 blank_issues_enabled: false
-contact_links:
-  - name: Add a CLI yourself (no issue needed)
-    url: https://github.com/greenpolo/cc-multi-cli-plugin/blob/master/plugins/multi/skills/multi-cli-anything/SKILL.md
-    about: With this plugin installed, ask Claude Code "add <CLI> to cc-multi-cli-plugin" — the multi-cli-anything skill scaffolds everything.
-  - name: Customize an existing CLI/role
-    url: https://github.com/greenpolo/cc-multi-cli-plugin/blob/master/plugins/multi/skills/customize/SKILL.md
-    about: Swap which CLI handles which role, hardcode a model, restrict tools — Claude does the file edits via the customize skill.
