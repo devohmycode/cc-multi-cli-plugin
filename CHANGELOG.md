@@ -6,8 +6,31 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+### Native permission regression contract
+
+- Added `test:live:permissions` for default, accept-edits, plan, don't-ask, and bypass modes through the ordinary OpenAI/Cursor launcher. Checks native dialogs, pre-approval file state, exact-once effects, denial results, provider attribution, and absence of classifier traffic.
+- Extended the native worker check with don't-ask/bypass modes and Cursor worker selection; reused the existing Python terminal helper. Plan-mode reports distinguish model restraint from a submitted write denied through a native prompt.
+
+### Automatic approval
+
+- Enabled OpenAI provider review in the ordinary launcher when Anthropic credentials are absent and the Codex catalog exposes its reviewer. Existing Claude subscription/API authentication keeps native classification. The runtime uses Codex's bundled policy, native context, and bounded read-only file investigation.
+- Added a local capability guard for provider switches and workers, and disabled auto mode at startup when unsupported. Removed the mid-session manual fallback: auto-mode actions without an available approval adapter are denied with an explicit capability error; Claude's current gateway interface cannot change the displayed permission mode. Sessions started with auto disabled require relaunch to enable it.
+- Prevented native classifier retries naming the working model from bypassing the reviewer. Added launcher, reviewer investigation/failure, credential-selection, and worker-isolation checks, plus live launcher and provider-switch modes.
+
+### Auto-mode regression testing
+
+- Added an opt-in native classifier gateway adapter and `test:live:provider-approval -- --native-escalation`. Claude's own permission filtering skips provider review for native-approved actions and explicit rules. Provider allow/block verdicts retain native auto-mode semantics; matching second-stage denials reuse one provider review. Protocol, session/context isolation, malformed/error/abort behavior, and gateway authentication have offline coverage. This earlier opt-in surface is now also used by the launcher.
+- Added `npm run test:live:provider-approval`: a credential-isolated OpenAI reviewer and native Claude terminal approval proof. It covers automatic approval, manual Yes/No decisions, exact-once canary effects, and absence of Anthropic classifier requests. Uses Codex's vendored review policy and real `codex-auto-review` requests; This earlier test remains available alongside the runtime integration.
+- Added `npm run test:live:auto-mode`: a sequential Claude control plus OpenAI/Cursor main-model and native-worker matrix. Harmless temporary canaries verify actual classifier allow/deny decisions, Anthropic routing, provider tool attribution, denial feedback, and file effects. Session-only rules and retained versioned diagnostics distinguish classifier enforcement from static permissions, sandbox auto-approval, model refusal, or silent fallback.
+- All five cases passed with Claude Code 2.1.263: Sonnet control, Luna high main/worker, and Composer 2.5 main/worker. Bash classification requested `claude-sonnet-5` via the existing Claude subscription passthrough; external-provider authentication does not replace classifier authentication.
+
+### Repository layout
+
+- Moved plugin runtime code from `plugins/multi/scripts/` to `plugins/multi/src/` and live integration checks to `test/live/`. Root `scripts/` remains for development utilities. Updated imports, npm scripts, and documented launcher commands to the new paths.
+
 ### Experimental Cursor SDK bridge
 
+- Reduced the default Cursor `/model` lineup to Auto, Grok 4.6, and Composer 2.5, filtered against the signed-in account catalog. Users can add other account models with the documented `MULTI_CURSOR_EXTRA_MODELS` environment variable. Full model IDs, presets, and registered workers remain available.
 - Added the official `@cursor/sdk` integration, browser login, account model/preset discovery, `/model` entries, and named Cursor workers alongside Claude and OpenAI. No private Cursor token extraction or backend selector.
 - Cursor custom-tool callbacks pause before execution and return native Claude tool requests. Claude handles permissions and supplies results; Cursor's independent execution tools and ambient settings/MCP servers are disabled.
 - Added streamed output, bounded callback waits/output, cancellation, in-memory retry deduplication, worker isolation, and transcript-based reconstruction after completed turns/restart. Added offline coverage and `test:live:cursor`; Composer 2.5 passed real callbacks, cancellation, Claude main/subagent Read/Edit, and Cursor → Claude → Cursor with saved history. Other models and Cursor compaction remain unverified.

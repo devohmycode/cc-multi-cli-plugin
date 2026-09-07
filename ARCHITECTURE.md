@@ -11,6 +11,8 @@ one Claude Code session in which users select external models through `/model`
 and delegate to explicitly named workers. Native subagent visibility, elapsed
 time, live progress, completion, and cancellation are core requirements. Reduce
 Claude token use by sending the work to the selected external model or harness.
+Enable Anthropic-independent use of external providers, including automatic
+approval wherever the selected provider supports it. Claude access remains optional.
 
 There are two execution paths behind that experience:
 
@@ -62,6 +64,35 @@ preserving the old interface unless a task specifically calls for it.
 
 ### Execution and subscription boundaries
 
+- When Anthropic credentials are available, preserve Claude Code's native automatic
+  classification, including for external working models. When they are absent, map
+  the selected provider's supported automatic approval into Claude Code's native
+  auto-mode experience. Disable auto mode when neither approval route is available,
+  including after provider switches; sandboxing alone does not establish that
+  support. Do not silently fall back to unauthenticated Anthropic classification or
+  unrestricted execution. The OpenAI adapter and capability guard are implemented; exact native mode
+  switching remains limited by the unmodified CLI interface.
+- Preserve native auto-mode semantics: provider-approved actions proceed and
+  provider-denied actions are blocked. Explicit ask rules and other native manual
+  approval requirements retain Claude Code's ordinary permission prompt. Reproduce
+  the provider's automatic review behavior, not Anthropic's classifier policy.
+  Let Claude resolve static permissions before invoking the reviewer; do not add
+  a second command-safety parser or review every tool from PreToolUse.
+- The launcher preserves native Anthropic classification when Claude reports an
+  existing credential. Otherwise it discovers OpenAI's subscription reviewer and
+  enables the runtime adapter automatically. Native permission filtering owns
+  escalation. The reviewer uses the provider policy, current request/transcript,
+  current tool cwd, and bounded read-only filesystem investigation.
+- Review contexts are scoped to session and worker. Two-stage classification
+  reuses only a matching denial; working-model classifier retries cannot bypass
+  review. Unknown capability, errors, or missing context cannot grant approval.
+- Claude 2.1.263 cannot reload launcher flag settings or change permission mode
+  through a gateway API. Unsupported startup routes disable auto mode for the
+  session. Mid-session providers and workers lacking an available approval adapter
+  are blocked in auto mode with an explicit capability error, never a manual
+  fallback; the displayed mode may remain auto. Native availability changes across
+  switches remain unfinished. Adapter support means an implemented and validated
+  integration: OpenAI has one; Cursor's is unfinished.
 - Keep the user's Claude login in unmodified Claude Code. Preserve its
   subscription passthrough and isolate other providers' credentials. Do not add
   a third-party Claude subscription login or token pool.
@@ -90,15 +121,17 @@ preserving the old interface unless a task specifically calls for it.
 
 ### Next work
 
-Verify and harden the Cursor SDK integration against its live contract, preserving
-the existing OpenAI route. The remaining targets have no fixed implementation order.
+OpenAI compatibility work and the Cursor Composer 2.5 live baseline are in place.
+Preserve those regression checks as new providers are added. Cursor compaction
+and visual lifecycle fidelity still need live verification. Antigravity and direct
+OpenCode Zen integration remain unimplemented; no next-provider order is agreed.
 
 ### First harness-bridge proof
 
 Build one Cursor-backed route using the official SDK and pending custom-tool callbacks. Exercise
 it both as a `/model` choice and as a native worker, without a Sonnet forwarder.
 Verify streamed output, a visible running worker and elapsed time, completion,
-cancellation, explicit failures, and isolation between workers. Check that an
+cancellation, explicit failures, and isolation between workers. Check that a
 Claude-executed edit occurs once and permission denials reach Cursor. Then verify
 conversation continuation and switching back to Claude. Composer 2.5 now passes
 the live callback, Read/Edit, cancellation, and switching baseline. Permission
@@ -128,7 +161,7 @@ or blanket approval for every subscription use case.
 
 ## Existing native model gateway
 
-`plugins/multi/scripts/native-model-gateway.ts` launches Claude with session-local
+`plugins/multi/src/native-model-gateway.ts` launches Claude with session-local
 model-picker settings, named external workers, and a localhost gateway.
 `lib/native-gateway.ts` separates Claude passthrough from registered GPT/Cursor routes;
 `lib/native-responses.ts` handles Messages/Responses translation and opaque

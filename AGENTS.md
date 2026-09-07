@@ -10,6 +10,9 @@ letting the selected external model or harness do the work.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) is the authoritative direction.
 [README.md](README.md) describes the current prototype and its limitations.
+For session continuity in this checkout, read `.agent/HANDOFF.md` if present;
+it records pending work and validation, while this file and the architecture
+define the product direction.
 
 - Maintain our custom Node gateway and provider-specific adapters. No CLIProxyAPI,
   Go gateway, Vercel engine migration, or user-facing backend selector is planned.
@@ -51,18 +54,19 @@ instructions. Keep new scratch research in gitignored `.agent/`.
 
 ## Current code map
 
-- `plugins/multi/scripts/native-model-gateway.ts`: experimental gateway launcher,
+- `plugins/multi/src/native-model-gateway.ts`: experimental gateway launcher,
   model-picker settings, and native OpenAI/Cursor worker registration.
-- `plugins/multi/scripts/lib/native-gateway.ts` and `native-responses.ts`:
+- `plugins/multi/src/lib/native-gateway.ts` and `native-responses.ts`:
   provider routing and Messages/Responses translation. `native-tools.ts` handles
   stable tool aliases; `native-tokens.ts` provides local count estimates.
 - `native-cursor.ts`: SDK callback lifecycle, retry cache, streaming, and isolation.
   `native-cursor-models.ts`: account catalog selections and native worker names.
-- `plugins/multi/scripts/lib/adapters/`: retained Cursor/OpenCode transport
+- `plugins/multi/src/lib/adapters/`: retained Cursor/OpenCode transport
   references, with their tests; they are not wired into the gateway yet.
-- `plugins/multi/scripts/lib/acp/` and `lib/process.mjs`: retained transport and
+- `plugins/multi/src/lib/acp/` and `lib/process.mjs`: retained transport and
   process helpers. The ACP SDK bundle is generated JavaScript, not migration input.
-- `test/unit/`: offline tests. `plugins/multi/scripts/test/`: opt-in live checks.
+- `scripts/`: repository development utilities, including the ACP bundle builder.
+- `test/unit/`: offline tests. `test/live/`: opt-in live checks.
 
 ## Development and verification
 
