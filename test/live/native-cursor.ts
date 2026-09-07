@@ -8,12 +8,12 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { Agent, Cursor } from '@cursor/sdk';
 import type { Run } from '@cursor/sdk';
-import { CursorBridge } from '../lib/native-cursor.ts';
-import { cursorModelOptions } from '../lib/native-cursor-models.ts';
-import type { MessagesRequest } from '../lib/native-responses.ts';
+import { CursorBridge } from '../../plugins/multi/src/lib/native-cursor.ts';
+import { cursorModelOptions } from '../../plugins/multi/src/lib/native-cursor-models.ts';
+import type { MessagesRequest } from '../../plugins/multi/src/lib/native-responses.ts';
 
 if (!process.env.CURSOR_API_KEY && (await Cursor.auth.status()).status !== 'logged-in') {
-  throw new Error('Cursor SDK login required: node plugins/multi/scripts/native-model-gateway.ts --cursor-login');
+  throw new Error('Cursor SDK login required: node plugins/multi/src/native-model-gateway.ts --cursor-login');
 }
 const catalog = cursorModelOptions(await Cursor.models.list());
 const selected = process.argv[2] ? catalog.find(o => o.model === process.argv[2] || o.worker === process.argv[2]) : catalog.find(o => o.selection.id.startsWith('composer-') && o.model.split('/').length === 3);
@@ -51,7 +51,7 @@ try {
   } finally { await cancellable.close(); }
 
   await writeFile(path.join(cwd, 'fixture.txt'), `alpha ${nonce}\n`);
-  const launcher = fileURLToPath(new URL('../native-model-gateway.ts', import.meta.url));
+  const launcher = fileURLToPath(new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url));
   async function run(args: string[]) {
     const child = spawn(process.execPath, args, { cwd, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, MULTI_NATIVE_TRACE: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', CLAUDE_CODE_MAX_RETRIES: '0' } });

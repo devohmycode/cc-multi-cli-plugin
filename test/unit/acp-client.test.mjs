@@ -17,12 +17,12 @@ import {
   runAcpTurn,
   listModelValueIds,
   findModelConfigOption,
-} from "../../plugins/multi/scripts/lib/acp/client.mjs";
+} from "../../plugins/multi/src/lib/acp/client.mjs";
 import {
   resolveOpenCodeAcp,
   resolveCursorAcp,
   pickLatestCursorVersionDir,
-} from "../../plugins/multi/scripts/lib/acp/resolve.mjs";
+} from "../../plugins/multi/src/lib/acp/resolve.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
@@ -524,7 +524,7 @@ test("vendor bundle exists, imports, exports the expected symbols, and records t
     repoRoot,
     "plugins",
     "multi",
-    "scripts",
+    "src",
     "lib",
     "acp",
     "vendor",

@@ -12,6 +12,6 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["plugins/multi/scripts/**/*.ts", "test/**/*.ts"],
-  "exclude": ["node_modules", "plugins/multi/scripts/lib/acp/vendor"]
+  "include": ["plugins/multi/src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules", "plugins/multi/src/lib/acp/vendor"]
 }

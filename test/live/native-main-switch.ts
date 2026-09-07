@@ -26,7 +26,7 @@ interface Waiter {
 const cwd = await mkdtemp(path.join(tmpdir(), 'native-main-switch-'));
 const nonce = randomBytes(8).toString('hex');
 await writeFile(path.join(cwd, 'fixture.txt'), `alpha ${nonce}\n`);
-const launcher = fileURLToPath(new URL('../native-model-gateway.ts', import.meta.url));
+const launcher = fileURLToPath(new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url));
 const child = spawn(process.execPath, [launcher, '--', '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
   '--model', 'sonnet', '--effort', 'high', '--allowedTools', 'Agent,Read,Edit',
   '--strict-mcp-config', '--setting-sources', '', '--disable-slash-commands', '--no-session-persistence'

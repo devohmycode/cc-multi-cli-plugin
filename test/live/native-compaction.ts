@@ -7,7 +7,7 @@ import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { OPENAI_WORKERS } from '../lib/native-gateway.ts';
+import { OPENAI_WORKERS } from '../../plugins/multi/src/lib/native-gateway.ts';
 
 interface Event {
   type: string;
@@ -32,7 +32,7 @@ const worker = positional[0] ?? 'openai-luna';
 assert(positional.length <= 1 && Object.hasOwn(OPENAI_WORKERS, worker), 'Expected a registered OpenAI worker and optional --manual-only');
 const target = OPENAI_WORKERS[worker];
 const model = `multi/openai/${target.model}`;
-const launcher = fileURLToPath(new URL('../native-model-gateway.ts', import.meta.url));
+const launcher = fileURLToPath(new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url));
 const artifacts = await mkdtemp(path.join(tmpdir(), 'native-compaction-'));
 const cwd = path.join(artifacts, 'workspace');
 await mkdir(cwd);

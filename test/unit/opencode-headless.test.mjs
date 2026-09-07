@@ -22,7 +22,7 @@ import {
   firstSessionId,
   normalizeHeadlessOutcome,
   adapter
-} from "../../plugins/multi/scripts/lib/adapters/opencode.mjs";
+} from "../../plugins/multi/src/lib/adapters/opencode.mjs";
 
 // ── role classification ───────────────────────────────────────────────────────
 

@@ -27,6 +27,7 @@ export function cursorModelOptions(catalog: ModelListItem[]): CursorModelOption[
       if (item.id === 'auto-smart' && !params?.some(p => p.id === 'optimize_for')) continue;
       const suffix = params?.map(p => `${encodeURIComponent(p.id)}=${encodeURIComponent(p.value)}`).sort().join(',');
       const model = `multi/cursor/${encodeURIComponent(item.id)}${!base && suffix ? '/' + suffix : ''}`;
+      if (options.has(model)) continue; // Empty-parameter presets must not replace the base row (notably Auto).
       const slug = item.id.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 40);
       const changed = params?.filter(p => defaultVariant?.params.find(d => d.id === p.id)?.value !== p.value) ?? [];
       const nativeWorker = base || (changed.length === 1 && ['effort', 'reasoning_effort'].includes(changed[0].id));
@@ -40,6 +41,18 @@ export function cursorModelOptions(catalog: ModelListItem[]): CursorModelOption[
     }
   }
   return [...options.values()];
+}
+
+/** Curated picker lineup; full catalog routes and worker definitions stay available. */
+export function cursorPickerOptions(options: CursorModelOption[], extraModels = ''): CursorModelOption[] {
+  const extras = extraModels.split(',').map(id => id.trim()).filter(Boolean);
+  for (const id of extras) {
+    if (!options.some(option => option.model === `multi/cursor/${encodeURIComponent(id)}`)) {
+      throw new Error(`MULTI_CURSOR_EXTRA_MODELS: model "${id}" is unavailable. Use --cursor-models and choose a selection.id from the account catalog.`);
+    }
+  }
+  return [...new Set(['default', 'grok-4.6', 'composer-2.5', ...extras])]
+    .flatMap(id => options.filter(option => option.model === `multi/cursor/${encodeURIComponent(id)}`));
 }
 
 export function cursorSelection(option: CursorModelOption, effort?: string): ModelSelection {

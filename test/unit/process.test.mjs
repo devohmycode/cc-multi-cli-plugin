@@ -5,7 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { terminateProcessTree } from "../../plugins/multi/scripts/lib/process.mjs";
+import { terminateProcessTree } from "../../plugins/multi/src/lib/process.mjs";
 
 function esrch() {
   const err = new Error("ESRCH");

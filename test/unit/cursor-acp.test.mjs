@@ -25,7 +25,7 @@ import {
   cancelAcpCursor,
   mapAcpUpdateToProgress,
   adapter
-} from "../../plugins/multi/scripts/lib/adapters/cursor.mjs";
+} from "../../plugins/multi/src/lib/adapters/cursor.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");

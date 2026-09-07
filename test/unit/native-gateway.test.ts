@@ -4,13 +4,13 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { originalToolNames, toolName, callId as wireCallId } from '../../plugins/multi/scripts/lib/native-tools.ts';
-import { estimateInputTokens } from '../../plugins/multi/scripts/lib/native-tokens.ts';
-import { createNativeGateway, readCodexAuth, OPENAI_WORKERS } from '../../plugins/multi/scripts/lib/native-gateway.ts';
-import type { GatewayFetch } from '../../plugins/multi/scripts/lib/native-gateway.ts';
-import { toResponses, fromResponses, readSse, forAnthropic } from '../../plugins/multi/scripts/lib/native-responses.ts';
+import { originalToolNames, toolName, callId as wireCallId } from '../../plugins/multi/src/lib/native-tools.ts';
+import { estimateInputTokens } from '../../plugins/multi/src/lib/native-tokens.ts';
+import { createNativeGateway, readCodexAuth, OPENAI_WORKERS } from '../../plugins/multi/src/lib/native-gateway.ts';
+import type { GatewayFetch } from '../../plugins/multi/src/lib/native-gateway.ts';
+import { toResponses, fromResponses, readSse, forAnthropic } from '../../plugins/multi/src/lib/native-responses.ts';
 import type { MessagesRequest, MessagesResponse, RequestMessage, ResponsesInputContent, ResponsesInputItem,
-  ResponsesRequest, StreamEventBody, StreamEventName } from '../../plugins/multi/scripts/lib/native-responses.ts';
+  ResponsesRequest, StreamEventBody, StreamEventName } from '../../plugins/multi/src/lib/native-responses.ts';
 
 /** A test double for one OpenAI Responses SSE event; sent as JSON, never typed upstream. */
 interface SseEvent { type: string; [field: string]: unknown }

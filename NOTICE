@@ -5,20 +5,20 @@ This product includes software developed by:
 
 - OpenAI (https://openai.com), from the codex-plugin-cc project
   (https://github.com/openai/codex-plugin-cc), licensed under Apache 2.0.
-  Parts of the retained runtime under plugins/multi/scripts/ are derived from
+  Parts of the retained runtime under plugins/multi/src/ are derived from
   this work.
 
 - sakibsadmanshajib (https://github.com/sakibsadmanshajib), from the
   gemini-plugin-cc project
   (https://github.com/sakibsadmanshajib/gemini-plugin-cc), licensed under
-  Apache 2.0. The ACP transport layer (plugins/multi/scripts/lib/acp/) is
+  Apache 2.0. The ACP transport layer (plugins/multi/src/lib/acp/) is
   derived from this work.
 
 - blowmage (https://github.com/blowmage), from the cursor-agent-acp-npm
   project (https://github.com/blowmage/cursor-agent-acp-npm), licensed under
   MIT. The Cursor ACP adapter is informed by this work.
 
-plugins/multi/scripts/lib/acp/vendor/acp-sdk.bundle.mjs is a generated bundle of
+plugins/multi/src/lib/acp/vendor/acp-sdk.bundle.mjs is a generated bundle of
 the official Agent Client Protocol SDK (https://agentclientprotocol.com,
 Apache 2.0) and its dependencies, including zod (https://zod.dev, MIT).
 
@@ -33,3 +33,7 @@ implementation from that project is included.
 The Cursor integration depends on the official @cursor/sdk package (Anysphere).
 That dependency has its own LICENSE.md and Cursor terms; this repository's
 Apache 2.0 license does not relicense the SDK. No SDK implementation is vendored.
+
+The automatic reviewer includes OpenAI Codex Guardian policy assets under
+plugins/multi/src/lib/guardian/, from https://github.com/openai/codex,
+licensed under Apache 2.0. Their upstream LICENSE and NOTICE are included there.

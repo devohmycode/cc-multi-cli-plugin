@@ -17,7 +17,7 @@ import {
   parseJsonResult,
   normalizeHeadlessOutcome,
   adapter
-} from "../../plugins/multi/scripts/lib/adapters/cursor.mjs";
+} from "../../plugins/multi/src/lib/adapters/cursor.mjs";
 
 // ── role classification ───────────────────────────────────────────────────────
 

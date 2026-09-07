@@ -10,9 +10,14 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && node --test \"test/unit/**/*.test.mjs\" \"test/unit/**/*.test.ts\"",
-    "test:live:compaction": "node plugins/multi/scripts/test/native-compaction.ts",
-    "test:live:cursor": "node plugins/multi/scripts/test/native-cursor.ts",
-    "build:acp-vendor": "node scripts/build-acp-vendor.mjs"
+    "test:live:compaction": "node test/live/native-compaction.ts",
+    "test:live:cursor": "node test/live/native-cursor.ts",
+    "test:live:auto-mode": "node test/live/native-auto-mode.ts",
+    "test:live:provider-approval": "node test/live/native-provider-approval.ts",
+    "test:live:reviewer": "node test/live/native-reviewer.ts",
+    "test:live:approval-worker": "node test/live/native-approval-worker.ts",
+    "build:acp-vendor": "node scripts/build-acp-vendor.mjs",
+    "test:live:permissions": "node test/live/native-permissions.ts"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",

@@ -6,8 +6,8 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { OPENAI_WORKERS } from '../lib/native-gateway.ts';
-import { cursorModelOptions } from '../lib/native-cursor-models.ts';
+import { OPENAI_WORKERS } from '../../plugins/multi/src/lib/native-gateway.ts';
+import { cursorModelOptions } from '../../plugins/multi/src/lib/native-cursor-models.ts';
 
 /** The Claude Code stream-json events this reproducer inspects. */
 interface ClaudeEvent {
@@ -27,7 +27,7 @@ const worker = process.argv[2] ?? 'openai-native';
 const cursor = worker.startsWith('cursor-')
   ? cursorModelOptions(await (await import('@cursor/sdk')).Cursor.models.list()).find(option => option.nativeWorker && option.worker === worker) : undefined;
 assert(cursor || Object.hasOwn(OPENAI_WORKERS, worker), 'Pass a registered native worker name (--cursor-models lists Cursor workers)');
-const launcher = fileURLToPath(new URL('../native-model-gateway.ts', import.meta.url));
+const launcher = fileURLToPath(new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url));
 const cwd = await mkdtemp(path.join(os.tmpdir(), 'native-live-smoke-'));
 const nonce = randomBytes(6).toString('hex');
 await writeFile(path.join(cwd, 'fixture.txt'), `alpha ${nonce}\n`);

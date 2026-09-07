@@ -25,7 +25,7 @@ import {
   mapAcpUpdateToProgress,
   READ_ONLY_PERMISSION_FLOOR,
   adapter
-} from "../../plugins/multi/scripts/lib/adapters/opencode.mjs";
+} from "../../plugins/multi/src/lib/adapters/opencode.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");

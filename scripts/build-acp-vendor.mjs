@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 /**
  * Vendors the ACP SDK (+ its zod peer dep) into a single committed ESM bundle so
- * the plugin ships with ZERO runtime dependencies — nothing is installed at
- * plugin-install time. The runtime (`lib/acp/client.mjs`) imports the bundle, not
- * the npm package.
+ * the retained ACP transport needs no separate SDK installation at runtime.
+ * The runtime (`lib/acp/client.mjs`) imports the bundle, not the npm package.
  *
- * Output: plugins/multi/scripts/lib/acp/vendor/acp-sdk.bundle.mjs
+ * Output: plugins/multi/src/lib/acp/vendor/acp-sdk.bundle.mjs
  *   - format=esm, platform=node, target=node24 (the SDK is ESM-only)
  *   - external: node:* builtins only (everything else, incl. zod, is inlined)
  *   - a banner comment records the exact @agentclientprotocol/sdk version that
@@ -32,7 +31,7 @@ const repoRoot = join(here, "..");
 const sdkPkgPath = join(dirname(require.resolve("@agentclientprotocol/sdk")), "..", "package.json");
 const sdkVersion = JSON.parse(read(sdkPkgPath, "utf8")).version;
 
-const outDir = join(repoRoot, "plugins", "multi", "scripts", "lib", "acp", "vendor");
+const outDir = join(repoRoot, "plugins", "multi", "src", "lib", "acp", "vendor");
 const outFile = join(outDir, "acp-sdk.bundle.mjs");
 
 // A tiny entry that re-exports exactly the symbols the runtime needs. Keeping the
