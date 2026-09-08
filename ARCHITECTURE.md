@@ -51,7 +51,7 @@ each provider's current capabilities; do not silently substitute another model.
 | Target | Intended route | Current state in this checkout |
 | --- | --- | --- |
 | OpenAI | Direct model adapter using the saved Codex login | Main-model switching and native GPT workers work as an experimental gateway; compatibility gaps remain. |
-| Cursor | Official SDK with asynchronous callbacks into Claude's tool loop | Experimental: Composer 2.5 passed live callback, main-model and worker Read/Edit, cancellation, and Cursor → Claude → Cursor with saved history. Other models and compaction unverified. |
+| Cursor | Official SDK with asynchronous callbacks into Claude's tool loop | Experimental: Composer 2.5 passed live callback, main-model and worker Read/Edit, cancellation, and Cursor → Claude → Cursor with saved history. Composer main-session manual/repeated/automatic compaction and disk resume also pass; other-model fidelity and subagent compaction remain unverified. |
 | Antigravity | Real `agy` CLI with its native login and documented streaming | Future harness bridge; the old transcript-recovery adapter was removed. |
 | OpenCode | Real CLI delegation; direct Zen endpoints where appropriate | Headless/ACP transport references are retained; direct Zen gateway integration is not implemented. |
 | Local models via llama.cpp | Prefer its Anthropic-compatible Messages endpoint | Planned; validate model/tool/template compatibility before adding translation. |
@@ -70,8 +70,16 @@ preserving the old interface unless a task specifically calls for it.
   auto-mode experience. Disable auto mode when neither approval route is available,
   including after provider switches; sandboxing alone does not establish that
   support. Do not silently fall back to unauthenticated Anthropic classification or
-  unrestricted execution. The OpenAI adapter and capability guard are implemented; exact native mode
+  unrestricted execution. The OpenAI adapter, experimental Cursor Bash reviewer, and capability guard are implemented; exact native mode
   switching remains limited by the unmodified CLI interface.
+- Provider auto-review is exclusively the no-Claude-access edge case. It requires
+  authentication with the originating agent's provider and reviews only that
+  provider's tool requests: OpenAI for OpenAI, Cursor for Cursor via its SDK.
+  This applies to main agents and subagents; resolve the provider from the agent
+  issuing the pending tool call, not the parent model. Subagents inherit the
+  parent's auto permission mode, but not a different provider's reviewer.
+  Provider connection alone does not activate review, and a provider reviewer
+  must never substitute for another provider's missing review capability.
 - Preserve native auto-mode semantics: provider-approved actions proceed and
   provider-denied actions are blocked. Explicit ask rules and other native manual
   approval requirements retain Claude Code's ordinary permission prompt. Reproduce
@@ -80,9 +88,15 @@ preserving the old interface unless a task specifically calls for it.
   a second command-safety parser or review every tool from PreToolUse.
 - The launcher preserves native Anthropic classification when Claude reports an
   existing credential. Otherwise it discovers OpenAI's subscription reviewer and
-  enables the runtime adapter automatically. Native permission filtering owns
+  the supported Cursor SDK review adapter, selecting per originating provider. Native permission filtering owns
   escalation. The reviewer uses the provider policy, current request/transcript,
   current tool cwd, and bounded read-only filesystem investigation.
+- Cursor review is verdict-only, using the same classifier-response adapter as
+  OpenAI. An isolated SDK process submits the exact pending Bash action to native
+  Auto-review without executing it. Source-pinned hooks correlate native allowance
+  and rejection; model prose is not a verdict. SDK drift and unsupported actions
+  fail closed. This is separate from the ordinary inference callback bridge and
+  does not redesign Claude Code's tool execution or introduce Sand/MCP review.
 - Review contexts are scoped to session and worker. Two-stage classification
   reuses only a matching denial; working-model classifier retries cannot bypass
   review. Unknown capability, errors, or missing context cannot grant approval.
@@ -122,8 +136,9 @@ preserving the old interface unless a task specifically calls for it.
 ### Next work
 
 OpenAI compatibility work and the Cursor Composer 2.5 live baseline are in place.
-Preserve those regression checks as new providers are added. Cursor compaction
-and visual lifecycle fidelity still need live verification. Antigravity and direct
+Preserve those regression checks as new providers are added. Composer main-session
+compaction is verified; subagent compaction and visual lifecycle fidelity still
+need live verification. Antigravity and direct
 OpenCode Zen integration remain unimplemented; no next-provider order is agreed.
 
 ### First harness-bridge proof
@@ -135,8 +150,9 @@ cancellation, explicit failures, and isolation between workers. Check that a
 Claude-executed edit occurs once and permission denials reach Cursor. Then verify
 conversation continuation and switching back to Claude. Composer 2.5 now passes
 the live callback, Read/Edit, cancellation, and switching baseline. Permission
-denial/isolation/retry behavior has offline coverage; UI timing and compaction
-need additional live checks before claiming full fidelity.
+denial/isolation/retry behavior has offline coverage. Main-session manual, repeated,
+and automatic compaction passes with saved-session recall and native edits; UI
+timing and subagent compaction need additional live checks before claiming full fidelity.
 
 The Cursor bridge keeps pending callbacks and retry responses in memory. After
 completion or restart it reconstructs an SDK agent from Claude's authoritative
@@ -163,13 +179,19 @@ or blanket approval for every subscription use case.
 
 `plugins/multi/src/native-model-gateway.ts` launches Claude with session-local
 model-picker settings, named external workers, and a localhost gateway.
-`lib/native-gateway.ts` separates Claude passthrough from registered GPT/Cursor routes;
-`lib/native-responses.ts` handles Messages/Responses translation and opaque
-reasoning state. See the [README](README.md#experimental-native-openai-models)
-for usage, tested behavior, and limitations. This code is the starting point for
-the SDK bridge. `native-cursor.ts` owns callback exchanges; `native-cursor-models.ts`
-builds model/worker choices from the account catalog. The retained headless/ACP
-adapters remain references, not an optional Cursor backend.
+`gateway/server.ts` separates Claude passthrough from registered GPT/Cursor routes.
+`gateway/messages.ts` defines the shared Claude Messages contract; approval protocol
+and capability handling live alongside it in `gateway/`.
+`providers/openai/responses.ts` handles Messages/Responses translation and opaque
+reasoning state; authentication, model registration, counting, and the reviewer
+are adjacent OpenAI modules. `providers/cursor/bridge.ts` owns callback exchanges;
+`providers/cursor/models.ts` builds model/worker choices from the account catalog.
+The Cursor bridge still reuses OpenAI normalization/counting helpers. That existing
+coupling remains explicit; the shared Messages types no longer live in the OpenAI
+translator. See the [README](README.md#experimental-native-openai-models) for usage,
+tested behavior, and limitations. The retained headless/ACP adapters live under
+`transports/` as references, not an optional Cursor backend. All paths in this
+paragraph are relative to `plugins/multi/src/`.
 
 ## Earlier companion implementation — historical reference
 

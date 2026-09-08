@@ -6,6 +6,99 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Default Cursor model routes, named workers and catalog-based live checks to
+  explicitly advertised non-Fast parameters, even when the account default is Fast.
+
+### Native Cursor Bash review
+
+- Connect native Cursor allow/deny to the existing Claude Code classifier adapter
+  for Cursor main agents and workers when Claude access is absent.
+- Use an isolated SDK 1.0.31 process with source-pinned in-memory hooks; pending
+  commands never execute in the reviewer. Correlate native decisions to the exact
+  command, cwd and tool call; model text is never accepted as a verdict.
+- Reject SDK drift, unsupported review operations and missing native proof. Initial
+  support is Bash only. No Sand, alternate login, or external MCP review route.
+- Add live native allow/deny and classifier-response checks, including a worker
+  authorization case and assertions that reviewed commands did not execute.
+- Match Claude's removal of a redundant current-directory Bash prefix during
+  classification while rejecting other directory changes and ambiguous workers.
+
+### Automatic-review routing corrections
+
+- Reject native classifier retries addressed to ordinary external inference when
+  no provider reviewer is enabled; standard Claude classifier requests retain
+  subscription passthrough.
+- Require a confirmed signed-out Claude auth status before enabling provider-only
+  review. Auth-status errors no longer silently select an external reviewer.
+
+### Cursor context and lifecycle
+
+- Estimate each Messages request from its submitted SDK prompt, tool schemas, and
+  image allowance; stop treating cumulative SDK usage as current context size.
+- Validate and snapshot callback arguments as finite JSON objects before exposing
+  them to Claude. Preserve arbitrary tool schemas.
+- Keep shared inference alive while any identical request remains connected, and
+  bound SDK cancellation waits during shutdown.
+- Add a live callback/image capability check; Auto, Composer 2.5 and Grok 4.6
+  passed plain callbacks and a valid red-image interpretation probe.
+- Extend the compaction check to account Cursor models. Composer 2.5 passed
+  manual/repeated/automatic compaction, saved-session recall, and native edits.
+
+### Cursor response recovery
+
+- Preserve terminal response text when Cursor streamed only a prefix, without
+  repeating text already delivered across tool callbacks.
+- Allow identical requests to retry SDK startup failures before inference starts;
+  retain failed continuations so retries cannot repeat tool actions.
+- Preserve structured Cursor error status and correlation details through the
+  gateway, with credentials redacted from surfaced SDK diagnostics.
+
+### Cursor automatic-review investigation
+
+- Verified the published SDK 1.0.31 custom/MCP callback paths with inert live
+  probes. Documented the missing correlated review/capability contract; retained
+  the existing block for Cursor auto mode without Anthropic credentials.
+- Follow-up research demonstrated native shell executor callbacks without MCP:
+  with review guidance forwarded in request context, an allowed control reached
+  an inert executor while a blocked canary did not. No production adapter enabled;
+  positive verdicts, availability, and Claude permission ordering remain open.
+- Found a structured native rejection in checkpoint tool results. The separate
+  bundled classification RPC requires a Sand session and rejects SDK-key auth;
+  the native reviewer adapter remains unimplemented.
+
+### Runtime organization
+
+- Replaced the catch-all `src/lib/native-*` layout with `gateway/`,
+  `providers/openai/`, `providers/cursor/`, and retained `transports/` modules.
+  Moved shared Claude Messages types out of the OpenAI translator and OpenAI
+  authentication/model registration out of the HTTP server. The launcher path
+  remains `plugins/multi/src/native-model-gateway.ts`.
+- Updated direct imports, permission-hook and policy paths, ACP build/drift checks,
+  Knip, TypeScript, documentation, and license notices. No compatibility wrappers
+  or intended provider behavior changes.
+
+### Development tooling
+
+- Cleared all lint violations across runtime code, retained transports, and tests.
+  Split provider routing, request validation, streaming state, Cursor continuation,
+  reviewer parsing, and launcher configuration into focused helpers. Added shared
+  live-test event types and replaced terminal escape parsing with Node's utility.
+  Strict rules remain enabled; only intentional ACP control-byte regexes have
+  narrowly documented suppressions.
+
+- Began structural lint cleanup: separated approval-envelope/stage parsing and
+  denial-cache insertion, Cursor catalog variants and worker deduplication, and
+  Windows/POSIX process termination. Removed unchecked assertions from token
+  counting and Cursor/approval unit tests; added cache-eviction and Windows
+  cancellation regression coverage. Strict lint rules remain unchanged.
+- Added pinned Biome and Knip development dependencies and a shared `npm run check`
+  CI command. Biome enforces formatting, braces, single variable declarations,
+  no nested ternaries/explicit `any`/non-null assertions, and cognitive complexity
+  at most 15; tests follow the same rules. Lint violations fail the check.
+- Formatted hand-written source and tests, applied mechanical style fixes, removed
+  unused process helpers, and made unused exported types/constants private. Knip
+  retains the architecture's Cursor/OpenCode reference entry points.
+
 ### Native permission regression contract
 
 - Added `test:live:permissions` for default, accept-edits, plan, don't-ask, and bypass modes through the ordinary OpenAI/Cursor launcher. Checks native dialogs, pre-approval file state, exact-once effects, denial results, provider attribution, and absence of classifier traffic.

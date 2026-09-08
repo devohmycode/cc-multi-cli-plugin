@@ -11,18 +11,27 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && node --test \"test/unit/**/*.test.mjs\" \"test/unit/**/*.test.ts\"",
     "test:live:compaction": "node test/live/native-compaction.ts",
+    "test:live:cursor-review": "node test/live/native-cursor-review.ts",
     "test:live:cursor": "node test/live/native-cursor.ts",
+    "test:live:cursor-capabilities": "node test/live/native-cursor-capabilities.ts",
     "test:live:auto-mode": "node test/live/native-auto-mode.ts",
     "test:live:provider-approval": "node test/live/native-provider-approval.ts",
     "test:live:reviewer": "node test/live/native-reviewer.ts",
     "test:live:approval-worker": "node test/live/native-approval-worker.ts",
     "build:acp-vendor": "node scripts/build-acp-vendor.mjs",
-    "test:live:permissions": "node test/live/native-permissions.ts"
+    "test:live:permissions": "node test/live/native-permissions.ts",
+    "format": "biome format --write .",
+    "lint": "biome check --error-on-warnings .",
+    "lint:fix": "biome check --write .",
+    "check:unused": "knip",
+    "check": "npm run lint && npm run check:unused && npm test"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",
+    "@biomejs/biome": "2.5.12",
     "@types/node": "^26.4.1",
     "esbuild": "^0.28.0",
+    "knip": "6.34.0",
     "typescript": "^7.0.2",
     "zod": "^4.4.3"
   },

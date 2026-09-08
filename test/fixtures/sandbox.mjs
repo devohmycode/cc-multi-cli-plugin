@@ -4,10 +4,10 @@
 // detached broker holding the directory open on Windows (see ARCHITECTURE.md →
 // "Broker lifecycle"), so cleanup swallows EBUSY rather than failing the test.
 
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 /**
  * Create an isolated git repo seeded with files.
@@ -18,19 +18,19 @@ import { execFileSync } from "node:child_process";
  * @returns {{ dir: string, write(rel: string, content: string): void, cleanup(): void }}
  */
 export function createSandbox({ files = {}, commitFirst = true } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcli-sbx-"));
-  const git = (...args) => execFileSync("git", ["-C", dir, ...args], { stdio: "pipe" });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcli-sbx-'));
+  const git = (...args) => execFileSync('git', ['-C', dir, ...args], { stdio: 'pipe' });
 
-  git("init", "-q");
-  git("config", "user.email", "test@example.com");
-  git("config", "user.name", "test");
+  git('init', '-q');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'test');
 
   for (const [rel, content] of Object.entries(files)) {
     fs.writeFileSync(path.join(dir, rel), content);
   }
   if (commitFirst) {
-    git("add", "-A");
-    git("commit", "-qm", "fixture");
+    git('add', '-A');
+    git('commit', '-qm', 'fixture');
   }
 
   return {

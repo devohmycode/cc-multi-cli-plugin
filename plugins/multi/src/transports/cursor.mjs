@@ -23,14 +23,13 @@
  * tools normally and is cancelled by killing the process tree.
  */
 
-import { execSync } from "node:child_process";
-import readline from "node:readline";
-import process from "node:process";
-
-import { buildSpawnEnvironment, spawnCommand } from "../process.mjs";
-import { sanitizeDiagnosticMessage } from "../acp/diagnostics.mjs";
-import { runAcpTurn } from "../acp/client.mjs";
-import { resolveCursorAcp } from "../acp/resolve.mjs";
+import { execSync } from 'node:child_process';
+import process from 'node:process';
+import readline from 'node:readline';
+import { acpAdapterResult, runAcpTurn } from './acp/client.mjs';
+import { sanitizeDiagnosticMessage } from './acp/diagnostics.mjs';
+import { resolveCursorAcp } from './acp/resolve.mjs';
+import { buildSpawnEnvironment, spawnCommand } from './process.mjs';
 
 // ─── Binary resolution ────────────────────────────────────────────────────────
 //
@@ -40,35 +39,35 @@ import { resolveCursorAcp } from "../acp/resolve.mjs";
 //   3. Well-known Windows fallback path
 
 const CURSOR_AGENT_WINDOWS_FALLBACK =
-  "C:/Users/" +
-  (process.env.USERNAME ?? process.env.USER ?? "WalshLab") +
-  "/AppData/Local/cursor-agent/agent.cmd";
+  'C:/Users/' +
+  (process.env.USERNAME ?? process.env.USER ?? 'WalshLab') +
+  '/AppData/Local/cursor-agent/agent.cmd';
 
 function findCursorBinary() {
   // User override always wins.
   if (process.env.CURSOR_AGENT_PATH) {
-    return process.env.CURSOR_AGENT_PATH.replace(/\\/g, "/");
+    return process.env.CURSOR_AGENT_PATH.replace(/\\/g, '/');
   }
 
   // Try `where` (Windows) / `which` (Unix) to find the binary on PATH.
-  const whereCmd = process.platform === "win32" ? "where agent" : "which agent";
+  const whereCmd = process.platform === 'win32' ? 'where agent' : 'which agent';
   try {
-    const found = execSync(whereCmd, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] })
+    const found = execSync(whereCmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] })
       .split(/\r?\n/)
       .filter(Boolean)[0];
     if (found) {
-      return found.replace(/\\/g, "/");
+      return found.replace(/\\/g, '/');
     }
   } catch {
     // Not on PATH — fall through to hardcoded Windows path.
   }
 
-  if (process.platform === "win32") {
+  if (process.platform === 'win32') {
     return CURSOR_AGENT_WINDOWS_FALLBACK;
   }
 
   // Non-Windows: return plain name and trust PATH.
-  return "agent";
+  return 'agent';
 }
 
 // ─── Model IDs (informational) ────────────────────────────────────────────────
@@ -83,18 +82,18 @@ function findCursorBinary() {
 // ─── Role → headless flags ────────────────────────────────────────────────────
 
 const READ_ONLY_ROLES = new Set([
-  "research",
-  "researcher",
-  "explore",
-  "explorer",
-  "ask",
-  "planner",
-  "plan"
+  'research',
+  'researcher',
+  'explore',
+  'explorer',
+  'ask',
+  'planner',
+  'plan',
 ]);
 
 /** Read-only roles run in `--mode ask` and never write files. */
 export function isReadOnlyRole(role) {
-  return READ_ONLY_ROLES.has(String(role ?? "").toLowerCase());
+  return READ_ONLY_ROLES.has(String(role ?? '').toLowerCase());
 }
 
 /**
@@ -102,7 +101,7 @@ export function isReadOnlyRole(role) {
  * so we can surface live progress and derive file/command activity per turn.
  */
 export function headlessOutputFormat(role) {
-  return isReadOnlyRole(role) ? "json" : "stream-json";
+  return isReadOnlyRole(role) ? 'json' : 'stream-json';
 }
 
 /**
@@ -111,29 +110,29 @@ export function headlessOutputFormat(role) {
  * @param {{ role?: string, model?: string, sessionId?: string|null, cwd?: string, outputFormat?: string }} [opts]
  * @returns {string[]}
  */
-export function buildHeadlessArgs({ role = "delegate", model, sessionId, cwd, outputFormat } = {}) {
+export function buildHeadlessArgs({ role = 'delegate', model, sessionId, cwd, outputFormat } = {}) {
   const fmt = outputFormat ?? headlessOutputFormat(role);
-  const args = ["-p", "--output-format", fmt];
-  if (fmt === "stream-json") {
-    args.push("--stream-partial-output");
+  const args = ['-p', '--output-format', fmt];
+  if (fmt === 'stream-json') {
+    args.push('--stream-partial-output');
   }
-  const resolvedModel = model && String(model).trim() ? String(model).trim() : "auto";
-  args.push("--model", resolvedModel);
+  const resolvedModel = model && String(model).trim() ? String(model).trim() : 'auto';
+  args.push('--model', resolvedModel);
   if (isReadOnlyRole(role)) {
     // Read-only Q&A/planning. --force keeps the built-in WebFetch tool from
     // stalling on the approval gate; --mode ask refuses edits even under --force.
-    args.push("--mode", "ask", "--force");
+    args.push('--mode', 'ask', '--force');
   } else {
     // Default agent mode: full tools incl. write + shell. --force auto-approves
     // tool execution; --trust (headless-only) trusts the workspace without a prompt.
-    args.push("--force", "--trust");
+    args.push('--force', '--trust');
   }
   if (cwd) {
-    args.push("--workspace", cwd);
+    args.push('--workspace', cwd);
   }
   if (sessionId) {
     // Resume a prior session — context is preserved server-side.
-    args.push("--resume", String(sessionId));
+    args.push('--resume', String(sessionId));
   }
   return args;
 }
@@ -150,33 +149,38 @@ export function buildHeadlessArgs({ role = "delegate", model, sessionId, cwd, ou
 //   https://forum.cursor.com/t/shell-commands-in-agent-mode-are-not-returning-output/155544
 //   https://forum.cursor.com/t/agent-command-execution-uses-wsl-instead-of-the-windows-default-integrated-terminal-git-bash/160196
 
-const KNOWN_BROKEN_CURSOR_VERSIONS = new Set([
-  "2026.04.17-787b533",
-  "2026.04.29-c83a488"
-]);
+const KNOWN_BROKEN_CURSOR_VERSIONS = new Set(['2026.04.17-787b533', '2026.04.29-c83a488']);
 let warnedAboutCursorVersion = false;
 // The version probe shells out (`agent --version`); run it at most once per
 // process so an --until-done loop doesn't pay a blocking execSync per turn.
 let cursorVersionProbed = false;
 
 function maybeWarnAboutCursorVersion(versionString) {
-  if (warnedAboutCursorVersion) return;
-  if (!versionString) return;
+  if (warnedAboutCursorVersion) {
+    return;
+  }
+  if (!versionString) {
+    return;
+  }
   const v = String(versionString).trim();
-  if (!KNOWN_BROKEN_CURSOR_VERSIONS.has(v)) return;
+  if (!KNOWN_BROKEN_CURSOR_VERSIONS.has(v)) {
+    return;
+  }
   warnedAboutCursorVersion = true;
   process.stderr.write(
     `[cursor] Note: agent ${v} predates the headless MCP-regression fix (~late May 2026). ` +
-    `Update Cursor (\`agent update\`) if MCP tools don't fire. Separately, Cursor's shell tool ` +
-    `can hang on Windows (host-PATH/WSL); this plugin defers verification to the caller, so it ` +
-    `does not affect file writes.\n`
+      `Update Cursor (\`agent update\`) if MCP tools don't fire. Separately, Cursor's shell tool ` +
+      `can hang on Windows (host-PATH/WSL); this plugin defers verification to the caller, so it ` +
+      `does not affect file writes.\n`,
   );
 }
 
 // ─── Stream event helpers ─────────────────────────────────────────────────────
 
 function emitStreamEvent(onStream, event) {
-  if (!onStream) return;
+  if (!onStream) {
+    return;
+  }
   try {
     onStream(event);
   } catch {
@@ -186,18 +190,22 @@ function emitStreamEvent(onStream, event) {
 
 /** Extract the tool kind from a stream-json tool_call object (keyed e.g. `shellToolCall`). */
 export function streamToolKind(toolCallObj) {
-  if (!toolCallObj || typeof toolCallObj !== "object") return "tool";
-  const key = Object.keys(toolCallObj)[0] ?? "tool";
-  return key.replace(/ToolCall$/, "") || "tool";
+  if (!toolCallObj || typeof toolCallObj !== 'object') {
+    return 'tool';
+  }
+  const key = Object.keys(toolCallObj)[0] ?? 'tool';
+  return key.replace(/ToolCall$/, '') || 'tool';
 }
 
 function extractAssistantText(event) {
   const content = event?.message?.content;
-  if (!Array.isArray(content)) return "";
+  if (!Array.isArray(content)) {
+    return '';
+  }
   return content
-    .filter((c) => c?.type === "text" && typeof c.text === "string")
+    .filter((c) => c?.type === 'text' && typeof c.text === 'string')
     .map((c) => c.text)
-    .join("");
+    .join('');
 }
 
 /**
@@ -209,14 +217,22 @@ function extractAssistantText(event) {
  * @returns {{ type: string, [k: string]: any } | null}
  */
 export function mapStreamEventToProgress(event) {
-  if (!event || typeof event !== "object") return null;
-  if (event.type === "tool_call" && event.subtype === "started") {
-    const kind = streamToolKind(event.tool_call);
-    return { type: "phase", message: `Cursor: ${sanitizeDiagnosticMessage(kind) || "tool"}`, phase: kind };
+  if (!event || typeof event !== 'object') {
+    return null;
   }
-  if (event.type === "assistant") {
+  if (event.type === 'tool_call' && event.subtype === 'started') {
+    const kind = streamToolKind(event.tool_call);
+    return {
+      type: 'phase',
+      message: `Cursor: ${sanitizeDiagnosticMessage(kind) || 'tool'}`,
+      phase: kind,
+    };
+  }
+  if (event.type === 'assistant') {
     const text = extractAssistantText(event);
-    if (text) return { type: "message_chunk", text };
+    if (text) {
+      return { type: 'message_chunk', text };
+    }
   }
   return null;
 }
@@ -236,16 +252,18 @@ export function deriveFileChanges(events) {
   const out = [];
   const seen = new Set();
   for (const e of events ?? []) {
-    if (e?.type !== "tool_call" || e.subtype !== "completed") continue;
-    const tc = e.tool_call;
-    if (!tc || typeof tc !== "object") continue;
-    const key = Object.keys(tc)[0] ?? "";
-    if (!EDIT_TOOL_PATTERN.test(key)) continue;
-    const inner = tc[key] ?? {};
-    const path = inner.args?.path ?? inner.result?.success?.path ?? null;
-    if (!path || seen.has(path)) continue;
+    if (e?.type !== 'tool_call' || e.subtype !== 'completed') {
+      continue;
+    }
+    const change = completedFileChange(e.tool_call);
+    if (!change) {
+      continue;
+    }
+    const { path, action } = change;
+    if (!path || seen.has(path)) {
+      continue;
+    }
     seen.add(path);
-    const action = /delete/i.test(key) ? "delete" : /create/i.test(key) ? "create" : "modify";
     out.push({ path, action });
   }
   return out;
@@ -255,11 +273,15 @@ export function deriveFileChanges(events) {
 export function deriveCommandExecutions(events) {
   const out = [];
   for (const e of events ?? []) {
-    if (e?.type !== "tool_call" || e.subtype !== "completed") continue;
+    if (e?.type !== 'tool_call' || e.subtype !== 'completed') {
+      continue;
+    }
     const tc = e.tool_call;
-    const key = tc && typeof tc === "object" ? Object.keys(tc)[0] : null;
-    if (key !== "shellToolCall") continue;
-    const command = tc.shellToolCall?.args?.command ?? "";
+    const key = tc && typeof tc === 'object' ? Object.keys(tc)[0] : null;
+    if (key !== 'shellToolCall') {
+      continue;
+    }
+    const command = tc.shellToolCall?.args?.command ?? '';
     out.push({ command });
   }
   return out;
@@ -269,7 +291,9 @@ export function deriveCommandExecutions(events) {
 export function deriveToolCalls(events) {
   const out = [];
   for (const e of events ?? []) {
-    if (e?.type !== "tool_call" || e.subtype !== "completed") continue;
+    if (e?.type !== 'tool_call' || e.subtype !== 'completed') {
+      continue;
+    }
     out.push({ name: streamToolKind(e.tool_call) });
   }
   return out;
@@ -277,27 +301,37 @@ export function deriveToolCalls(events) {
 
 function firstSessionId(events) {
   for (const e of events ?? []) {
-    if (e && typeof e === "object" && e.session_id) return e.session_id;
+    if (e && typeof e === 'object' && e.session_id) {
+      return e.session_id;
+    }
   }
   return null;
 }
 
 /** Parse the single result object emitted by `--output-format json`. */
 export function parseJsonResult(text) {
-  const trimmed = String(text ?? "").trim();
-  if (!trimmed) return null;
+  const trimmed = String(text ?? '').trim();
+  if (!trimmed) {
+    return null;
+  }
   try {
     const obj = JSON.parse(trimmed);
-    if (obj && typeof obj === "object") return obj;
+    if (obj && typeof obj === 'object') {
+      return obj;
+    }
   } catch {
     // Fall through to a line scan for the result object.
   }
   for (const line of trimmed.split(/\r?\n/).reverse()) {
     const l = line.trim();
-    if (!l.startsWith("{")) continue;
+    if (!l.startsWith('{')) {
+      continue;
+    }
     try {
       const obj = JSON.parse(l);
-      if (obj?.type === "result") return obj;
+      if (obj?.type === 'result') {
+        return obj;
+      }
     } catch {
       // keep scanning
     }
@@ -315,29 +349,45 @@ export function parseJsonResult(text) {
  *
  * @returns {{ sessionId: string|null, text: string, error: object|null, status: number, fileChanges: Array, commandExecutions: Array, toolCalls: Array }}
  */
-export function normalizeHeadlessOutcome({ events = [], stdoutText = "", stderr = "", exitCode = 0, outputFormat = "json" } = {}) {
-  const resultObj = outputFormat === "stream-json"
-    ? (events.filter((e) => e?.type === "result").pop() ?? null)
-    : parseJsonResult(stdoutText);
+export function normalizeHeadlessOutcome({
+  events = [],
+  stdoutText = '',
+  stderr = '',
+  exitCode = 0,
+  outputFormat = 'json',
+} = {}) {
+  const resultObj =
+    outputFormat === 'stream-json'
+      ? (events.filter((e) => e?.type === 'result').pop() ?? null)
+      : parseJsonResult(stdoutText);
 
   const fileChanges = deriveFileChanges(events);
   const commandExecutions = deriveCommandExecutions(events);
   const toolCalls = deriveToolCalls(events);
 
   if (!resultObj) {
-    const message = (stderr || "").trim()
-      || (stdoutText || "").trim()
-      || `Cursor produced no result (exit ${exitCode}).`;
-    return { sessionId: firstSessionId(events), text: "", error: { message }, status: exitCode || 1, fileChanges, commandExecutions, toolCalls };
+    const message =
+      (stderr || '').trim() ||
+      (stdoutText || '').trim() ||
+      `Cursor produced no result (exit ${exitCode}).`;
+    return {
+      sessionId: firstSessionId(events),
+      text: '',
+      error: { message },
+      status: exitCode || 1,
+      fileChanges,
+      commandExecutions,
+      toolCalls,
+    };
   }
 
-  const text = typeof resultObj.result === "string" ? resultObj.result : "";
+  const text = typeof resultObj.result === 'string' ? resultObj.result : '';
   const sessionId = resultObj.session_id ?? firstSessionId(events) ?? null;
   const isError = Boolean(resultObj.is_error) || exitCode !== 0;
   const error = isError
-    ? { message: text || (stderr || "").trim() || "Cursor reported an error." }
+    ? { message: text || (stderr || '').trim() || 'Cursor reported an error.' }
     : null;
-  const status = isError ? (exitCode || 1) : 0;
+  const status = isError ? exitCode || 1 : 0;
 
   return { sessionId, text, error, status, fileChanges, commandExecutions, toolCalls };
 }
@@ -353,17 +403,17 @@ export function getCursorAvailability() {
   const cli = findCursorBinary();
   try {
     const version = execSync(`"${cli}" --version`, {
-      encoding: "utf8",
+      encoding: 'utf8',
       shell: true,
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: 8000
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 8000,
     }).trim();
     return { available: true, detail: `agent ${version}`, version };
   } catch (err) {
     return {
       available: false,
       detail: `Cursor agent CLI not found (tried: ${cli}). Error: ${String(err.message ?? err)}`,
-      version: null
+      version: null,
     };
   }
 }
@@ -377,28 +427,28 @@ export function getCursorAuthStatus() {
   const cli = findCursorBinary();
   try {
     const output = execSync(`"${cli}" status`, {
-      encoding: "utf8",
+      encoding: 'utf8',
       shell: true,
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: 10000
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 10000,
     });
     const lower = output.toLowerCase();
     // Look for common "not signed in" / "not logged in" indicators.
     const notSignedIn =
-      lower.includes("not signed in") ||
-      lower.includes("not logged in") ||
-      lower.includes("unauthenticated") ||
-      lower.includes("please sign in");
+      lower.includes('not signed in') ||
+      lower.includes('not logged in') ||
+      lower.includes('unauthenticated') ||
+      lower.includes('please sign in');
     if (notSignedIn) {
       return { authenticated: false, loggedIn: false, method: null, detail: output.trim() };
     }
-    return { authenticated: true, loggedIn: true, method: "cursor-account", detail: output.trim() };
+    return { authenticated: true, loggedIn: true, method: 'cursor-account', detail: output.trim() };
   } catch (err) {
     return {
       authenticated: false,
       loggedIn: false,
       method: null,
-      detail: String(err.message ?? err)
+      detail: String(err.message ?? err),
     };
   }
 }
@@ -419,14 +469,14 @@ export function getCursorAuthStatus() {
  * @returns {Promise<{ sessionId: string|null, text: string, error: object|null, status: number, fileChanges: Array, commandExecutions: Array, toolCalls: Array }>}
  */
 export async function runHeadlessCursorTurn(cwd, prompt, options = {}) {
-  const role = options.role ?? "delegate";
+  const role = options.role ?? 'delegate';
   const outputFormat = options.outputFormat ?? headlessOutputFormat(role);
   const args = buildHeadlessArgs({
     role,
     model: options.model,
     sessionId: options.sessionId,
     cwd,
-    outputFormat
+    outputFormat,
   });
   const cli = findCursorBinary();
   if (!cursorVersionProbed) {
@@ -437,7 +487,9 @@ export async function runHeadlessCursorTurn(cwd, prompt, options = {}) {
   return await new Promise((resolve) => {
     let settled = false;
     const finish = (value) => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       settled = true;
       resolve(value);
     };
@@ -447,23 +499,33 @@ export async function runHeadlessCursorTurn(cwd, prompt, options = {}) {
       child = spawnCommand(cli, args, {
         cwd,
         env: buildSpawnEnvironment(options.env ?? process.env),
-        stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
       });
     } catch (error) {
-      finish({ sessionId: null, text: "", error, status: 1, fileChanges: [], commandExecutions: [], toolCalls: [] });
+      finish({
+        sessionId: null,
+        text: '',
+        error,
+        status: 1,
+        fileChanges: [],
+        commandExecutions: [],
+        toolCalls: [],
+      });
       return;
     }
 
     const events = [];
-    let stdoutText = "";
-    let stderrText = "";
+    let stdoutText = '';
+    let stderrText = '';
 
-    if (outputFormat === "stream-json") {
+    if (outputFormat === 'stream-json') {
       const rl = readline.createInterface({ input: child.stdout });
-      rl.on("line", (line) => {
+      rl.on('line', (line) => {
         const trimmed = line.trim();
-        if (!trimmed) return;
+        if (!trimmed) {
+          return;
+        }
         let evt;
         try {
           evt = JSON.parse(trimmed);
@@ -472,32 +534,50 @@ export async function runHeadlessCursorTurn(cwd, prompt, options = {}) {
         }
         events.push(evt);
         const progress = mapStreamEventToProgress(evt);
-        if (progress) emitStreamEvent(options.onStream, progress);
+        if (progress) {
+          emitStreamEvent(options.onStream, progress);
+        }
       });
     } else if (child.stdout) {
-      child.stdout.on("data", (chunk) => {
+      child.stdout.on('data', (chunk) => {
         stdoutText += chunk.toString();
       });
     }
 
     if (child.stderr) {
-      child.stderr.on("data", (chunk) => {
+      child.stderr.on('data', (chunk) => {
         stderrText += chunk.toString();
       });
     }
 
-    child.on("error", (error) => {
-      finish({ sessionId: null, text: "", error, status: 1, fileChanges: [], commandExecutions: [], toolCalls: [] });
+    child.on('error', (error) => {
+      finish({
+        sessionId: null,
+        text: '',
+        error,
+        status: 1,
+        fileChanges: [],
+        commandExecutions: [],
+        toolCalls: [],
+      });
     });
 
-    child.on("close", (code) => {
-      finish(normalizeHeadlessOutcome({ events, stdoutText, stderr: stderrText, exitCode: code ?? 0, outputFormat }));
+    child.on('close', (code) => {
+      finish(
+        normalizeHeadlessOutcome({
+          events,
+          stdoutText,
+          stderr: stderrText,
+          exitCode: code ?? 0,
+          outputFormat,
+        }),
+      );
     });
 
     // Deliver the prompt on stdin (newline-safe; avoids cmd.exe arg quoting).
     try {
       if (child.stdin) {
-        child.stdin.write(prompt ?? "");
+        child.stdin.write(prompt ?? '');
         child.stdin.end();
       }
     } catch {
@@ -517,8 +597,8 @@ export async function cancelHeadlessCursor(jobId) {
   return {
     attempted: true,
     interrupted: false,
-    transport: "process-tree",
-    detail: `Cursor headless jobs are cancelled by killing the process tree (job ${jobId}).`
+    transport: 'process-tree',
+    detail: `Cursor headless jobs are cancelled by killing the process tree (job ${jobId}).`,
   };
 }
 
@@ -537,9 +617,11 @@ export async function cancelHeadlessCursor(jobId) {
 
 /** The transport flag value for Cursor, read at call time. Default "headless". */
 export function cursorTransport(env = process.env) {
-  return String(env.MULTI_TRANSPORT_CURSOR ?? "").trim().toLowerCase() === "acp"
-    ? "acp"
-    : "headless";
+  return String(env.MULTI_TRANSPORT_CURSOR ?? '')
+    .trim()
+    .toLowerCase() === 'acp'
+    ? 'acp'
+    : 'headless';
 }
 
 // In-flight ACP turn handles, keyed by jobId, so an in-process cancel() can route
@@ -550,7 +632,7 @@ const inflightAcpTurns = new Map();
 
 /** The ACP session mode for a role: read-only → "ask"; write/delegate → "agent". */
 export function acpSessionModeForRole(role) {
-  return isReadOnlyRole(role) ? "ask" : "agent";
+  return isReadOnlyRole(role) ? 'ask' : 'agent';
 }
 
 /**
@@ -571,11 +653,13 @@ export function acpSessionModeForRole(role) {
  * @returns {{ value: string|undefined } | { error: { code: string, message: string, detail?: string } }}
  */
 export function resolveCursorModel(availableIds, requested) {
-  const want = requested && String(requested).trim() ? String(requested).trim() : "";
+  const want = requested && String(requested).trim() ? String(requested).trim() : '';
   // No explicit model → do not pin; let cursor use its current/default model.
-  if (!want) return { value: undefined };
+  if (!want) {
+    return { value: undefined };
+  }
 
-  const ids = Array.isArray(availableIds) ? availableIds.filter((s) => typeof s === "string") : [];
+  const ids = Array.isArray(availableIds) ? availableIds.filter((s) => typeof s === 'string') : [];
   if (!ids.length) {
     // No live list to resolve against — pass the requested value through; the
     // runner's own validation (empty list) will allow it (best-effort).
@@ -583,32 +667,36 @@ export function resolveCursorModel(availableIds, requested) {
   }
 
   // Exact match wins.
-  if (ids.includes(want)) return { value: want };
+  if (ids.includes(want)) {
+    return { value: want };
+  }
 
   // Unique prefix match on the segment before "[".
   const base = (id) => {
-    const i = id.indexOf("[");
+    const i = id.indexOf('[');
     return i >= 0 ? id.slice(0, i) : id;
   };
   const prefixMatches = ids.filter((id) => base(id) === want);
-  if (prefixMatches.length === 1) return { value: prefixMatches[0] };
+  if (prefixMatches.length === 1) {
+    return { value: prefixMatches[0] };
+  }
 
   if (prefixMatches.length > 1) {
     return {
       error: {
-        code: "config",
+        code: 'config',
         message: `Model "${want}" is ambiguous for Cursor (matches ${prefixMatches.length} variants).`,
-        detail: `Matching ids: ${prefixMatches.join(", ")}. Available: ${ids.join(", ")}`
-      }
+        detail: `Matching ids: ${prefixMatches.join(', ')}. Available: ${ids.join(', ')}`,
+      },
     };
   }
 
   return {
     error: {
-      code: "config",
+      code: 'config',
       message: `Model "${want}" is not offered by Cursor.`,
-      detail: `Available: ${ids.join(", ")}`
-    }
+      detail: `Available: ${ids.join(', ')}`,
+    },
   };
 }
 
@@ -620,17 +708,25 @@ export function resolveCursorModel(availableIds, requested) {
  * @returns {{ type: string, [k: string]: any } | null}
  */
 export function mapAcpUpdateToProgress(update) {
-  if (!update || typeof update !== "object") return null;
-  const kind = update.sessionUpdate;
-  if (kind === "agent_message_chunk") {
-    const block = update.content;
-    const text = block?.type === "text" && typeof block.text === "string" ? block.text : "";
-    if (text) return { type: "message_chunk", text };
+  if (!update || typeof update !== 'object') {
     return null;
   }
-  if (kind === "tool_call" || kind === "tool_call_update") {
-    const raw = update.title ?? update.kind ?? update.toolCallId ?? "tool";
-    return { type: "phase", message: `Cursor: ${sanitizeDiagnosticMessage(raw) || "tool"}`, phase: kind };
+  const kind = update.sessionUpdate;
+  if (kind === 'agent_message_chunk') {
+    const block = update.content;
+    const text = block?.type === 'text' && typeof block.text === 'string' ? block.text : '';
+    if (text) {
+      return { type: 'message_chunk', text };
+    }
+    return null;
+  }
+  if (kind === 'tool_call' || kind === 'tool_call_update') {
+    const raw = update.title ?? update.kind ?? update.toolCallId ?? 'tool';
+    return {
+      type: 'phase',
+      message: `Cursor: ${sanitizeDiagnosticMessage(raw) || 'tool'}`,
+      phase: kind,
+    };
   }
   return null;
 }
@@ -647,19 +743,19 @@ export function mapAcpUpdateToProgress(update) {
  * @returns {Promise<{ sessionId: string|null, text: string, error: object|null, status: number, fileChanges: Array, commandExecutions: Array, toolCalls: Array }>}
  */
 export async function runAcpCursorTurn(cwd, prompt, options = {}) {
-  const role = options.role ?? "delegate";
+  const role = options.role ?? 'delegate';
   // Tests inject a {exe, args} for the fake ACP agent here (same role resolve.mjs
   // env overrides serve in production); production never passes spawnSpec.
   const resolved = options.spawnSpec ?? resolveCursorAcp({ env: options.env ?? process.env });
   if (!resolved.exe) {
     return {
       sessionId: null,
-      text: "",
-      error: { message: resolved.detail || "Cursor ACP runtime not found." },
+      text: '',
+      error: { message: resolved.detail || 'Cursor ACP runtime not found.' },
       status: 1,
       fileChanges: [],
       commandExecutions: [],
-      toolCalls: []
+      toolCalls: [],
     };
   }
 
@@ -670,51 +766,36 @@ export async function runAcpCursorTurn(cwd, prompt, options = {}) {
     args: resolved.args,
     cwd,
     env: buildSpawnEnvironment(options.env ?? process.env),
-    prompt: prompt ?? "",
+    prompt: prompt ?? '',
     sessionMode: acpSessionModeForRole(role),
     allowWrites: !readOnly,
     // Resolve the friendly model name against the live composite-id list,
     // pre-prompt, inside the runner (no second session). A miss/ambiguity fails
     // the turn with a config error rather than silently falling back.
     resolveModel: (availableIds) => resolveCursorModel(availableIds, options.model),
-    onUpdate: onStream
-      ? (update) => {
-          const progress = mapAcpUpdateToProgress(update);
-          if (progress) {
-            try {
-              onStream(progress);
-            } catch {
-              // Best-effort.
-            }
-          }
-        }
-      : undefined,
-    onDiagnostic: () => {}
+    onUpdate: (update) => {
+      const progress = mapAcpUpdateToProgress(update);
+      if (progress) {
+        onStream?.(progress);
+      }
+    },
+    onDiagnostic: () => {},
   });
 
   const jobId = options.jobId ?? null;
-  if (jobId) inflightAcpTurns.set(jobId, turn);
+  if (jobId) {
+    inflightAcpTurns.set(jobId, turn);
+  }
   let res;
   try {
     res = await turn;
   } finally {
-    if (jobId) inflightAcpTurns.delete(jobId);
+    if (jobId) {
+      inflightAcpTurns.delete(jobId);
+    }
   }
 
-  const text = typeof res.text === "string" ? res.text : "";
-  const error = res.error ? { message: res.error.message + (res.error.detail ? ` ${res.error.detail}` : "") } : null;
-  const status = error ? 1 : 0;
-  return {
-    sessionId: res.sessionId ?? null,
-    text,
-    error,
-    status,
-    // The ACP turn runner does not derive file/command activity. The render layer
-    // tolerates empty arrays.
-    fileChanges: [],
-    commandExecutions: [],
-    toolCalls: []
-  };
+  return acpAdapterResult(res);
 }
 
 /**
@@ -728,7 +809,7 @@ export async function runAcpCursorTurn(cwd, prompt, options = {}) {
  */
 export async function cancelAcpCursor(jobId) {
   const turn = jobId ? inflightAcpTurns.get(jobId) : null;
-  if (turn && typeof turn.cancel === "function") {
+  if (turn && typeof turn.cancel === 'function') {
     try {
       turn.cancel();
     } catch {
@@ -737,8 +818,8 @@ export async function cancelAcpCursor(jobId) {
     return {
       attempted: true,
       interrupted: true,
-      transport: "acp",
-      detail: `Cursor ACP turn cancelled in-protocol (job ${jobId}); process tree killed as backstop.`
+      transport: 'acp',
+      detail: `Cursor ACP turn cancelled in-protocol (job ${jobId}); process tree killed as backstop.`,
     };
   }
   // No in-flight turn in THIS process (the cross-process cancel case): the
@@ -747,8 +828,8 @@ export async function cancelAcpCursor(jobId) {
   return {
     attempted: true,
     interrupted: false,
-    transport: "process-tree",
-    detail: `No in-flight ACP turn in this process; Cursor ACP jobs are cancelled by killing the process tree (job ${jobId}).`
+    transport: 'process-tree',
+    detail: `No in-flight ACP turn in this process; Cursor ACP jobs are cancelled by killing the process tree (job ${jobId}).`,
   };
 }
 
@@ -759,7 +840,7 @@ export async function cancelAcpCursor(jobId) {
  * unchanged headless path. The default (no flag) is byte-identical to today.
  */
 export async function invokeCursor(cwd, prompt, options = {}) {
-  if (cursorTransport(options.env ?? process.env) === "acp") {
+  if (cursorTransport(options.env ?? process.env) === 'acp') {
     return runAcpCursorTurn(cwd, prompt, options);
   }
   return runHeadlessCursorTurn(cwd, prompt, options);
@@ -767,17 +848,36 @@ export async function invokeCursor(cwd, prompt, options = {}) {
 
 /** Transport-dispatching cancel: ACP routing when the flag selects acp. */
 export async function cancelCursor(jobId) {
-  if (cursorTransport(process.env) === "acp") {
+  if (cursorTransport(process.env) === 'acp') {
     return cancelAcpCursor(jobId);
   }
   return cancelHeadlessCursor(jobId);
 }
 
 export const adapter = {
-  name: "cursor",
+  name: 'cursor',
   isAvailable: getCursorAvailability,
   isAuthenticated: getCursorAuthStatus,
   invoke: invokeCursor,
   cancel: cancelCursor,
-  getSession: undefined
+  getSession: undefined,
 };
+
+function fileAction(tool) {
+  if (/delete/i.test(tool)) {
+    return 'delete';
+  }
+  return /create/i.test(tool) ? 'create' : 'modify';
+}
+
+function completedFileChange(tc) {
+  if (!tc || typeof tc !== 'object') {
+    return null;
+  }
+  const key = Object.keys(tc)[0] ?? '';
+  if (!EDIT_TOOL_PATTERN.test(key)) {
+    return null;
+  }
+  const inner = tc[key] ?? {};
+  return { path: inner.args?.path ?? inner.result?.success?.path ?? null, action: fileAction(key) };
+}

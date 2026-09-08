@@ -1,5 +1,5 @@
 // Python stdlib terminal shared by the native permission integration checks.
-export const pty = String.raw`import os,pty,select,sys,fcntl,termios,struct,signal
+export const pty = `import os,pty,select,sys,fcntl,termios,struct,signal
 pid,fd=pty.fork()
 if pid==0: os.execvp(sys.argv[1],sys.argv[1:])
 fcntl.ioctl(fd,termios.TIOCSWINSZ,struct.pack('HHHH',36,140,0,0))

@@ -23,17 +23,12 @@
  *   - never log prompt content (diagnostics carry methods/tools/errors only).
  */
 
-import { spawn } from "node:child_process";
-import { Readable, Writable } from "node:stream";
-import process from "node:process";
-
-import {
-  ndJsonStream,
-  ClientSideConnection,
-  PROTOCOL_VERSION,
-} from "./vendor/acp-sdk.bundle.mjs";
-import { terminateProcessTree } from "../process.mjs";
-import { sanitizeDiagnosticMessage } from "./diagnostics.mjs";
+import { spawn } from 'node:child_process';
+import process from 'node:process';
+import { Readable, Writable } from 'node:stream';
+import { terminateProcessTree } from '../process.mjs';
+import { sanitizeDiagnosticMessage } from './diagnostics.mjs';
+import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } from './vendor/acp-sdk.bundle.mjs';
 
 /** Grace period (ms) between session/cancel and the process-tree kill. */
 const CANCEL_GRACE_MS = 5000;
@@ -53,16 +48,18 @@ const DEFAULT_OVERALL_MS = 1800000;
  */
 function envWindowMs(env, name, fallback) {
   const raw = env?.[name];
-  if (raw === undefined || raw === null || String(raw).trim() === "") return fallback;
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return fallback;
+  }
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 /** Client identity advertised to the agent (never carries prompt content). */
 const CLIENT_INFO = {
-  name: "cc-multi-cli-plugin",
-  title: "cc-multi-cli ACP client",
-  version: "0.1.0",
+  name: 'cc-multi-cli-plugin',
+  title: 'cc-multi-cli ACP client',
+  version: '0.1.0',
 };
 
 /**
@@ -112,28 +109,16 @@ const CLIENT_INFO = {
  */
 export function listModelValueIds(modelOption) {
   const options = Array.isArray(modelOption?.options) ? modelOption.options : [];
-  const ids = [];
-  for (const opt of options) {
-    if (opt && typeof opt === "object" && Array.isArray(opt.options)) {
-      // grouped
-      for (const inner of opt.options) {
-        if (inner && typeof inner.value === "string") ids.push(inner.value);
-      }
-    } else if (opt && typeof opt === "object" && typeof opt.value === "string") {
-      ids.push(opt.value);
-    }
-  }
-  return ids;
+  return options.flatMap((option) => {
+    const values = Array.isArray(option?.options) ? option.options : [option];
+    return values.filter((value) => typeof value?.value === 'string').map((value) => value.value);
+  });
 }
 
 /** Locate the "model" config option (by category first, then by id). */
 export function findModelConfigOption(configOptions) {
   const list = Array.isArray(configOptions) ? configOptions : [];
-  return (
-    list.find((o) => o?.category === "model") ??
-    list.find((o) => o?.id === "model") ??
-    null
-  );
+  return list.find((o) => o?.category === 'model') ?? list.find((o) => o?.id === 'model') ?? null;
 }
 
 /**
@@ -155,8 +140,12 @@ export function runAcpTurn(spec) {
     model,
     resolveModel,
     allowWrites = false,
-    inactivityMs = envWindowMs(spec?.env ?? process.env, "MULTI_ACP_INACTIVITY_MS", DEFAULT_INACTIVITY_MS),
-    overallMs = envWindowMs(spec?.env ?? process.env, "MULTI_ACP_OVERALL_MS", DEFAULT_OVERALL_MS),
+    inactivityMs = envWindowMs(
+      spec?.env ?? process.env,
+      'MULTI_ACP_INACTIVITY_MS',
+      DEFAULT_INACTIVITY_MS,
+    ),
+    overallMs = envWindowMs(spec?.env ?? process.env, 'MULTI_ACP_OVERALL_MS', DEFAULT_OVERALL_MS),
     onStream,
     onUpdate,
     onDiagnostic,
@@ -172,7 +161,9 @@ export function runAcpTurn(spec) {
   let childPid = null;
 
   const diag = (message) => {
-    if (!onDiagnostic) return;
+    if (!onDiagnostic) {
+      return;
+    }
     const clean = sanitizeDiagnosticMessage(message);
     if (clean) {
       try {
@@ -186,7 +177,7 @@ export function runAcpTurn(spec) {
   const promise = new Promise((resolve) => {
     /** @type {AcpTurnResult} */
     const result = {
-      text: "",
+      text: '',
       error: null,
       sessionId: null,
       stopReason: null,
@@ -204,18 +195,26 @@ export function runAcpTurn(spec) {
     let overallTimer = null;
     let killTimer = null;
     let handshakeDone = false;
-    let stderrTail = "";
+    let stderrTail = '';
 
     const clearTimers = () => {
-      if (inactivityTimer) clearTimeout(inactivityTimer);
-      if (overallTimer) clearTimeout(overallTimer);
-      if (killTimer) clearTimeout(killTimer);
+      if (inactivityTimer) {
+        clearTimeout(inactivityTimer);
+      }
+      if (overallTimer) {
+        clearTimeout(overallTimer);
+      }
+      if (killTimer) {
+        clearTimeout(killTimer);
+      }
       inactivityTimer = overallTimer = killTimer = null;
     };
 
     /** Tree-kill the child (no orphans). Safe to call repeatedly. */
     const killChild = () => {
-      if (!child || child.killed || result.exitCode !== null) return;
+      if (!child || child.killed || result.exitCode !== null) {
+        return;
+      }
       try {
         terminateProcessTree(child.pid, { env });
       } catch {
@@ -228,18 +227,24 @@ export function runAcpTurn(spec) {
     };
 
     const finish = () => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       settled = true;
       clearTimers();
       // Cancelled-detection rule: if cancel was ever requested and the turn ended,
       // it is cancelled regardless of the stopReason the agent reported.
-      if (cancelRequested) result.cancelled = true;
+      if (cancelRequested) {
+        result.cancelled = true;
+      }
       killChild();
       resolve(result);
     };
 
     const setError = (code, message, detail) => {
-      if (result.error) return; // first error wins
+      if (result.error) {
+        return; // first error wins
+      }
       result.error = {
         code,
         message,
@@ -248,11 +253,13 @@ export function runAcpTurn(spec) {
     };
 
     const resetInactivity = () => {
-      if (inactivityTimer) clearTimeout(inactivityTimer);
+      if (inactivityTimer) {
+        clearTimeout(inactivityTimer);
+      }
       inactivityTimer = setTimeout(() => {
         diag(`inactivity watchdog fired after ${inactivityMs}ms`);
-        setError("timeout", `No ACP session/update for ${inactivityMs}ms.`);
-        cancelFlow("inactivity timeout");
+        setError('timeout', `No ACP session/update for ${inactivityMs}ms.`);
+        cancelFlow('inactivity timeout');
       }, inactivityMs);
     };
 
@@ -279,20 +286,20 @@ export function runAcpTurn(spec) {
       }
       if (!killTimer) {
         killTimer = setTimeout(() => {
-          diag("cancel grace expired — killing process tree");
+          diag('cancel grace expired — killing process tree');
           killChild();
         }, CANCEL_GRACE_MS);
       }
     };
 
-    triggerCancel = () => cancelFlow("external cancel");
+    triggerCancel = () => cancelFlow('external cancel');
 
     if (signal) {
       if (signal.aborted) {
         // Defer so .cancel()/resolve wiring is in place.
-        queueMicrotask(() => cancelFlow("signal already aborted"));
+        queueMicrotask(() => cancelFlow('signal already aborted'));
       } else {
-        signal.addEventListener("abort", () => cancelFlow("signal aborted"), { once: true });
+        signal.addEventListener('abort', () => cancelFlow('signal aborted'), { once: true });
       }
     }
 
@@ -301,70 +308,66 @@ export function runAcpTurn(spec) {
       child = spawn(exe, args, {
         cwd,
         env,
-        stdio: ["pipe", "pipe", "pipe"],
+        stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       });
       childPid = child.pid ?? null;
     } catch (err) {
-      setError("spawn", `Failed to spawn ACP agent: ${String(err?.message ?? err)}`);
+      setError('spawn', `Failed to spawn ACP agent: ${String(err?.message ?? err)}`);
       finish();
       return;
     }
 
-    child.on("error", (err) => {
-      setError("spawn", `ACP agent process error: ${String(err?.message ?? err)}`, stderrTail);
+    child.on('error', (err) => {
+      setError('spawn', `ACP agent process error: ${String(err?.message ?? err)}`, stderrTail);
       finish();
     });
 
     if (child.stderr) {
-      child.stderr.setEncoding("utf8");
-      child.stderr.on("data", (chunk) => {
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk) => {
         const text = String(chunk);
         // Keep a bounded tail for spawn-failure detail; emit each line as a
         // diagnostic. Never includes prompt content (that goes over stdin only).
         stderrTail = (stderrTail + text).slice(-4000);
         for (const line of text.split(/\r?\n/)) {
-          if (line.trim()) diag(line);
+          if (line.trim()) {
+            diag(line);
+          }
         }
       });
     }
 
-    child.on("exit", (code, sig) => {
+    child.on('exit', (code, sig) => {
       result.exitCode = code ?? (sig ? -1 : 0);
+      const status = `code ${code ?? 'null'}${sig ? `, signal ${sig}` : ''}`;
       if (!handshakeDone) {
         // Child died before we completed the handshake → spawn-class failure.
-        setError(
-          "spawn",
-          `ACP agent exited before handshake (code ${code ?? "null"}${sig ? `, signal ${sig}` : ""}).`,
-          stderrTail
-        );
-        finish();
-      } else {
-        // Post-handshake exit. If the turn has not settled, no stopReason ever
-        // arrived, and we did not cancel, the agent CRASHED mid-turn. Set an
-        // explicit error: whether this handler or the SDK's connection-closed
-        // rejection wins the race, the result must never look like a success.
-        if (!settled && !cancelRequested && result.stopReason === null) {
-          setError(
-            "crash",
-            `ACP agent exited mid-turn (code ${code ?? "null"}${sig ? `, signal ${sig}` : ""}) without finishing the prompt.`,
-            stderrTail
-          );
-        }
-        finish();
+        setError('spawn', `ACP agent exited before handshake (${status}).`, stderrTail);
       }
+      // A post-handshake exit without a stop reason must not look successful,
+      // whichever arrives first: this event or the SDK's closed-connection error.
+      if (handshakeDone && !settled && !cancelRequested && result.stopReason === null) {
+        setError(
+          'crash',
+          `ACP agent exited mid-turn (${status}) without finishing the prompt.`,
+          stderrTail,
+        );
+      }
+      finish();
     });
 
     // ── connection ──────────────────────────────────────────────────────────────
     // Input writable FIRST, then readable (per the SDK recipe).
     let stream;
     try {
-      stream = ndJsonStream(
-        Writable.toWeb(child.stdin),
-        Readable.toWeb(child.stdout)
-      );
+      stream = ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout));
     } catch (err) {
-      setError("spawn", `Failed to wrap ACP stdio streams: ${String(err?.message ?? err)}`, stderrTail);
+      setError(
+        'spawn',
+        `Failed to wrap ACP stdio streams: ${String(err?.message ?? err)}`,
+        stderrTail,
+      );
       finish();
       return;
     }
@@ -378,29 +381,22 @@ export function runAcpTurn(spec) {
           params?.toolCall?.title ??
           params?.toolCall?.toolCallId ??
           params?.toolCall?.kind ??
-          "tool";
+          'tool';
         if (cancelRequested) {
           // Per ACP: if we cancelled, respond Cancelled to outstanding permissions.
           diag(`permission request during cancel (${toolTitle}) → cancelled`);
-          return { outcome: { outcome: "cancelled" } };
+          return { outcome: { outcome: 'cancelled' } };
         }
-        const reject =
-          options.find((o) => o?.kind === "reject_once") ??
-          options.find((o) => o?.kind === "reject_always");
-        const allow =
-          options.find((o) => o?.kind === "allow_once") ??
-          options.find((o) => o?.kind === "allow_always") ??
-          options[0];
-        const chosen = allowWrites ? (allow ?? reject) : (reject ?? allow);
+        const chosen = permissionOption(options, allowWrites);
         diag(
-          `permission request (${toolTitle}) → ${allowWrites ? "allow" : "reject"}` +
-            (chosen?.kind ? ` [${chosen.kind}]` : "")
+          `permission request (${toolTitle}) → ${allowWrites ? 'allow' : 'reject'}` +
+            (chosen?.kind ? ` [${chosen.kind}]` : ''),
         );
         if (!chosen) {
           // No options offered — cancel outcome is the safe response.
-          return { outcome: { outcome: "cancelled" } };
+          return { outcome: { outcome: 'cancelled' } };
         }
-        return { outcome: { outcome: "selected", optionId: chosen.optionId } };
+        return { outcome: { outcome: 'selected', optionId: chosen.optionId } };
       },
 
       async sessionUpdate(params) {
@@ -408,26 +404,14 @@ export function runAcpTurn(spec) {
         resetInactivity();
         const update = params?.update ?? {};
         const kind = update.sessionUpdate;
-        if (onUpdate) {
-          try {
-            onUpdate(update);
-          } catch {
-            // Best-effort.
-          }
-        }
-        if (kind === "agent_message_chunk") {
+        notify(onUpdate, update);
+        if (kind === 'agent_message_chunk') {
           const block = update.content;
-          if (block?.type === "text" && typeof block.text === "string") {
+          if (block?.type === 'text' && typeof block.text === 'string') {
             result.text += block.text;
-            if (onStream) {
-              try {
-                onStream(block.text);
-              } catch {
-                // Best-effort.
-              }
-            }
+            notify(onStream, block.text);
           }
-        } else if (kind === "usage_update") {
+        } else if (kind === 'usage_update') {
           // Capture the latest usage snapshot.
           result.usage = {
             size: update.size,
@@ -443,7 +427,11 @@ export function runAcpTurn(spec) {
     try {
       connection = new ClientSideConnection(() => clientHandler, stream);
     } catch (err) {
-      setError("spawn", `Failed to establish ACP connection: ${String(err?.message ?? err)}`, stderrTail);
+      setError(
+        'spawn',
+        `Failed to establish ACP connection: ${String(err?.message ?? err)}`,
+        stderrTail,
+      );
       finish();
       return;
     }
@@ -451,8 +439,8 @@ export function runAcpTurn(spec) {
     // Overall hard cap.
     overallTimer = setTimeout(() => {
       diag(`overall watchdog fired after ${overallMs}ms`);
-      setError("timeout", `ACP turn exceeded the overall cap of ${overallMs}ms.`);
-      cancelFlow("overall timeout");
+      setError('timeout', `ACP turn exceeded the overall cap of ${overallMs}ms.`);
+      cancelFlow('overall timeout');
     }, overallMs);
 
     // Arm the inactivity watchdog from the very start so it covers the HANDSHAKE
@@ -461,6 +449,95 @@ export function runAcpTurn(spec) {
     // inactivityMs, not by the 30-minute overall cap. Handshake steps normally
     // complete in seconds; cold starts (~15 s) sit far inside the 120 s default.
     resetInactivity();
+
+    const configureModel = async () => {
+      // Model pin: resolve + validate against the LIVE options list first (no
+      // silent fallback — a miss is a configuration error before we ever prompt).
+      if (!model && !resolveModel) {
+        return true;
+      }
+      const modelOption = findModelConfigOption(result.configOptions);
+      const available = listModelValueIds(modelOption);
+
+      const resolution = resolvePinnedModel(resolveModel, available, model);
+      if (resolution.error) {
+        const e = resolution.error;
+        setError(e.code ?? 'config', e.message, e.detail);
+        diag(`model resolver rejected "${model ?? ''}" — failing before prompt`);
+        killChild();
+        finish();
+        return false;
+      }
+      const pinned = resolution.value;
+
+      if (pinned) {
+        if (modelOption && available.length && !available.includes(pinned)) {
+          setError(
+            'config',
+            `Requested model "${pinned}" is not offered by this agent.`,
+            `Available: ${available.join(', ')}`,
+          );
+          diag(`model "${pinned}" not in options — failing before prompt`);
+          // End the turn cleanly without prompting.
+          killChild();
+          finish();
+          return false;
+        }
+        // SDK setSessionConfigOption param shape for a select option is
+        // { sessionId, configId, value } (the non-boolean union member; no
+        // `type` field) — verified against the bundled .d.ts. This matches the
+        // blueprint's expected wire shape, so the SDK wrapper is used directly.
+        await connection.setSessionConfigOption({
+          sessionId: result.sessionId,
+          configId: modelOption?.id ?? 'model',
+          value: pinned,
+        });
+        diag(`set config option model → ${pinned}`);
+      }
+
+      return true;
+    };
+
+    const flowError = (err) => {
+      // The connection closing mid-flight (e.g. after a kill) rejects pending
+      // requests — that's an expected path during cancel/timeout, not a new error.
+      if (cancelRequested) {
+        diag(`flow ended during cancel: ${String(err?.message ?? err)}`);
+        finish();
+        return;
+      }
+      if (!handshakeDone) {
+        // The connection broke before the handshake completed — almost always
+        // the child dying on spawn. Let the child's `exit` handler (the
+        // authoritative spawn-failure path: it records exitCode + the stderr
+        // tail) finish first. If the exit hasn't landed yet, wait for it (capped)
+        // so exitCode is reliably captured; the exit handler will call finish().
+        const settleSpawnFailure = () => {
+          if (!result.error) {
+            setError(
+              'spawn',
+              `ACP agent failed before handshake: ${String(err?.message ?? err)}`,
+              stderrTail,
+            );
+          }
+          finish();
+        };
+        if (result.exitCode !== null) {
+          // Child already exited — its handler ran (or is about to); settle now.
+          settleSpawnFailure();
+        } else {
+          // Wait for the exit (which sets exitCode + finishes), with a fallback
+          // cap so we never hang if no exit ever arrives.
+          child.once('exit', settleSpawnFailure);
+          setTimeout(settleSpawnFailure, 1000);
+        }
+        return;
+      }
+      if (!result.error) {
+        setError('protocol', `ACP turn failed: ${String(err?.message ?? err)}`, stderrTail);
+      }
+      finish();
+    };
 
     // ── main flow ───────────────────────────────────────────────────────────────
     (async () => {
@@ -482,7 +559,7 @@ export function runAcpTurn(spec) {
         result.modes = session?.modes ?? null;
         result.configOptions = Array.isArray(session?.configOptions) ? session.configOptions : [];
         handshakeDone = true;
-        diag(`session ready (${result.sessionId ?? "no id"})`);
+        diag(`session ready (${result.sessionId ?? 'no id'})`);
 
         // Session mode (e.g. "ask"/"plan" for read-only roles).
         if (sessionMode) {
@@ -490,109 +567,23 @@ export function runAcpTurn(spec) {
           diag(`set session mode → ${sessionMode}`);
         }
 
-        // Model pin: resolve + validate against the LIVE options list first (no
-        // silent fallback — a miss is a configuration error before we ever prompt).
-        if (model || resolveModel) {
-          const modelOption = findModelConfigOption(result.configOptions);
-          const available = listModelValueIds(modelOption);
-
-          // Caller-supplied resolver gets the live ids so a friendly/partial name
-          // can be mapped to an exact composite id (cursor) before prompting.
-          let pinned = model;
-          if (typeof resolveModel === "function") {
-            let resolution;
-            try {
-              resolution = resolveModel(available, model);
-            } catch (err) {
-              resolution = { error: { code: "config", message: String(err?.message ?? err) } };
-            }
-            if (resolution && resolution.error) {
-              const e = resolution.error;
-              setError(e.code ?? "config", e.message, e.detail);
-              diag(`model resolver rejected "${model ?? ""}" — failing before prompt`);
-              killChild();
-              finish();
-              return;
-            }
-            if (resolution && typeof resolution.value === "string") {
-              pinned = resolution.value;
-            }
-          }
-
-          if (pinned) {
-            if (modelOption && available.length && !available.includes(pinned)) {
-              setError(
-                "config",
-                `Requested model "${pinned}" is not offered by this agent.`,
-                `Available: ${available.join(", ")}`
-              );
-              diag(`model "${pinned}" not in options — failing before prompt`);
-              // End the turn cleanly without prompting.
-              killChild();
-              finish();
-              return;
-            }
-            // SDK setSessionConfigOption param shape for a select option is
-            // { sessionId, configId, value } (the non-boolean union member; no
-            // `type` field) — verified against the bundled .d.ts. This matches the
-            // blueprint's expected wire shape, so the SDK wrapper is used directly.
-            await connection.setSessionConfigOption({
-              sessionId: result.sessionId,
-              configId: modelOption?.id ?? "model",
-              value: pinned,
-            });
-            diag(`set config option model → ${pinned}`);
-          }
+        if (!(await configureModel())) {
+          return;
         }
 
         resetInactivity();
         const promptRes = await connection.prompt({
           sessionId: result.sessionId,
-          prompt: [{ type: "text", text: String(prompt ?? "") }],
+          prompt: [{ type: 'text', text: String(prompt ?? '') }],
         });
         result.stopReason = promptRes?.stopReason ?? null;
-        if (promptRes?.usage) result.usage = promptRes.usage;
+        if (promptRes?.usage) {
+          result.usage = promptRes.usage;
+        }
         diag(`prompt resolved (stopReason ${result.stopReason})`);
         finish();
       } catch (err) {
-        // The connection closing mid-flight (e.g. after a kill) rejects pending
-        // requests — that's an expected path during cancel/timeout, not a new error.
-        if (cancelRequested) {
-          diag(`flow ended during cancel: ${String(err?.message ?? err)}`);
-          finish();
-          return;
-        }
-        if (!handshakeDone) {
-          // The connection broke before the handshake completed — almost always
-          // the child dying on spawn. Let the child's `exit` handler (the
-          // authoritative spawn-failure path: it records exitCode + the stderr
-          // tail) finish first. If the exit hasn't landed yet, wait for it (capped)
-          // so exitCode is reliably captured; the exit handler will call finish().
-          const settleSpawnFailure = () => {
-            if (!result.error) {
-              setError(
-                "spawn",
-                `ACP agent failed before handshake: ${String(err?.message ?? err)}`,
-                stderrTail
-              );
-            }
-            finish();
-          };
-          if (result.exitCode !== null) {
-            // Child already exited — its handler ran (or is about to); settle now.
-            settleSpawnFailure();
-          } else {
-            // Wait for the exit (which sets exitCode + finishes), with a fallback
-            // cap so we never hang if no exit ever arrives.
-            child.once("exit", settleSpawnFailure);
-            setTimeout(settleSpawnFailure, 1000);
-          }
-          return;
-        }
-        if (!result.error) {
-          setError("protocol", `ACP turn failed: ${String(err?.message ?? err)}`, stderrTail);
-        }
-        finish();
+        flowError(err);
       }
     })();
   });
@@ -601,6 +592,61 @@ export function runAcpTurn(spec) {
   // caller may pick either (documented in the JSDoc above).
   promise.cancel = () => triggerCancel();
   // The child's PID (or null if spawn failed). Lets callers/tests probe liveness.
-  Object.defineProperty(promise, "pid", { get: () => childPid });
+  Object.defineProperty(promise, 'pid', { get: () => childPid });
   return promise;
+}
+
+function notify(callback, value) {
+  try {
+    callback?.(value);
+  } catch {
+    /* Observers must not interrupt the turn. */
+  }
+}
+
+function permissionOption(options, allowWrites) {
+  const reject =
+    options.find((o) => o?.kind === 'reject_once') ??
+    options.find((o) => o?.kind === 'reject_always');
+  const allow =
+    options.find((o) => o?.kind === 'allow_once') ??
+    options.find((o) => o?.kind === 'allow_always') ??
+    options[0];
+  const chosen = allowWrites ? (allow ?? reject) : (reject ?? allow);
+  return chosen;
+}
+
+function resolvePinnedModel(resolveModel, available, model) {
+  if (typeof resolveModel !== 'function') {
+    return { value: model };
+  }
+  try {
+    const resolution = resolveModel(available, model);
+    if (resolution?.error) {
+      return resolution;
+    }
+    return { value: typeof resolution?.value === 'string' ? resolution.value : model };
+  } catch (err) {
+    return { error: { code: 'config', message: String(err?.message ?? err) } };
+  }
+}
+
+/** Map the retained ACP transport to the headless adapter result contract. */
+export function acpAdapterResult(res) {
+  const text = typeof res.text === 'string' ? res.text : '';
+  const error = res.error
+    ? { message: res.error.message + (res.error.detail ? ` ${res.error.detail}` : '') }
+    : null;
+  const status = error ? 1 : 0;
+  return {
+    sessionId: res.sessionId ?? null,
+    text,
+    error,
+    status,
+    // The ACP turn runner does not derive file/command activity (no tool_use
+    // schema parse like the NDJSON path). The render layer tolerates empty arrays.
+    fileChanges: [],
+    commandExecutions: [],
+    toolCalls: [],
+  };
 }

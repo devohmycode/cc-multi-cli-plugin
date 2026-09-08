@@ -15,14 +15,14 @@
  * path-handling constraint.
  */
 
-import { existsSync, readdirSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import process from "node:process";
+import { existsSync, readdirSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import process from 'node:process';
 
 /** Normalize a user-supplied path to forward slashes (matches the adapters). */
 function normalizeOverride(value) {
-  return String(value).replace(/\\/g, "/");
+  return String(value).replace(/\\/g, '/');
 }
 
 /**
@@ -42,31 +42,31 @@ function normalizeOverride(value) {
 export function resolveOpenCodeAcp(opts = {}) {
   const env = opts.env ?? process.env;
   const platform = opts.platform ?? process.platform;
-  const args = ["acp", "--print-logs", "--log-level", "INFO"];
+  const args = ['acp', '--print-logs', '--log-level', 'INFO'];
 
   // Operator override always wins (same env var the headless adapter honors).
   if (env.OPENCODE_CLI_PATH && String(env.OPENCODE_CLI_PATH).trim()) {
     return { exe: normalizeOverride(env.OPENCODE_CLI_PATH), args };
   }
 
-  if (platform !== "win32") {
-    return { exe: "opencode", args };
+  if (platform !== 'win32') {
+    return { exe: 'opencode', args };
   }
 
   const home = opts.homedir ?? env.USERPROFILE ?? env.HOME ?? os.homedir();
-  const appData = env.APPDATA ?? path.join(home, "AppData", "Roaming");
+  const appData = env.APPDATA ?? path.join(home, 'AppData', 'Roaming');
   const binDir = path.join(
     appData,
-    "npm",
-    "node_modules",
-    "opencode-ai",
-    "node_modules",
-    "opencode-windows-x64",
-    "bin"
+    'npm',
+    'node_modules',
+    'opencode-ai',
+    'node_modules',
+    'opencode-windows-x64',
+    'bin',
   );
   const candidates = [
-    path.join(binDir, "opencode.exe"),
-    path.join(binDir, "opencode-baseline.exe"),
+    path.join(binDir, 'opencode.exe'),
+    path.join(binDir, 'opencode-baseline.exe'),
   ];
   for (const candidate of candidates) {
     if (existsSync(candidate)) {
@@ -77,7 +77,7 @@ export function resolveOpenCodeAcp(opts = {}) {
   return {
     exe: null,
     detail:
-      `OpenCode ACP executable not found. Looked for ${candidates.join(" and ")}. ` +
+      `OpenCode ACP executable not found. Looked for ${candidates.join(' and ')}. ` +
       `Install OpenCode (\`npm install -g opencode-ai\`) or set OPENCODE_CLI_PATH.`,
   };
 }
@@ -129,16 +129,16 @@ export function resolveCursorAcp(opts = {}) {
   // Operator override always wins. The override is a single launcher binary, so
   // it takes the bare acp subcommand (no bundled node.exe split).
   if (env.CURSOR_AGENT_PATH && String(env.CURSOR_AGENT_PATH).trim()) {
-    return { exe: normalizeOverride(env.CURSOR_AGENT_PATH), args: ["acp"] };
+    return { exe: normalizeOverride(env.CURSOR_AGENT_PATH), args: ['acp'] };
   }
 
-  if (platform !== "win32") {
-    return { exe: "cursor-agent", args: ["acp"] };
+  if (platform !== 'win32') {
+    return { exe: 'cursor-agent', args: ['acp'] };
   }
 
   const home = opts.homedir ?? env.USERPROFILE ?? env.HOME ?? os.homedir();
-  const localAppData = env.LOCALAPPDATA ?? path.join(home, "AppData", "Local");
-  const versionsDir = path.join(localAppData, "cursor-agent", "versions");
+  const localAppData = env.LOCALAPPDATA ?? path.join(home, 'AppData', 'Local');
+  const versionsDir = path.join(localAppData, 'cursor-agent', 'versions');
   const ver = pickLatestCursorVersionDir(versionsDir);
   if (!ver) {
     return {
@@ -149,8 +149,8 @@ export function resolveCursorAcp(opts = {}) {
     };
   }
   const verDir = path.join(versionsDir, ver);
-  const node = path.join(verDir, "node.exe");
-  const indexJs = path.join(verDir, "index.js");
+  const node = path.join(verDir, 'node.exe');
+  const indexJs = path.join(verDir, 'index.js');
   if (!existsSync(node) || !existsSync(indexJs)) {
     return {
       exe: null,
@@ -159,5 +159,5 @@ export function resolveCursorAcp(opts = {}) {
         `(expected node.exe + index.js). Reinstall cursor-agent or set CURSOR_AGENT_PATH.`,
     };
   }
-  return { exe: normalizeOverride(node), args: [normalizeOverride(indexJs), "acp"] };
+  return { exe: normalizeOverride(node), args: [normalizeOverride(indexJs), 'acp'] };
 }

@@ -44,14 +44,13 @@
  * the npm `opencode.cmd`. findOpencodeBinary never resolves to `opencode.exe`.
  */
 
-import { execSync } from "node:child_process";
-import readline from "node:readline";
-import process from "node:process";
-
-import { buildSpawnEnvironment, spawnCommand } from "../process.mjs";
-import { sanitizeDiagnosticMessage } from "../acp/diagnostics.mjs";
-import { runAcpTurn } from "../acp/client.mjs";
-import { resolveOpenCodeAcp } from "../acp/resolve.mjs";
+import { execSync } from 'node:child_process';
+import process from 'node:process';
+import readline from 'node:readline';
+import { acpAdapterResult, runAcpTurn } from './acp/client.mjs';
+import { sanitizeDiagnosticMessage } from './acp/diagnostics.mjs';
+import { resolveOpenCodeAcp } from './acp/resolve.mjs';
+import { buildSpawnEnvironment, spawnCommand } from './process.mjs';
 
 // ─── Binary resolution ────────────────────────────────────────────────────────
 //
@@ -65,12 +64,12 @@ import { resolveOpenCodeAcp } from "../acp/resolve.mjs";
 export function findOpencodeBinary() {
   // User override always wins.
   if (process.env.OPENCODE_CLI_PATH) {
-    return process.env.OPENCODE_CLI_PATH.replace(/\\/g, "/");
+    return process.env.OPENCODE_CLI_PATH.replace(/\\/g, '/');
   }
   // Bare name; process.mjs resolveWindowsCommand selects the .cmd on win32 and
   // normalizes slashes, and trusts PATH elsewhere. This avoids the extensionless
   // npm shim (ENOENT) and never auto-promotes the stale bun opencode.exe.
-  return "opencode";
+  return 'opencode';
 }
 
 // ─── Model IDs (informational) ──────────────────────────────────────────────
@@ -81,36 +80,40 @@ export function findOpencodeBinary() {
 // The id form is `provider/model`. Catalog drifts (155+ models) — re-verify the
 // default against `opencode models opencode` rather than hardcoding more here.
 
-const DEFAULT_OPENCODE_MODEL = "opencode/claude-opus-5";
+const DEFAULT_OPENCODE_MODEL = 'opencode/claude-opus-5';
 
 export function resolveModel(model) {
-  if (model && String(model).trim()) return String(model).trim();
+  if (model && String(model).trim()) {
+    return String(model).trim();
+  }
   const envDefault = process.env.OPENCODE_CLI_DEFAULT_MODEL;
-  if (envDefault && String(envDefault).trim()) return String(envDefault).trim();
+  if (envDefault && String(envDefault).trim()) {
+    return String(envDefault).trim();
+  }
   return DEFAULT_OPENCODE_MODEL;
 }
 
 // ─── Role → flags / agent ─────────────────────────────────────────────────────
 
 const READ_ONLY_ROLES = new Set([
-  "research",
-  "researcher",
-  "explore",
-  "explorer",
-  "ask",
-  "planner",
-  "plan"
+  'research',
+  'researcher',
+  'explore',
+  'explorer',
+  'ask',
+  'planner',
+  'plan',
 ]);
 
 /** Read-only roles run under an injected oc-* primary agent and never write files. */
 export function isReadOnlyRole(role) {
-  return READ_ONLY_ROLES.has(String(role ?? "").toLowerCase());
+  return READ_ONLY_ROLES.has(String(role ?? '').toLowerCase());
 }
 
 /** Roles that want web access (research family) vs codebase-only (explore family). */
 function isResearchRole(role) {
-  const r = String(role ?? "").toLowerCase();
-  return r === "research" || r === "researcher";
+  const r = String(role ?? '').toLowerCase();
+  return r === 'research' || r === 'researcher';
 }
 
 /**
@@ -119,12 +122,12 @@ function isResearchRole(role) {
  * so the format is "json" for every role.
  */
 export function headlessOutputFormat(_role) {
-  return "json";
+  return 'json';
 }
 
 /** The injected oc-* primary agent name for a read-only role. */
 export function readOnlyAgentName(role) {
-  return isResearchRole(role) ? "oc-research" : "oc-explore";
+  return isResearchRole(role) ? 'oc-research' : 'oc-explore';
 }
 
 /**
@@ -134,31 +137,31 @@ export function readOnlyAgentName(role) {
  * @param {{ role?: string, model?: string, effort?: string|null, sessionId?: string|null, cwd?: string }} [opts]
  * @returns {string[]}
  */
-export function buildHeadlessArgs({ role = "delegate", model, effort, sessionId, cwd } = {}) {
-  const args = ["run", "--format", headlessOutputFormat(role), "--model", resolveModel(model)];
+export function buildHeadlessArgs({ role = 'delegate', model, effort, sessionId, cwd } = {}) {
+  const args = ['run', '--format', headlessOutputFormat(role), '--model', resolveModel(model)];
   if (effort && String(effort).trim()) {
     // `--variant` = provider-specific reasoning effort (e.g. high, max). Passed
     // through verbatim; OpenCode validates it against the selected model.
-    args.push("--variant", String(effort).trim());
+    args.push('--variant', String(effort).trim());
   }
   if (cwd && String(cwd).trim()) {
     // Pin OpenCode's working directory (cursor's --workspace analog). NOTE: when
     // cwd is INSIDE a git repo, OpenCode resolves writes to the repo ROOT (its
     // project model) regardless of --dir; --dir is honored verbatim for non-git
     // targets. Live-verified on 1.15.13.
-    args.push("--dir", String(cwd));
+    args.push('--dir', String(cwd));
   }
   if (sessionId) {
     // Resume an exact prior session — NEVER --continue (cross-dir pollution).
-    args.push("--session", String(sessionId));
+    args.push('--session', String(sessionId));
   }
   if (isReadOnlyRole(role)) {
     // Read-only: route to the injected oc-* primary agent (defined via
     // OPENCODE_CONFIG_CONTENT in the spawn env). NO --dangerously-skip-permissions.
-    args.push("--agent", readOnlyAgentName(role));
+    args.push('--agent', readOnlyAgentName(role));
   } else {
     // Write/delegate: auto-approve tool execution (auto-replies "once" to each ask).
-    args.push("--dangerously-skip-permissions");
+    args.push('--dangerously-skip-permissions');
   }
   return args;
 }
@@ -173,37 +176,37 @@ export function buildHeadlessArgs({ role = "delegate", model, effort, sessionId,
 // (UNVERIFIED-but-cheap) OPENCODE_SERVER_PASSWORD/USERNAME for ALL roles.
 
 const READ_ONLY_BASE_PERMISSION = {
-  edit: "deny",
-  bash: "deny",
-  write: "deny",
-  read: "allow",
-  glob: "allow",
-  grep: "allow",
-  list: "allow",
-  external_directory: "allow"
+  edit: 'deny',
+  bash: 'deny',
+  write: 'deny',
+  read: 'allow',
+  glob: 'allow',
+  grep: 'allow',
+  list: 'allow',
+  external_directory: 'allow',
 };
 
 /** The OPENCODE_CONFIG_CONTENT JSON defining the oc-* primary agent for a role. */
 export function buildReadOnlyConfigContent(role) {
   const agentName = readOnlyAgentName(role);
   const permission = isResearchRole(role)
-    ? { ...READ_ONLY_BASE_PERMISSION, webfetch: "allow", websearch: "allow" }
-    : { ...READ_ONLY_BASE_PERMISSION, webfetch: "deny", websearch: "deny" };
+    ? { ...READ_ONLY_BASE_PERMISSION, webfetch: 'allow', websearch: 'allow' }
+    : { ...READ_ONLY_BASE_PERMISSION, webfetch: 'deny', websearch: 'deny' };
   return JSON.stringify({
     agent: {
       [agentName]: {
-        mode: "primary",
-        permission
-      }
-    }
+        mode: 'primary',
+        permission,
+      },
+    },
   });
 }
 
 /** The OPENCODE_PERMISSION deny-floor JSON injected for read-only roles. */
 export const READ_ONLY_PERMISSION_FLOOR = JSON.stringify({
-  edit: "deny",
-  bash: "deny",
-  write: "deny"
+  edit: 'deny',
+  bash: 'deny',
+  write: 'deny',
 });
 
 /**
@@ -231,7 +234,9 @@ export function buildOpencodeSpawnEnv(baseEnv, role) {
 // ─── Stream event helpers ─────────────────────────────────────────────────────
 
 function emitStreamEvent(onStream, event) {
-  if (!onStream) return;
+  if (!onStream) {
+    return;
+  }
   try {
     onStream(event);
   } catch {
@@ -242,7 +247,7 @@ function emitStreamEvent(onStream, event) {
 /** Extract the tool kind from a tool_use event (`part.tool`, e.g. bash|read|write|edit). */
 export function streamToolKind(event) {
   const tool = event?.part?.tool;
-  return typeof tool === "string" && tool ? tool : "tool";
+  return typeof tool === 'string' && tool ? tool : 'tool';
 }
 
 /**
@@ -253,17 +258,25 @@ export function streamToolKind(event) {
  * @returns {{ type: string, [k: string]: any } | null}
  */
 export function mapEventToProgress(event) {
-  if (!event || typeof event !== "object") return null;
-  if (event.type === "tool_use") {
+  if (!event || typeof event !== 'object') {
+    return null;
+  }
+  if (event.type === 'tool_use') {
     const kind = streamToolKind(event);
-    return { type: "phase", message: `OpenCode: ${sanitizeDiagnosticMessage(kind) || "tool"}`, phase: kind };
+    return {
+      type: 'phase',
+      message: `OpenCode: ${sanitizeDiagnosticMessage(kind) || 'tool'}`,
+      phase: kind,
+    };
   }
-  if (event.type === "step_start") {
-    return { type: "phase", message: "OpenCode: step", phase: "step" };
+  if (event.type === 'step_start') {
+    return { type: 'phase', message: 'OpenCode: step', phase: 'step' };
   }
-  if (event.type === "text") {
-    const text = typeof event.part?.text === "string" ? event.part.text : "";
-    if (text) return { type: "message_chunk", text };
+  if (event.type === 'text') {
+    const text = typeof event.part?.text === 'string' ? event.part.text : '';
+    if (text) {
+      return { type: 'message_chunk', text };
+    }
   }
   return null;
 }
@@ -278,7 +291,7 @@ export function mapEventToProgress(event) {
 const EDIT_TOOL_PATTERN = /(write|edit|create|delete|move|rename|patch|replace)/i;
 
 function isCompletedToolUse(e) {
-  return e?.type === "tool_use" && e?.part?.state?.status === "completed";
+  return e?.type === 'tool_use' && e?.part?.state?.status === 'completed';
 }
 
 /** Derive file changes from completed edit tool_use events that target a path. */
@@ -286,13 +299,19 @@ export function deriveFileChanges(events) {
   const out = [];
   const seen = new Set();
   for (const e of events ?? []) {
-    if (!isCompletedToolUse(e)) continue;
-    const tool = e.part.tool ?? "";
-    if (!EDIT_TOOL_PATTERN.test(tool)) continue;
+    if (!isCompletedToolUse(e)) {
+      continue;
+    }
+    const tool = e.part.tool ?? '';
+    if (!EDIT_TOOL_PATTERN.test(tool)) {
+      continue;
+    }
     const path = e.part?.state?.input?.filePath ?? null;
-    if (!path || seen.has(path)) continue;
+    if (!path || seen.has(path)) {
+      continue;
+    }
     seen.add(path);
-    const action = /delete/i.test(tool) ? "delete" : /create/i.test(tool) ? "create" : "modify";
+    const action = fileAction(tool);
     out.push({ path, action });
   }
   return out;
@@ -302,9 +321,13 @@ export function deriveFileChanges(events) {
 export function deriveCommandExecutions(events) {
   const out = [];
   for (const e of events ?? []) {
-    if (!isCompletedToolUse(e)) continue;
-    if (e.part.tool !== "bash") continue;
-    const command = e.part?.state?.input?.command ?? "";
+    if (!isCompletedToolUse(e)) {
+      continue;
+    }
+    if (e.part.tool !== 'bash') {
+      continue;
+    }
+    const command = e.part?.state?.input?.command ?? '';
     out.push({ command });
   }
   return out;
@@ -314,7 +337,9 @@ export function deriveCommandExecutions(events) {
 export function deriveToolCalls(events) {
   const out = [];
   for (const e of events ?? []) {
-    if (!isCompletedToolUse(e)) continue;
+    if (!isCompletedToolUse(e)) {
+      continue;
+    }
     out.push({ name: streamToolKind(e) });
   }
   return out;
@@ -323,16 +348,18 @@ export function deriveToolCalls(events) {
 /** First event carrying a sessionID (present on every line in practice). */
 export function firstSessionId(events) {
   for (const e of events ?? []) {
-    if (e && typeof e === "object" && e.sessionID) return e.sessionID;
+    if (e && typeof e === 'object' && e.sessionID) {
+      return e.sessionID;
+    }
   }
   return null;
 }
 
 /** Concatenate all `text` part deltas into the assistant answer. */
 function concatText(events) {
-  let text = "";
+  let text = '';
   for (const e of events ?? []) {
-    if (e?.type === "text" && typeof e.part?.text === "string") {
+    if (e?.type === 'text' && typeof e.part?.text === 'string') {
       text += e.part.text;
     }
   }
@@ -342,7 +369,9 @@ function concatText(events) {
 /** Whether a step_finish with part.reason==="stop" (end-of-turn) was seen. */
 function sawStop(events) {
   for (const e of events ?? []) {
-    if (e?.type === "step_finish" && e?.part?.reason === "stop") return true;
+    if (e?.type === 'step_finish' && e?.part?.reason === 'stop') {
+      return true;
+    }
   }
   return false;
 }
@@ -350,7 +379,9 @@ function sawStop(events) {
 /** The first {type:"error"} event, if any. */
 function firstErrorEvent(events) {
   for (const e of events ?? []) {
-    if (e?.type === "error") return e;
+    if (e?.type === 'error') {
+      return e;
+    }
   }
   return null;
 }
@@ -375,30 +406,35 @@ const AGENT_FALLBACK_PATTERN = /Falling back to default agent/i;
  * @param {{ events?: Array, stderr?: string, exitCode?: number, role?: string }} [args]
  * @returns {{ sessionId: string|null, text: string, error: object|null, status: number, fileChanges: Array, commandExecutions: Array, toolCalls: Array }}
  */
-export function normalizeHeadlessOutcome({ events = [], stderr = "", exitCode = 0, role = "delegate" } = {}) {
+export function normalizeHeadlessOutcome({
+  events = [],
+  stderr = '',
+  exitCode = 0,
+  role = 'delegate',
+} = {}) {
   const text = concatText(events);
   const sessionId = firstSessionId(events);
   const fileChanges = deriveFileChanges(events);
   const commandExecutions = deriveCommandExecutions(events);
   const toolCalls = deriveToolCalls(events);
-  const stderrTrimmed = (stderr || "").trim();
+  const stderrTrimmed = (stderr || '').trim();
 
   // Read-only safety: an unresolved --agent name silently becomes full-write
   // `build`. Fail hard if the fallback line is present.
   if (isReadOnlyRole(role) && AGENT_FALLBACK_PATTERN.test(stderrTrimmed)) {
     return {
       sessionId,
-      text: "",
+      text: '',
       error: {
         message:
-          "OpenCode could not resolve the read-only agent and fell back to the default (full-write) agent. " +
-          "Aborting to avoid an unintended write. " +
-          (stderrTrimmed || "")
+          'OpenCode could not resolve the read-only agent and fell back to the default (full-write) agent. ' +
+          'Aborting to avoid an unintended write. ' +
+          (stderrTrimmed || ''),
       },
       status: exitCode || 1,
       fileChanges,
       commandExecutions,
-      toolCalls
+      toolCalls,
     };
   }
 
@@ -408,7 +444,7 @@ export function normalizeHeadlessOutcome({ events = [], stderr = "", exitCode = 
     const message =
       errEvent?.error?.data?.message ??
       errEvent?.error?.message ??
-      (stderrTrimmed || "OpenCode reported an error.");
+      (stderrTrimmed || 'OpenCode reported an error.');
     return {
       sessionId,
       text,
@@ -416,7 +452,7 @@ export function normalizeHeadlessOutcome({ events = [], stderr = "", exitCode = 
       status: exitCode || 1,
       fileChanges,
       commandExecutions,
-      toolCalls
+      toolCalls,
     };
   }
 
@@ -431,21 +467,21 @@ export function normalizeHeadlessOutcome({ events = [], stderr = "", exitCode = 
       status: exitCode,
       fileChanges,
       commandExecutions,
-      toolCalls
+      toolCalls,
     };
   }
 
   // Success requires a produced turn: a text answer or an end-of-turn stop.
   if (!text && !sawStop(events)) {
-    const message = stderrTrimmed || "OpenCode produced no result.";
+    const message = stderrTrimmed || 'OpenCode produced no result.';
     return {
       sessionId,
-      text: "",
+      text: '',
       error: { message },
       status: 1,
       fileChanges,
       commandExecutions,
-      toolCalls
+      toolCalls,
     };
   }
 
@@ -458,7 +494,7 @@ export function normalizeHeadlessOutcome({ events = [], stderr = "", exitCode = 
     status: 0,
     fileChanges,
     commandExecutions,
-    toolCalls
+    toolCalls,
   };
 }
 
@@ -473,10 +509,10 @@ export function getOpencodeAvailability() {
   const cli = findOpencodeBinary();
   try {
     const version = execSync(`"${cli}" --version`, {
-      encoding: "utf8",
+      encoding: 'utf8',
       shell: true,
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: 8000
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 8000,
     }).trim();
     return { available: true, detail: `opencode ${version}`, version };
   } catch (err) {
@@ -485,7 +521,7 @@ export function getOpencodeAvailability() {
       detail:
         `OpenCode CLI not found (tried: ${cli}). Install it via \`npm install -g opencode-ai\`. ` +
         `Error: ${String(err.message ?? err)}`,
-      version: null
+      version: null,
     };
   }
 }
@@ -501,27 +537,33 @@ export function getOpencodeAuthStatus() {
   const cli = findOpencodeBinary();
   try {
     const output = execSync(`"${cli}" auth list`, {
-      encoding: "utf8",
+      encoding: 'utf8',
       shell: true,
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: 10000
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 10000,
     });
-    const authenticated = output.includes("●");
+    const authenticated = output.includes('●');
     if (authenticated) {
-      return { authenticated: true, loggedIn: true, method: "opencode-auth", detail: output.trim() };
+      return {
+        authenticated: true,
+        loggedIn: true,
+        method: 'opencode-auth',
+        detail: output.trim(),
+      };
     }
     return {
       authenticated: false,
       loggedIn: false,
       method: null,
-      detail: output.trim() || "OpenCode reports no authenticated providers. Run `opencode auth login`."
+      detail:
+        output.trim() || 'OpenCode reports no authenticated providers. Run `opencode auth login`.',
     };
   } catch (err) {
     return {
       authenticated: false,
       loggedIn: false,
       method: null,
-      detail: String(err.message ?? err)
+      detail: String(err.message ?? err),
     };
   }
 }
@@ -542,20 +584,22 @@ export function getOpencodeAuthStatus() {
  * @returns {Promise<{ sessionId: string|null, text: string, error: object|null, status: number, fileChanges: Array, commandExecutions: Array, toolCalls: Array }>}
  */
 export async function runHeadlessOpencodeTurn(cwd, prompt, options = {}) {
-  const role = options.role ?? "delegate";
+  const role = options.role ?? 'delegate';
   const args = buildHeadlessArgs({
     role,
     model: options.model,
     effort: options.effort,
     sessionId: options.sessionId,
-    cwd
+    cwd,
   });
   const cli = findOpencodeBinary();
 
   return await new Promise((resolve) => {
     let settled = false;
     const finish = (value) => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       settled = true;
       resolve(value);
     };
@@ -565,22 +609,32 @@ export async function runHeadlessOpencodeTurn(cwd, prompt, options = {}) {
       child = spawnCommand(cli, args, {
         cwd,
         env: buildOpencodeSpawnEnv(options.env ?? process.env, role),
-        stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
       });
     } catch (error) {
-      finish({ sessionId: null, text: "", error, status: 1, fileChanges: [], commandExecutions: [], toolCalls: [] });
+      finish({
+        sessionId: null,
+        text: '',
+        error,
+        status: 1,
+        fileChanges: [],
+        commandExecutions: [],
+        toolCalls: [],
+      });
       return;
     }
 
     const events = [];
-    let stderrText = "";
+    let stderrText = '';
 
     if (child.stdout) {
       const rl = readline.createInterface({ input: child.stdout });
-      rl.on("line", (line) => {
+      rl.on('line', (line) => {
         const trimmed = line.trim();
-        if (!trimmed) return;
+        if (!trimmed) {
+          return;
+        }
         let evt;
         try {
           evt = JSON.parse(trimmed);
@@ -589,28 +643,38 @@ export async function runHeadlessOpencodeTurn(cwd, prompt, options = {}) {
         }
         events.push(evt);
         const progress = mapEventToProgress(evt);
-        if (progress) emitStreamEvent(options.onStream, progress);
+        if (progress) {
+          emitStreamEvent(options.onStream, progress);
+        }
       });
     }
 
     if (child.stderr) {
-      child.stderr.on("data", (chunk) => {
+      child.stderr.on('data', (chunk) => {
         stderrText += chunk.toString();
       });
     }
 
-    child.on("error", (error) => {
-      finish({ sessionId: null, text: "", error, status: 1, fileChanges: [], commandExecutions: [], toolCalls: [] });
+    child.on('error', (error) => {
+      finish({
+        sessionId: null,
+        text: '',
+        error,
+        status: 1,
+        fileChanges: [],
+        commandExecutions: [],
+        toolCalls: [],
+      });
     });
 
-    child.on("close", (code) => {
+    child.on('close', (code) => {
       finish(normalizeHeadlessOutcome({ events, stderr: stderrText, exitCode: code ?? 0, role }));
     });
 
     // Deliver the prompt on stdin (newline-safe; avoids cmd.exe arg quoting).
     try {
       if (child.stdin) {
-        child.stdin.write(prompt ?? "");
+        child.stdin.write(prompt ?? '');
         child.stdin.end();
       }
     } catch {
@@ -630,8 +694,8 @@ export async function cancelHeadlessOpencode(jobId) {
   return {
     attempted: true,
     interrupted: false,
-    transport: "process-tree",
-    detail: `OpenCode headless jobs are cancelled by killing the process tree (job ${jobId}).`
+    transport: 'process-tree',
+    detail: `OpenCode headless jobs are cancelled by killing the process tree (job ${jobId}).`,
   };
 }
 
@@ -646,9 +710,11 @@ export async function cancelHeadlessOpencode(jobId) {
 
 /** The transport flag value for OpenCode, read at call time. Default "headless". */
 export function opencodeTransport(env = process.env) {
-  return String(env.MULTI_TRANSPORT_OPENCODE ?? "").trim().toLowerCase() === "acp"
-    ? "acp"
-    : "headless";
+  return String(env.MULTI_TRANSPORT_OPENCODE ?? '')
+    .trim()
+    .toLowerCase() === 'acp'
+    ? 'acp'
+    : 'headless';
 }
 
 // In-flight ACP turn handles, keyed by jobId, so an in-process cancel() can route
@@ -665,17 +731,25 @@ const inflightAcpTurns = new Map();
  * @returns {{ type: string, [k: string]: any } | null}
  */
 export function mapAcpUpdateToProgress(update) {
-  if (!update || typeof update !== "object") return null;
-  const kind = update.sessionUpdate;
-  if (kind === "agent_message_chunk") {
-    const block = update.content;
-    const text = block?.type === "text" && typeof block.text === "string" ? block.text : "";
-    if (text) return { type: "message_chunk", text };
+  if (!update || typeof update !== 'object') {
     return null;
   }
-  if (kind === "tool_call" || kind === "tool_call_update") {
-    const raw = update.title ?? update.kind ?? update.toolCallId ?? "tool";
-    return { type: "phase", message: `OpenCode: ${sanitizeDiagnosticMessage(raw) || "tool"}`, phase: kind };
+  const kind = update.sessionUpdate;
+  if (kind === 'agent_message_chunk') {
+    const block = update.content;
+    const text = block?.type === 'text' && typeof block.text === 'string' ? block.text : '';
+    if (text) {
+      return { type: 'message_chunk', text };
+    }
+    return null;
+  }
+  if (kind === 'tool_call' || kind === 'tool_call_update') {
+    const raw = update.title ?? update.kind ?? update.toolCallId ?? 'tool';
+    return {
+      type: 'phase',
+      message: `OpenCode: ${sanitizeDiagnosticMessage(raw) || 'tool'}`,
+      phase: kind,
+    };
   }
   return null;
 }
@@ -696,19 +770,19 @@ export function mapAcpUpdateToProgress(update) {
  * @returns {Promise<{ sessionId: string|null, text: string, error: object|null, status: number, fileChanges: Array, commandExecutions: Array, toolCalls: Array }>}
  */
 export async function runAcpOpencodeTurn(cwd, prompt, options = {}) {
-  const role = options.role ?? "delegate";
+  const role = options.role ?? 'delegate';
   // Tests inject a {exe, args} for the fake ACP agent here (same role resolve.mjs
   // env overrides serve in production); production never passes spawnSpec.
   const resolved = options.spawnSpec ?? resolveOpenCodeAcp({ env: options.env ?? process.env });
   if (!resolved.exe) {
     return {
       sessionId: null,
-      text: "",
-      error: { message: resolved.detail || "OpenCode ACP executable not found." },
+      text: '',
+      error: { message: resolved.detail || 'OpenCode ACP executable not found.' },
       status: 1,
       fileChanges: [],
       commandExecutions: [],
-      toolCalls: []
+      toolCalls: [],
     };
   }
 
@@ -723,47 +797,32 @@ export async function runAcpOpencodeTurn(cwd, prompt, options = {}) {
     args: resolved.args,
     cwd,
     env,
-    prompt: prompt ?? "",
+    prompt: prompt ?? '',
     model: resolveModel(options.model),
     allowWrites: !readOnly,
-    onUpdate: onStream
-      ? (update) => {
-          const progress = mapAcpUpdateToProgress(update);
-          if (progress) {
-            try {
-              onStream(progress);
-            } catch {
-              // Best-effort.
-            }
-          }
-        }
-      : undefined,
-    onDiagnostic: () => {}
+    onUpdate: (update) => {
+      const progress = mapAcpUpdateToProgress(update);
+      if (progress) {
+        onStream?.(progress);
+      }
+    },
+    onDiagnostic: () => {},
   });
 
   const jobId = options.jobId ?? null;
-  if (jobId) inflightAcpTurns.set(jobId, turn);
+  if (jobId) {
+    inflightAcpTurns.set(jobId, turn);
+  }
   let res;
   try {
     res = await turn;
   } finally {
-    if (jobId) inflightAcpTurns.delete(jobId);
+    if (jobId) {
+      inflightAcpTurns.delete(jobId);
+    }
   }
 
-  const text = typeof res.text === "string" ? res.text : "";
-  const error = res.error ? { message: res.error.message + (res.error.detail ? ` ${res.error.detail}` : "") } : null;
-  const status = error ? 1 : 0;
-  return {
-    sessionId: res.sessionId ?? null,
-    text,
-    error,
-    status,
-    // The ACP turn runner does not derive file/command activity (no tool_use
-    // schema parse like the NDJSON path). The render layer tolerates empty arrays.
-    fileChanges: [],
-    commandExecutions: [],
-    toolCalls: []
-  };
+  return acpAdapterResult(res);
 }
 
 /**
@@ -777,7 +836,7 @@ export async function runAcpOpencodeTurn(cwd, prompt, options = {}) {
  */
 export async function cancelAcpOpencode(jobId) {
   const turn = jobId ? inflightAcpTurns.get(jobId) : null;
-  if (turn && typeof turn.cancel === "function") {
+  if (turn && typeof turn.cancel === 'function') {
     try {
       turn.cancel();
     } catch {
@@ -786,8 +845,8 @@ export async function cancelAcpOpencode(jobId) {
     return {
       attempted: true,
       interrupted: true,
-      transport: "acp",
-      detail: `OpenCode ACP turn cancelled in-protocol (job ${jobId}); process tree killed as backstop.`
+      transport: 'acp',
+      detail: `OpenCode ACP turn cancelled in-protocol (job ${jobId}); process tree killed as backstop.`,
     };
   }
   // No in-flight turn in THIS process (the cross-process cancel case): the
@@ -796,8 +855,8 @@ export async function cancelAcpOpencode(jobId) {
   return {
     attempted: true,
     interrupted: false,
-    transport: "process-tree",
-    detail: `No in-flight ACP turn in this process; OpenCode ACP jobs are cancelled by killing the process tree (job ${jobId}).`
+    transport: 'process-tree',
+    detail: `No in-flight ACP turn in this process; OpenCode ACP jobs are cancelled by killing the process tree (job ${jobId}).`,
   };
 }
 
@@ -808,7 +867,7 @@ export async function cancelAcpOpencode(jobId) {
  * unchanged headless path. The default (no flag) is byte-identical to today.
  */
 export async function invokeOpencode(cwd, prompt, options = {}) {
-  if (opencodeTransport(options.env ?? process.env) === "acp") {
+  if (opencodeTransport(options.env ?? process.env) === 'acp') {
     return runAcpOpencodeTurn(cwd, prompt, options);
   }
   return runHeadlessOpencodeTurn(cwd, prompt, options);
@@ -816,17 +875,24 @@ export async function invokeOpencode(cwd, prompt, options = {}) {
 
 /** Transport-dispatching cancel: ACP routing when the flag selects acp. */
 export async function cancelOpencode(jobId) {
-  if (opencodeTransport(process.env) === "acp") {
+  if (opencodeTransport(process.env) === 'acp') {
     return cancelAcpOpencode(jobId);
   }
   return cancelHeadlessOpencode(jobId);
 }
 
 export const adapter = {
-  name: "opencode",
+  name: 'opencode',
   isAvailable: getOpencodeAvailability,
   isAuthenticated: getOpencodeAuthStatus,
   invoke: invokeOpencode,
   cancel: cancelOpencode,
-  getSession: undefined
+  getSession: undefined,
 };
+
+function fileAction(tool) {
+  if (/delete/i.test(tool)) {
+    return 'delete';
+  }
+  return /create/i.test(tool) ? 'create' : 'modify';
+}

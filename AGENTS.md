@@ -24,15 +24,29 @@ define the product direction.
   bridges use the real external CLI's execution loop and native authentication.
   Never replay observed external tool events as executable Claude tool calls.
 - Cursor uses the official SDK with only our custom MCP callbacks enabled.
-  These forward **unexecuted** tool requests to Claude and await results; Claude
-  permissions apply. Do not enable Cursor's independent tools or ambient settings.
+  These forward **unexecuted** tool requests to the Claude Code harness and await
+  results; Claude Code permissions apply. Do not enable Cursor's independent tools or ambient settings.
+- Provider auto-review is an edge case used only when Claude access is absent.
+  With Claude access, preserve Claude Code's standard reviewer for every provider.
+  Without it, an authenticated provider may review only its own agent's pending
+  tool calls: OpenAI reviews OpenAI; Cursor reviews Cursor through the official SDK.
+  Apply this per originating agent, including subagents inheriting auto mode;
+  the parent/main model does not select a different provider's reviewer for a worker.
+  Invoke review only when Claude Code's native permission flow requires it after
+  static permission checks. Never use a provider reviewer as a cross-provider fallback.
+- Cursor's experimental Bash reviewer uses an isolated, source-pinned SDK process
+  only to obtain a native verdict. Its Shell core is inert; other native execution
+  requests fail closed. Claude Code still executes approved actions. Keep this
+  separate from the inference bridge; no Sand or MCP review route. SDK drift and
+  unsupported review actions must not fall through to approval.
 - Preserve Claude subscription passthrough and isolate provider credentials.
   Do not add our own Claude subscription login/token pool or extract Antigravity
   tokens for direct model requests. External operations retain external permissions.
 - Targets: OpenAI, Cursor, Antigravity through its real CLI, OpenCode, llama.cpp,
   and Grok Build. The direct GPT gateway and Cursor SDK bridge are experimental;
-  Cursor's Composer 2.5 live baseline passes. Other models and Cursor compaction
-  are unverified; other provider bridges are planned.
+  Cursor's Composer 2.5 live baseline includes main-session manual/repeated/automatic
+  compaction and disk resume. Other-model fidelity and subagent compaction remain
+  unverified; other provider bridges are planned.
 
 ## Refactor scope
 
@@ -54,22 +68,54 @@ instructions. Keep new scratch research in gitignored `.agent/`.
 
 ## Current code map
 
-- `plugins/multi/src/native-model-gateway.ts`: experimental gateway launcher,
-  model-picker settings, and native OpenAI/Cursor worker registration.
-- `plugins/multi/src/lib/native-gateway.ts` and `native-responses.ts`:
-  provider routing and Messages/Responses translation. `native-tools.ts` handles
-  stable tool aliases; `native-tokens.ts` provides local count estimates.
-- `native-cursor.ts`: SDK callback lifecycle, retry cache, streaming, and isolation.
-  `native-cursor-models.ts`: account catalog selections and native worker names.
-- `plugins/multi/src/lib/adapters/`: retained Cursor/OpenCode transport
-  references, with their tests; they are not wired into the gateway yet.
-- `plugins/multi/src/lib/acp/` and `lib/process.mjs`: retained transport and
-  process helpers. The ACP SDK bundle is generated JavaScript, not migration input.
-- `scripts/`: repository development utilities, including the ACP bundle builder.
-- `test/unit/`: offline tests. `test/live/`: opt-in live checks.
+Paths below are relative to `plugins/multi/src/` unless noted.
+
+- `native-model-gateway.ts`: launcher, session-local model picker, worker registration.
+- `gateway/server.ts`: HTTP routing, Claude passthrough, and request/session lifecycle.
+- `gateway/messages.ts`: shared Claude Messages request/response and stream types.
+  `gateway/tools.ts`: stable tool aliases. `gateway/approval.ts` and
+  `gateway/permission-hook.ts`: native approval protocol and capability checks.
+- `providers/openai/`: Codex authentication (`auth.ts`), models/workers (`models.ts`),
+  Responses translation (`responses.ts`), local estimates (`tokens.ts`), and reviewer
+  (`approval.ts`, with vendored policy/license files in `guardian/`).
+- `providers/cursor/`: SDK callbacks, retry cache, and cancellation (`bridge.ts`);
+  account model selections and native worker names (`models.ts`).
+- `transports/`: retained Cursor/OpenCode CLI adapters (`cursor.mjs`, `opencode.mjs`),
+  process helpers (`process.mjs`), and ACP transport (`acp/`). These are references,
+  not wired gateway backends. `acp/vendor/` is generated JavaScript.
+- Root `scripts/`: development utilities, including the ACP bundle builder.
+- Root `test/unit/`: offline tests. `test/live/`: opt-in live checks.
+
+Keep provider authentication and model catalogs with the provider. Shared Claude
+protocol types belong in `gateway/`; avoid importing the HTTP server for provider
+runtime helpers. Import concrete modules directly; no re-export barrels or old-path
+wrappers. The Cursor bridge currently reuses OpenAI request normalization and token
+estimation; do not mistake that explicit reuse for an independent generic protocol
+layer or duplicate it merely to make the folders look independent.
 
 ## Development and verification
 
+- Do not use Cursor Fast mode for development or live tests. Explicitly select
+  advertised `fast:false`; do not inherit an account default. Keep paid probes
+  small and bounded, and reuse existing usage records before generating more.
+
+- Run `npm run check` before considering a change done: Biome formatting/lint,
+  Knip unused-code analysis, strict TypeScript, and offline tests. `npm run format`
+  formats files; `npm run lint:fix` applies Biome's safe fixes. Do not apply all
+  unsafe fixes without reviewing their effect.
+- Biome requires braces, one variable declaration per statement, no nested
+  ternaries, no parameter reassignment, no explicit `any`, no non-null assertions,
+  and cognitive complexity at most 15. Tests follow the same rules. Use clear
+  names, keep mutable state ownership explicit, and explain protocol constraints.
+  Do not manufacture arbitrary helpers to evade complexity checks.
+- Do not disable rules, raise limits, add blanket exclusions, or use assertions
+  to evade validation just to pass lint. Any necessary suppression must name the
+  specific rule and explain the concrete external/protocol constraint locally.
+- Knip treats the retained Cursor/OpenCode adapter modules as reference entry
+  points because the architecture deliberately preserves their public transports.
+  `where.exe` is a Windows system command, not an npm dependency. Biome excludes
+  the generated ACP bundle and lockfile; hand-written runtime and test code stay
+  covered.
 - Preserve unrelated uncommitted work. Do not restore removed integrations from
   archived plans or install/publish changes merely because an old skill says to.
 - Do not spawn fleets of Claude agents to implement or validate work here.
