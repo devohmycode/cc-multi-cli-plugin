@@ -23,22 +23,20 @@ define the product direction.
 - Direct model integrations use Claude Code's tools and execution loop. Harness
   bridges use the real external CLI's execution loop and native authentication.
   Never replay observed external tool events as executable Claude tool calls.
-- Cursor uses the official SDK with only our custom MCP callbacks enabled.
-  These forward **unexecuted** tool requests to the Claude Code harness and await
-  results; Claude Code permissions apply. Do not enable Cursor's independent tools or ambient settings.
-- Provider auto-review is an edge case used only when Claude access is absent.
-  With Claude access, preserve Claude Code's standard reviewer for every provider.
-  Without it, an authenticated provider may review only its own agent's pending
-  tool calls: OpenAI reviews OpenAI; Cursor reviews Cursor through the official SDK.
-  Apply this per originating agent, including subagents inheriting auto mode;
-  the parent/main model does not select a different provider's reviewer for a worker.
-  Invoke review only when Claude Code's native permission flow requires it after
-  static permission checks. Never use a provider reviewer as a cross-provider fallback.
-- Cursor's experimental Bash reviewer uses an isolated, source-pinned SDK process
-  only to obtain a native verdict. Its Shell core is inert; other native execution
-  requests fail closed. Claude Code still executes approved actions. Keep this
-  separate from the inference bridge; no Sand or MCP review route. SDK drift and
-  unsupported review actions must not fall through to approval.
+- Cursor's accepted direction is official SDK ownership of tools, persistent state,
+  and native review. Claude Code supplies the session interface and outer worker
+  coordination. Display external actions without replaying them as executable
+  Claude tools. Initial text/status progress is acceptable; native tool-row
+  rendering is a separate integration task. No Sand or alternate auth route.
+- The current checkpoint still uses Claude-executed callbacks and a separate
+  Bash-only reviewer. These are transition code, not the target architecture.
+  Retire the separate Cursor reviewer when native execution replaces it; do not
+  extend its internal SDK patches into a general tool-review framework.
+- Native Cursor review belongs to the originating Cursor run, including workers,
+  irrespective of Claude login availability. Do not substitute another provider's
+  reviewer. The existing callback/OpenAI routes still follow their implemented
+  no-Claude-access fallback rule until separately changed. External execution
+  must retain explicit permissions; rendering a decision is not enforcement.
 - Preserve Claude subscription passthrough and isolate provider credentials.
   Do not add our own Claude subscription login/token pool or extract Antigravity
   tokens for direct model requests. External operations retain external permissions.

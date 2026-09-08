@@ -1,6 +1,6 @@
 # Architecture
 
-This is the authoritative product and architecture direction, agreed 2026-09-05.
+This is the authoritative product and architecture direction, updated 2026-09-07.
 Pair it with [AGENTS.md](AGENTS.md) for development rules. Historical research and rejected proposals are
 archived locally under `.agent/archive/`; they are not implementation instructions.
 
@@ -22,21 +22,19 @@ There are two execution paths behind that experience:
 2. **External harness integration:** the real provider CLI or supported agent SDK
    owns execution and native authentication. Our bridge translates its public
    progress stream and final result for display inside Claude Code. This path
-   remains the fallback for integrations that execute tools externally. Cursor's
-   SDK bridge is a more direct variant: its inference loop requests our custom
-   callbacks, which wait while Claude executes the corresponding native tools.
-   That variant passed the authenticated Composer 2.5 callback, main-model and
-   worker Read/Edit, cancellation, and saved-history switching contract.
+   is the accepted Cursor direction: the official SDK owns tools, persistent
+   conversation state, and native review. The current callback implementation
+   described below predates this decision and remains until the transition lands.
 
 ```text
 Claude Code: /model, named workers, native subagent lifecycle
                          |
                   Our Node gateway
                /          |                   \
-     direct adapter   SDK callback bridge   CLI bridge (planned)
+     direct adapter   SDK harness bridge   CLI bridge (planned)
            |                |                      |
     provider/server    official Cursor SDK      real CLI
-      Claude tools        Claude tools         CLI tools
+      Claude tools        Cursor tools         CLI tools
 ```
 
 The backend mechanism is chosen by the integration. Users should not need to
@@ -51,7 +49,7 @@ each provider's current capabilities; do not silently substitute another model.
 | Target | Intended route | Current state in this checkout |
 | --- | --- | --- |
 | OpenAI | Direct model adapter using the saved Codex login | Main-model switching and native GPT workers work as an experimental gateway; compatibility gaps remain. |
-| Cursor | Official SDK with asynchronous callbacks into Claude's tool loop | Experimental: Composer 2.5 passed live callback, main-model and worker Read/Edit, cancellation, and Cursor → Claude → Cursor with saved history. Composer main-session manual/repeated/automatic compaction and disk resume also pass; other-model fidelity and subagent compaction remain unverified. |
+| Cursor | Official SDK owning tools, state, and native review (transition pending) | Experimental: Composer 2.5 passed live callback, main-model and worker Read/Edit, cancellation, and Cursor → Claude → Cursor with saved history. Composer main-session manual/repeated/automatic compaction and disk resume also pass; other-model fidelity and subagent compaction remain unverified. |
 | Antigravity | Real `agy` CLI with its native login and documented streaming | Future harness bridge; the old transcript-recovery adapter was removed. |
 | OpenCode | Real CLI delegation; direct Zen endpoints where appropriate | Headless/ACP transport references are retained; direct Zen gateway integration is not implemented. |
 | Local models via llama.cpp | Prefer its Anthropic-compatible Messages endpoint | Planned; validate model/tool/template compatibility before adding translation. |
@@ -62,7 +60,54 @@ forwarders. This records the branch state, not a new requirement for future work
 for the new architecture. Reuse useful runtime components; do not invest in
 preserving the old interface unless a task specifically calls for it.
 
-### Execution and subscription boundaries
+### Cursor ownership decision — accepted, implementation pending
+
+Prioritize a native-feeling, functional Claude Code interface over requiring
+Claude Code to own Cursor's internals. Keep our Node gateway, official SDK auth,
+model picker, and outer main/worker integration. Cursor owns its tools, ongoing
+conversation state, compaction, and native review. Persist/resume SDK state rather
+than rebuilding the full conversation after each completed user turn. Define
+branching, provider switching, changed configuration, and cancellation explicitly.
+
+Cursor reviews Cursor-originated actions whether or not Claude access exists.
+This supersedes the old requirement to use Claude's reviewer for Cursor whenever
+Claude is signed in. It does not itself change the existing OpenAI runtime.
+Permissions must be enforced in the executing harness, with unavailable review
+and manual intervention handled explicitly. Native SDK autoReview alone is not
+proof that a call was reviewed. Do not silently permit actions to fix compatibility.
+
+Translate external progress and outcomes for display; never re-execute an observed
+Cursor tool through Claude Code. Attributed text and status are acceptable for the
+first implementation. Native tool rows, diffs, approval indicators and nested
+Cursor worker rows are separate UI work. A less polished display is preferable to
+retaining the separate, source-patched Cursor reviewer merely for visual fidelity.
+Remove that reviewer when the native tool route replaces it.
+
+Evidence behind the decision (SDK 1.0.31, Claude Code 2.1.263):
+
+- A six-request, non-Fast Composer 2.5 experiment compared one persistent agent
+  against our actual reconstructed-history bridge. Initial cache reads were 427
+  tokens in both arms. Follow-up cache reads were 6,429 and 7,045 for the persistent
+  agent versus 438 and 427 for reconstructed agents; answers matched. This is a
+  small cache-reuse result, not an exact billed-cost or monthly-budget measurement.
+- Custom callbacks can receive native server-side review. With injected test
+  policy, an allowed callback ran and a denied callback did not. With the review
+  feature disabled, both ran. The documented policy file did not load in that
+  probe. The former blanket claim that custom callbacks bypass native review was
+  incorrect; public callback arrival still does not prove approval.
+- An offline terminal probe displayed progress text and a custom status line.
+  An unfamiliar server-tool block did not produce a native tool row. The installed
+  renderer has specific supported cases, not a generic external-tool renderer.
+  Native visual fidelity needs a deliberate extension, not a renamed tool event.
+
+These probes and raw artifacts remain in gitignored `.agent/cursor-review/`.
+No harness-translation implementation is included in this decision checkpoint.
+All future Cursor live tests must explicitly disable Fast and bound paid usage.
+
+### Current callback implementation and subscription boundaries
+
+The following describes the pre-transition runtime. Where it conflicts with the
+Cursor ownership decision above, it is implementation status, not a target design.
 
 - When Anthropic credentials are available, preserve Claude Code's native automatic
   classification, including for external working models. When they are absent, map
@@ -135,13 +180,16 @@ preserving the old interface unless a task specifically calls for it.
 
 ### Next work
 
+Implement the Cursor ownership transition above before expanding the separate
+Cursor reviewer. Preserve the direct OpenAI route and keep paid validation bounded.
+
 OpenAI compatibility work and the Cursor Composer 2.5 live baseline are in place.
 Preserve those regression checks as new providers are added. Composer main-session
 compaction is verified; subagent compaction and visual lifecycle fidelity still
 need live verification. Antigravity and direct
 OpenCode Zen integration remain unimplemented; no next-provider order is agreed.
 
-### First harness-bridge proof
+### Existing callback-bridge proof (pre-transition)
 
 Build one Cursor-backed route using the official SDK and pending custom-tool callbacks. Exercise
 it both as a `/model` choice and as a native worker, without a Sonnet forwarder.

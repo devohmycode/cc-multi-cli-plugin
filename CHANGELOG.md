@@ -6,6 +6,13 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+### Cursor harness direction
+
+- Record the accepted transition to Cursor-owned tools, persistent state and
+  native review, with Claude Code providing display and outer coordination.
+  Preserve cache/UI probe findings and distinguish the current callback prototype
+  from the target architecture. Implementation begins after this checkpoint.
+
 - Default Cursor model routes, named workers and catalog-based live checks to
   explicitly advertised non-Fast parameters, even when the account default is Fast.
 

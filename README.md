@@ -14,6 +14,12 @@ direct GPT gateway and an experimental Cursor SDK bridge in TypeScript, plus
 retained Cursor/OpenCode transport references.
 The earlier command-based delegation system was removed in the TypeScript branch.
 
+**Next architecture:** Cursor will own its native tools, persistent session state,
+compaction, and review; Claude Code will display and coordinate the work. The
+callback bridge and separate Bash reviewer documented below are the current
+prototype, pending replacement. Initial external progress may use text/status
+rather than native tool rows. See [the ownership decision](ARCHITECTURE.md#cursor-ownership-decision--accepted-implementation-pending).
+
 ## Direction: one session, multiple models and harnesses
 
 We are building a custom Node gateway that brings external models and real coding
