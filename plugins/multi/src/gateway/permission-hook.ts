@@ -1,4 +1,18 @@
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+export function hookCommand(file: URL): string {
+  return [process.execPath, fileURLToPath(file)]
+    .map((value) => {
+      if (process.platform !== 'win32') {
+        return `'${value.replaceAll("'", "'\\''")}'`;
+      }
+      if (/["%\r\n!]/.test(value)) {
+        throw new Error('Unsupported characters in hook path');
+      }
+      return `"${value}"`;
+    })
+    .join(' ');
+}
 
 export interface PendingApprovalTool {
   session: string;

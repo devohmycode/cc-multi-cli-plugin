@@ -19,7 +19,7 @@ test('launcher preserves native auth, disables unavailable auto mode, and merges
 const fs=require('node:fs');const args=process.argv.slice(2);
 if(args[0]==='auth'){if(process.env.TEST_AUTH==='malformed'){console.log('not-json');process.exit(0)}if(process.env.TEST_AUTH==='error'){process.exit(2)}if(process.env.TEST_AUTH==='missing'){console.log('{}');process.exit(0)}process.stdout.write(JSON.stringify({loggedIn:process.env.TEST_AUTH==='yes'}));process.exitCode=process.env.TEST_AUTH==='yes'?0:1}else{
 const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'utf8'));
- console.log(JSON.stringify({settings,models:args.filter(x=>x.startsWith('multi/')),settingsCount:args.filter(x=>x==='--settings').length,hasLocalToken:!!process.env.MULTI_GATEWAY_TOKEN,auth:process.env.ANTHROPIC_API_KEY?'api':process.env.ANTHROPIC_AUTH_TOKEN?'local':'native'}));}
+ console.log(JSON.stringify({settings,models:args.filter(x=>x.startsWith('multi/')),settingsCount:args.filter(x=>x==='--settings').length,hasLocalToken:!!process.env.MULTI_GATEWAY_TOKEN,apiTimeout:process.env.API_TIMEOUT_MS,auth:process.env.ANTHROPIC_API_KEY?'api':process.env.ANTHROPIC_AUTH_TOKEN?'local':'native'}));}
 `,
     { mode: 0o755 },
   );
@@ -46,18 +46,24 @@ const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'ut
           CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
           CODEX_HOME: cwd,
           TEST_AUTH: auth,
+          API_TIMEOUT_MS: auth === 'api' ? '1000' : undefined,
           ...(auth === 'api' ? { ANTHROPIC_API_KEY: 'fake-test-key' } : {}),
         },
       },
     );
     const result = JSON.parse(stdout);
     assert.equal(result.settingsCount, 1);
+    assert.equal(result.apiTimeout, auth === 'api' ? '1000' : '2147483647');
     assert.deepEqual(result.settings.permissions.deny, ['Bash(denied)']);
     assert.equal(
       result.settings.permissions.disableAutoMode,
       auth === 'no' ? 'disable' : undefined,
     );
-    assert.equal(result.hasLocalToken, auth === 'no');
+    assert.equal(
+      result.hasLocalToken,
+      true,
+      'local hooks authenticate independently of Claude login',
+    );
     assert.equal(result.auth, { no: 'local', api: 'api', yes: 'native' }[auth]);
     assert.equal(result.settings.hooks.PreToolUse?.length, auth === 'no' ? 1 : undefined);
   }

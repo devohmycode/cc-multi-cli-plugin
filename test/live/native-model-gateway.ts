@@ -28,6 +28,7 @@ interface TraceEvent {
 }
 
 const worker = process.argv[2] ?? 'openai-native';
+const parent = process.argv[3] ?? 'sonnet';
 const cursor = worker.startsWith('cursor-')
   ? cursorModelOptions(await (await import('@cursor/sdk')).Cursor.models.list()).find(
       (option) => option.nativeWorker && option.worker === worker,
@@ -37,6 +38,12 @@ assert(
   cursor || Object.hasOwn(OPENAI_WORKERS, worker),
   'Pass a registered native worker name (--cursor-models lists Cursor workers)',
 );
+if (cursor) {
+  assert.equal(
+    cursor.selection.params?.find((parameter) => parameter.id === 'fast')?.value,
+    'false',
+  );
+}
 const launcher = fileURLToPath(
   new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url),
 );
@@ -52,15 +59,14 @@ try {
       '-p',
       `Delegate to ${worker}: read fixture.txt, then use Edit to replace alpha with beta while preserving the remaining text. Have the worker report the exact resulting line. Wait for completion. Do not read or edit the file yourself.`,
       '--model',
-      'sonnet',
+      parent,
       '--effort',
       'low',
       '--system-prompt',
       'You coordinate a small native subagent integration test. Use the requested worker and report its result.',
-      '--tools',
-      'Agent,Read,Edit',
-      '--allowedTools',
-      'Agent,Read,Edit',
+      ...(cursor
+        ? ['--permission-mode', 'auto', '--allowedTools', 'Agent']
+        : ['--tools', 'Agent,Read,Edit', '--allowedTools', 'Agent,Read,Edit']),
       '--strict-mcp-config',
       '--setting-sources',
       '',
@@ -134,7 +140,13 @@ try {
   assert.equal(code, 0);
   assert.equal(content, `beta ${nonce}\n`);
   assert(results.some((e) => !e.is_error && e.result?.includes(nonce)));
-  assert(diagnostics.includes('"route":"anthropic","status":200'));
+  assert(
+    diagnostics.includes(
+      parent.startsWith('multi/openai/')
+        ? '"route":"openai-request"'
+        : '"route":"anthropic","status":200',
+    ),
+  );
   const { model, effort } = cursor
     ? { model: cursor.model, effort: undefined }
     : OPENAI_WORKERS[worker];
@@ -145,15 +157,22 @@ try {
     .filter((line) => line.startsWith('[native] '))
     .map((line) => JSON.parse(line.slice('[native] '.length)))
     .filter((event: TraceEvent) => event.route === (cursor ? 'cursor' : 'openai-request'));
-  assert(requests.length >= 3, 'Expected external tool calls and completion');
+  assert(requests.length >= (cursor ? 2 : 3), 'Expected external dispatch and completion');
   assert(
     requests.every((request) => request.model === model && (cursor || request.effort === effort)),
     'Wrong upstream model or effort',
   );
-  assert(diagnostics.includes('"tools":["Read"]'));
-  assert(diagnostics.includes('"tools":["Edit"]'));
+  if (cursor) {
+    assert(
+      diagnostics.includes('"tools":[]'),
+      'Cursor actions must not be emitted as Claude tools',
+    );
+  } else {
+    assert(diagnostics.includes('"tools":["Read"]'));
+    assert(diagnostics.includes('"tools":["Edit"]'));
+  }
   console.log(
-    `PASS: real Claude parent + ${worker} (${model}${effort ? `, ${effort}` : ''}) + native Read/Edit + completion.`,
+    `PASS: real ${parent} parent + ${worker} (${model}${effort ? `, ${effort}` : ''}) + native Read/Edit + completion.`,
   );
 } finally {
   await rm(cwd, { recursive: true, force: true });

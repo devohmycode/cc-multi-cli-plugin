@@ -73,7 +73,7 @@ function modelVariants(item: ModelListItem): CursorModelOption[] {
       return {
         model,
         label: `${label} via Cursor`,
-        description: 'Cursor SDK · Claude Code executes tools',
+        description: 'Cursor SDK · native tools and persistent state',
         worker: `cursor-${slug}${!base && preset ? `-${preset}` : ''}`.slice(0, 90),
         nativeWorker,
         selection: { id: item.id, ...(params?.length ? { params } : {}) },

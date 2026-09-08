@@ -6,6 +6,82 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+### Cursor native lifecycle and compatibility
+
+- Remove the single-model request deadline from whole Cursor runs. Preserve
+  cancellation and explicit user API timeouts while extending Claude's default
+  timeout for native work.
+- Recover completed SDK runs after an interrupted gateway commit without another
+  inference call. Preserve durable failure records, allow new prompts after known
+  cancellation, and retain saved state when idle agents leave memory.
+- Continue native history after outer compaction using authenticated fresh prompts
+  or an unambiguous prior response. Explain when native history is retained;
+  uncertain execution and unsupported rollback never replay earlier actions.
+- Discover enabled plugin workers through Claude's CLI; translate whole-tool
+  restrictions, supported Linux managed policy and explicit bypass mode. Enforce
+  worker-specific permission hooks by rejecting unsupported native execution.
+- Route worktree workers to their own SDK workspace and settings. Display bounded
+  edit diffs, shell output, exit status and elapsed time without executable tool replay.
+- Validate non-Fast Composer recovery/compaction recall, a GPT-parent Grok worker,
+  and unmodified Claude worktree hooks.
+
+### Cursor native cutover
+
+- Activate the official SDK harness in the normal launcher: Cursor owns tools,
+  persistent conversation state and native review. Claude Code displays progress
+  and coordinates Cursor workers without replaying their actions.
+- Delete the callback bridge, separate Cursor reviewer and obsolete live checks.
+  OpenAI retains its existing Claude-executed tool and approval path.
+- Follow Claude's existing mode selector through authenticated hooks. Support Auto
+  and read-only Plan; reject unsupported modes and policies before execution.
+  Check effective user/project settings on dispatch, with initial admission limited
+  to Linux without WSL or managed policy.
+- Verify a real Claude-parent Composer worker edit, plus persisted SDK resume,
+  completed-request replay, follow-up recall and read-only Plan using non-Fast inference.
+- Retry a failed mode change by resuming the saved agent, including when returning
+  to the original mode; never send through the closed SDK handle.
+
+### Cursor harness foundation
+
+- Accept Cursor's native Auto fallback when its classifier is unavailable;
+  guaranteed review availability is no longer a native-activation requirement.
+
+- Forward resolved worker permissions to the native harness. Translate tool
+  restrictions into SDK capabilities, remove shell/edit in Plan, and resume the
+  same Cursor conversation when its mode or tool policy changes.
+- Make session lock release idempotent so repeated cleanup cannot remove another
+  gateway's lock. Verify failed policy resumes and streamed cancellation cannot
+  execute work again or appear as successful completion.
+
+- Scope initial delegation to Claude/OpenAI parents spawning Cursor workers.
+  Defer Cursor-originated delegation and keep native child spawning disabled.
+
+- Replace the proposed Claude source-patch mode exporter with documented prompt
+  and worker hooks. Resolve worker definitions and parent-mode precedence through
+  the authenticated gateway without inserting permission markers into prompts.
+  Preserve worker tool restrictions as separate context; native enforcement is
+  still part of the pending harness transition.
+- Add an opt-in unmodified-Claude hook check using only local fake model replies
+  (`npm run test:live:mode-hooks`); it spends no provider usage.
+
+- Resolve gateway session identity consistently from headers and metadata; reject
+  conflicting identities before execution and retain worker isolation.
+- Commit native completion and replay data together, allow safe pre-send retries,
+  and recheck ignored native policy files before new work on reused agents.
+- Sanitize terminal escape sequences in native progress and reject unsupported
+  native tool controls before streaming. Separate catalog tests from callback tests.
+
+- Map the remaining native transition into owned work packages. Harden cancellation
+  and late disposal; verify main/worker native progress and duplicate-request
+  behavior through the HTTP gateway with an offline SDK fake.
+
+- Add an independently testable native SDK harness with persistent agents, disk
+  resume, retry protection, cancellation, and attributed tool/compaction text.
+- Add explicit Auto/Plan mode mapping and reject unsupported manual-approval
+  modes instead of treating them as automatic permission grants.
+- Keep launcher activation pending reliable Claude permission-mode observation;
+  the callback runtime and its reviewer remain until that replacement is ready.
+
 ### Cursor harness direction
 
 - Record the accepted transition to Cursor-owned tools, persistent state and

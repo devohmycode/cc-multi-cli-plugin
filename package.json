@@ -11,9 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && node --test \"test/unit/**/*.test.mjs\" \"test/unit/**/*.test.ts\"",
     "test:live:compaction": "node test/live/native-compaction.ts",
-    "test:live:cursor-review": "node test/live/native-cursor-review.ts",
-    "test:live:cursor": "node test/live/native-cursor.ts",
-    "test:live:cursor-capabilities": "node test/live/native-cursor-capabilities.ts",
+    "test:live:cursor": "node test/live/native-cursor-harness.ts",
+    "test:live:cursor-harness": "node test/live/native-cursor-harness.ts",
     "test:live:auto-mode": "node test/live/native-auto-mode.ts",
     "test:live:provider-approval": "node test/live/native-provider-approval.ts",
     "test:live:reviewer": "node test/live/native-reviewer.ts",
@@ -24,7 +23,8 @@
     "lint": "biome check --error-on-warnings .",
     "lint:fix": "biome check --write .",
     "check:unused": "knip",
-    "check": "npm run lint && npm run check:unused && npm test"
+    "check": "npm run lint && npm run check:unused && npm test",
+    "test:live:mode-hooks": "node test/live/native-mode-hooks.ts"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",
@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "@cursor/sdk": "1.0.31",
-    "js-tiktoken": "1.0.21"
+    "js-tiktoken": "1.0.21",
+    "yaml": "2.9.0"
   }
 }

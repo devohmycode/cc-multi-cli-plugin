@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { OPENAI_WORKERS } from '../../plugins/multi/src/providers/openai/models.ts';
 
 const { values } = parseArgs({
   options: {
@@ -17,10 +18,14 @@ assert(mode && ['auto', 'dontAsk', 'bypassPermissions'].includes(mode));
 
 if (values.help) {
   console.log(
-    'Usage: node test/live/native-approval-worker.ts [--mode auto|dontAsk|bypassPermissions] [--worker openai-luna-high|cursor-composer-2-5]\nReal launcher and provider worker permissions without Anthropic credentials. Creates one temporary append canary.',
+    'Usage: node test/live/native-approval-worker.ts [--mode auto|dontAsk|bypassPermissions] [--worker openai-luna-high]\nReal launcher and provider worker permissions without Anthropic credentials. Creates one temporary append canary.',
   );
   process.exit(0);
 }
+assert(
+  values.worker && Object.hasOwn(OPENAI_WORKERS, values.worker),
+  'This worker tool-review test supports OpenAI; native Cursor is unsupported.',
+);
 const cwd = await mkdtemp('/tmp/multi-review-worker-');
 console.log(`Artifacts: ${cwd}`);
 await mkdir(`${cwd}/config`);
@@ -75,7 +80,6 @@ const child = spawn(
       PATH: process.env.PATH,
       HOME: os.homedir(),
       CODEX_HOME: process.env.CODEX_HOME,
-      CURSOR_API_KEY: process.env.CURSOR_API_KEY,
       CLAUDE_CONFIG_DIR: `${cwd}/config`,
       MULTI_NATIVE_TRACE: '1',
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
@@ -111,9 +115,7 @@ try {
     JSON.parse(match[1]),
   );
   assert(!routes.some((route) => route.route === 'anthropic'));
-  const worker = routes.find(
-    (route) => ['openai-request', 'cursor'].includes(route.route) && route.agentId,
-  );
+  const worker = routes.find((route) => route.route === 'openai-request' && route.agentId);
   assert(worker, 'Missing native worker inference');
   if (values.mode === 'auto') {
     assert(
@@ -129,13 +131,7 @@ try {
   assert(
     routes
       .filter((route) => route.route === 'approval')
-      .every(
-        (route) =>
-          route.model ===
-          (route.agentId === worker.agentId && values.worker?.startsWith('cursor-')
-            ? 'cursor-auto-review'
-            : 'codex-auto-review'),
-      ),
+      .every((route) => route.model === 'codex-auto-review'),
   );
   if (values.mode !== 'auto') {
     assert(!routes.some((route) => route.route === 'approval'));

@@ -4,15 +4,17 @@ import { randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import type { ApprovalContext, NativeApprovalBridge } from './gateway/approval.ts';
+import { loadWorkerPermissions } from './gateway/agent-definitions.ts';
+import { checkCursorSettings } from './gateway/cursor-settings.ts';
+import { PermissionModes } from './gateway/mode-hook.ts';
+import { hookCommand } from './gateway/permission-hook.ts';
 import type { GatewayEvent } from './gateway/server.ts';
 import { createNativeGateway } from './gateway/server.ts';
-import { createCursorApproval } from './providers/cursor/approval.ts';
-import { CursorBridge } from './providers/cursor/bridge.ts';
+import { CursorHarness } from './providers/cursor/harness.ts';
 import type { CursorModelOption } from './providers/cursor/models.ts';
 import { cursorModelOptions, cursorPickerOptions } from './providers/cursor/models.ts';
+import { CursorWorkspaces } from './providers/cursor/workspaces.ts';
 import { createOpenAIApproval, discoverOpenAIReviewer } from './providers/openai/approval.ts';
 import { readCodexAuth } from './providers/openai/auth.ts';
 import { MODELS, OPENAI_WORKERS } from './providers/openai/models.ts';
@@ -69,17 +71,34 @@ async function main() {
   );
   const { codexSignedIn, openaiReview } = await discoverOpenAI(authFile, anthropic);
   const token = randomBytes(32).toString('hex');
-  const cursor = cursorModels.length ? new CursorBridge(cursorModels) : undefined;
+  const settings = pickerSettings(codexSignedIn, cursorPicker);
+  await mergeSettings(args, settings);
+  const callerSettings = structuredClone(settings);
+  const cursor = cursorModels.length
+    ? new CursorWorkspaces(
+        (cwd) =>
+          new CursorHarness(cursorModels, {
+            cwd,
+            checkPermissions: () => checkCursorSettings(cwd, args, callerSettings),
+          }),
+      )
+    : undefined;
+  const agents = workerDefinitions(codexSignedIn, cursorModels);
+  const permissionModes = cursor
+    ? new PermissionModes((cwd) =>
+        loadWorkerPermissions(cwd, agents, [...args, '--settings', JSON.stringify(callerSettings)]),
+      )
+    : undefined;
   const { approvalBridge, approvalProviders } = await discoverApprovals(
     authFile,
-    cursorModels,
-    anthropic,
+    cursorModels.length > 0,
     openaiReview,
   );
   const server = createNativeGateway({
     token,
     authFile,
     cursor,
+    permissionModes,
     approvalBridge,
     approvalProviders,
     blockAnthropic: !anthropic,
@@ -97,9 +116,7 @@ async function main() {
   if (address === null || typeof address === 'string') {
     throw new Error('Gateway did not bind a local port.');
   }
-  const agents = workerDefinitions(codexSignedIn, cursorModels);
-  const settings = pickerSettings(codexSignedIn, cursorPicker);
-  await mergeSettings(args, settings);
+  configureModeHooks(settings, permissionModes);
   const settingsDir = await mkdtemp(path.join(os.tmpdir(), 'multi-native-settings-'));
   const settingsFile = path.join(settingsDir, 'settings.json');
   const { initialModel, selectedModel } = await initialSelection(
@@ -264,9 +281,9 @@ function workerDefinitions(codexSignedIn: boolean, cursorModels: CursorModelOpti
   );
   for (const option of cursorModels.filter((option) => option.nativeWorker)) {
     agents[option.worker] = {
-      description: `${option.label}. Coding, investigation, and review through Cursor's SDK with Claude-executed tools.`,
+      description: `${option.label}. Native Cursor coding worker with its own tools, conversation state, and review.`,
       prompt:
-        'Complete the delegated task using the supplied Claude Code tools. Respect its scope and permissions. Verify changes and report the result and unresolved issues. Do not invoke external coding CLIs.',
+        'Complete the delegated task using Cursor’s native tools and persistent conversation. Respect the task scope and permissions. Verify changes and report results and unresolved issues. Native tool progress is displayed by Claude Code; do not request that Claude Code repeat those actions. Do not spawn further agents or invoke external coding CLIs.',
       model: option.model,
       tools: ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write'],
     };
@@ -336,42 +353,16 @@ function approvalProvider(model: string | undefined): 'openai' | 'cursor' | unde
 
 async function discoverApprovals(
   authFile: string,
-  cursorModels: CursorModelOption[],
-  anthropic: boolean,
+  cursorAvailable: boolean,
   openaiReview: boolean,
 ) {
-  const approvalProviders: ('openai' | 'cursor')[] = [];
-  const bridges: Partial<Record<'openai' | 'cursor', NativeApprovalBridge>> = {};
+  const approvalProviders: ('openai' | 'cursor')[] = cursorAvailable ? ['cursor'] : [];
   if (openaiReview) {
-    bridges.openai = await createOpenAIApproval(authFile, process.cwd());
     approvalProviders.push('openai');
-  }
-  if (!anthropic && cursorModels.length) {
-    try {
-      bridges.cursor = await createCursorApproval(cursorModels, process.cwd());
-      approvalProviders.push('cursor');
-    } catch (error) {
-      console.error(
-        `Cursor automatic reviewer unavailable: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
   }
   return {
     approvalProviders,
-    approvalBridge: approvalProviders.length ? approvalDispatcher(bridges) : undefined,
-  };
-}
-
-function approvalDispatcher(bridges: Partial<Record<'openai' | 'cursor', NativeApprovalBridge>>) {
-  return {
-    respond(body: unknown, signal: AbortSignal, context?: ApprovalContext) {
-      const provider = approvalProvider(context?.model);
-      const bridge = provider ? bridges[provider] : undefined;
-      if (!bridge) {
-        throw new Error('Automatic approval is unavailable for this provider');
-      }
-      return bridge.respond(body, signal, context);
-    },
+    approvalBridge: openaiReview ? await createOpenAIApproval(authFile, process.cwd()) : undefined,
   };
 }
 
@@ -386,21 +377,7 @@ function configureApproval(
   }
   // --settings is fixed for the session. A per-tool capability guard also covers
   // /model changes and workers, without calling a model or classifying commands.
-  const quote = (value: string) => {
-    if (process.platform !== 'win32') {
-      return `'${value.replaceAll("'", "'\\''")}'`;
-    }
-    if (/["%\r\n!]/.test(value)) {
-      throw new Error('Unsupported characters in approval hook path');
-    }
-    return `"${value}"`;
-  };
-  const command = [
-    process.execPath,
-    fileURLToPath(new URL('./gateway/permission-hook.ts', import.meta.url)),
-  ]
-    .map(quote)
-    .join(' ');
+  const command = hookCommand(new URL('./gateway/permission-hook.ts', import.meta.url));
   const hooks = settings.hooks as Record<string, unknown[]> | undefined;
   settings.hooks = {
     ...hooks,
@@ -509,8 +486,12 @@ function pickerSettings(codexSignedIn: boolean, cursorPicker: CursorModelOption[
 function gatewayEnvironment(port: number, token: string, anthropic: boolean) {
   return {
     ...process.env,
+    // Whole native runs outlive Claude's default ten-minute API timer. The
+    // gateway still bounds direct model requests; preserve explicit user limits.
+    API_TIMEOUT_MS: process.env.API_TIMEOUT_MS ?? '2147483647',
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
-    ...(!anthropic ? { ANTHROPIC_AUTH_TOKEN: token, MULTI_GATEWAY_TOKEN: token } : {}),
+    MULTI_GATEWAY_TOKEN: token,
+    ...(!anthropic ? { ANTHROPIC_AUTH_TOKEN: token } : {}),
     ANTHROPIC_CUSTOM_HEADERS: [
       process.env.ANTHROPIC_CUSTOM_HEADERS,
       `x-multi-gateway-token: ${token}`,
@@ -518,4 +499,23 @@ function gatewayEnvironment(port: number, token: string, anthropic: boolean) {
       .filter(Boolean)
       .join('\n'),
   };
+}
+
+function configureModeHooks(
+  settings: LaunchSettings,
+  permissionModes: PermissionModes | undefined,
+) {
+  if (permissionModes) {
+    const hooks = settings.hooks as Record<string, unknown[]> | undefined;
+    const command = hookCommand(new URL('./gateway/mode-hook.ts', import.meta.url));
+    settings.hooks = {
+      ...hooks,
+      ...Object.fromEntries(
+        ['UserPromptSubmit', 'SubagentStart'].map((event) => [
+          event,
+          [...(hooks?.[event] ?? []), { hooks: [{ type: 'command', command, timeout: 10 }] }],
+        ]),
+      ),
+    };
+  }
 }

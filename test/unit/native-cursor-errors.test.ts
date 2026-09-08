@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { AuthenticationError, ConfigurationError, NetworkError, RateLimitError } from '@cursor/sdk';
+import type { Emit, MessagesRequest } from '../../plugins/multi/src/gateway/messages.ts';
 import { createNativeGateway } from '../../plugins/multi/src/gateway/server.ts';
-import { CursorBridge } from '../../plugins/multi/src/providers/cursor/bridge.ts';
 import {
   CursorProviderError,
   cursorFailure,
   sanitizeCursorErrorMessage,
 } from '../../plugins/multi/src/providers/cursor/errors.ts';
+import { CursorHarness } from '../../plugins/multi/src/providers/cursor/harness.ts';
 import { cursorModelOptions } from '../../plugins/multi/src/providers/cursor/models.ts';
 
 test('Cursor SDK classes preserve the provider error contract', () => {
@@ -82,11 +86,16 @@ test('gateway preserves Cursor status and SSE failure terminal event', async (t)
     messages: [{ role: 'user', content: 'hello' }],
     stream: false,
   };
-  const makeBridge = (code: string) => {
-    const bridge = new CursorBridge(
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'cursor-errors-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const makeHarness = (code: string) => {
+    const harness = new CursorHarness(
       cursorModelOptions([{ id: 'test-model', displayName: 'Test' }]),
       {
+        cwd: directory,
+        stateDirectory: path.join(directory, code),
         createAgent: async () => ({
+          agentId: 'agent',
           close: () => {},
           send: async () => ({
             id: 'run',
@@ -108,13 +117,18 @@ test('gateway preserves Cursor status and SSE failure terminal event', async (t)
         }),
       },
     );
-    t.after(() => bridge.close());
-    return bridge;
+    t.after(() => harness.close());
+    // This fixture tests error translation with an explicit native Auto policy.
+    return {
+      validate: (body: MessagesRequest) => harness.validate(body, { permissionMode: 'auto' }),
+      handle: (body: MessagesRequest, scope: string, signal: AbortSignal, emit?: Emit) =>
+        harness.handle(body, scope, signal, emit, { permissionMode: 'auto' }),
+    };
   };
   const server = createNativeGateway({
     token: 'local',
     authFile: '/does-not-exist',
-    cursor: makeBridge('AUTH_TOKEN_EXPIRED'),
+    cursor: makeHarness('AUTH_TOKEN_EXPIRED'),
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => {
@@ -139,7 +153,7 @@ test('gateway preserves Cursor status and SSE failure terminal event', async (t)
   const streamServer = createNativeGateway({
     token: 'local',
     authFile: '/does-not-exist',
-    cursor: makeBridge('RESOURCE_EXHAUSTED'),
+    cursor: makeHarness('RESOURCE_EXHAUSTED'),
   });
   await new Promise<void>((resolve) => streamServer.listen(0, '127.0.0.1', resolve));
   t.after(async () => {

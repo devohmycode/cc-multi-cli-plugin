@@ -4,8 +4,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import type { CursorBridge } from '../providers/cursor/bridge.ts';
 import { CursorProviderError } from '../providers/cursor/errors.ts';
+import type { CursorHarness } from '../providers/cursor/harness.ts';
 import { readCodexAuth } from '../providers/openai/auth.ts';
 import { MODELS } from '../providers/openai/models.ts';
 import type { Effort, ResponsesRequest } from '../providers/openai/responses.ts';
@@ -21,6 +21,7 @@ import type {
   StreamEventBody,
   StreamEventName,
 } from './messages.ts';
+import type { PermissionContext, PermissionModes } from './mode-hook.ts';
 import type { PendingApprovalTool } from './permission-hook.ts';
 import { approvalCapabilityGuard } from './permission-hook.ts';
 import { originalToolNames } from './tools.ts';
@@ -56,6 +57,7 @@ export interface GatewayEvent {
   stage?: 1 | 2;
   outcome?: 'allow' | 'deny';
   cached?: boolean;
+  permissionContext?: PermissionContext;
 }
 
 interface GatewayFetchInit {
@@ -74,13 +76,14 @@ export interface GatewayOptions {
   fetchImpl?: GatewayFetch;
   onEvent?: (event: GatewayEvent) => void;
   timeoutMs?: number;
-  cursor?: CursorBridge;
+  cursor?: Pick<CursorHarness, 'validate' | 'handle'>;
   /** Explicit credential-independent review. Disables all Anthropic passthrough. */
   approvalBridge?: Pick<NativeApprovalBridge, 'respond'>;
   approvalProviders?: readonly ('openai' | 'cursor')[];
   /** No Anthropic credentials: also block passthrough if no reviewer is available. */
   blockAnthropic?: boolean;
   guardAuto?: boolean;
+  permissionModes?: PermissionModes;
 }
 
 /** Rejected before any provider call; answered as HTTP 400 rather than 502. */
@@ -121,6 +124,8 @@ interface ProviderRequest {
   signal: AbortSignal;
   abort: AbortController;
   agentId?: string;
+  identity: ReturnType<typeof requestIdentity>;
+  permissionContext?: PermissionContext;
   emit: Emit;
   remember: (tool: { id: string; name: string; input: unknown }) => void;
   startStream: () => void;
@@ -137,6 +142,7 @@ export function createNativeGateway({
   approvalProviders = approvalBridge ? ['openai'] : [],
   blockAnthropic,
   guardAuto,
+  permissionModes,
 }: GatewayOptions): Server {
   if (!token) {
     throw new Error('Gateway token required');
@@ -228,7 +234,7 @@ export function createNativeGateway({
     return candidates[0].context;
   }
   async function handleCursor(exchange: ProviderRequest) {
-    const { req, res, body, parsed, url, signal, agentId, emit } = exchange;
+    const { req, res, body, url, signal, agentId, emit, identity } = exchange;
     const bridge = cursor;
     if (!bridge) {
       throw new BadRequest(
@@ -243,7 +249,7 @@ export function createNativeGateway({
       ) {
         throw new Error('Cursor requires POST /v1/messages or /v1/messages/count_tokens');
       }
-      inputTokens = bridge.validate(body);
+      inputTokens = bridge.validate(body, exchange.permissionContext);
     } catch (error) {
       throw new BadRequest(reason(error));
     }
@@ -255,12 +261,14 @@ export function createNativeGateway({
       return res.end(JSON.stringify({ input_tokens: inputTokens }));
     }
     exchange.startStream();
-    const metadata = isRecord(parsed.metadata) ? parsed.metadata.user_id : undefined;
-    const scope = JSON.stringify([
-      header(req.headers['x-claude-code-session-id']) ?? metadata ?? fallbackSession,
-      agentId ?? 'main',
-    ]);
-    const result = await bridge.handle(body, scope, signal, body.stream ? emit : undefined);
+    const scope = identity.scope ?? JSON.stringify([fallbackSession, agentId ?? 'main']);
+    const result = await bridge.handle(
+      body,
+      scope,
+      signal,
+      body.stream ? emit : undefined,
+      exchange.permissionContext,
+    );
     rememberResult(exchange, result);
     onEvent({
       route: 'cursor',
@@ -411,15 +419,24 @@ export function createNativeGateway({
     res.writeHead(200, { 'content-type': 'application/json' });
     return res.end(JSON.stringify(decision));
   }
+  async function recordMode(exchange: ProviderRequest) {
+    if (!permissionModes || exchange.req.method !== 'POST') {
+      throw new BadRequest('Mode hook is unavailable');
+    }
+    try {
+      await permissionModes.record(exchange.parsed);
+    } catch (error) {
+      throw new BadRequest(reason(error));
+    }
+    exchange.res.writeHead(200, { 'content-type': 'application/json' });
+    return exchange.res.end('{}');
+  }
   async function dispatch(
     exchange: ProviderRequest,
     metadata: ReturnType<typeof requestIdentity>,
     external: string | null,
   ) {
-    const { parsed, url } = exchange;
-    if (url.pathname === '/multi/permission') {
-      return sendPermissionDecision(exchange);
-    }
+    const { parsed } = exchange;
     const classification = isApprovalRequest(parsed);
     if (external && !classification) {
       retainRequestContext(exchange, metadata, external);
@@ -439,11 +456,25 @@ export function createNativeGateway({
   }
   async function forwardProvider(exchange: ProviderRequest, external: string | null) {
     const { body, agentId, url } = exchange;
+    let permissionContext: PermissionContext | undefined;
+    if (
+      permissionModes &&
+      external?.startsWith('multi/cursor/') &&
+      url.pathname === '/v1/messages'
+    ) {
+      try {
+        permissionContext = permissionModes.resolve(exchange.identity.session, agentId);
+        exchange.permissionContext = permissionContext;
+      } catch (error) {
+        throw new BadRequest(reason(error));
+      }
+    }
     onEvent({
       route: providerRoute(external),
       model: body.model,
       agentId: agentId ?? null,
       path: url.pathname,
+      ...(permissionContext ? { permissionContext } : {}),
     });
     if (!external) {
       return handleAnthropic(exchange);
@@ -460,7 +491,6 @@ export function createNativeGateway({
         abort.abort();
       }
     });
-    const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(timeoutMs)]);
     let heartbeat: NodeJS.Timeout | undefined;
     let sourceModel = '';
     let sourceSession = '';
@@ -494,8 +524,13 @@ export function createNativeGateway({
       const body: MessagesRequest = parsed;
       const external =
         typeof body.model === 'string' && body.model.startsWith('multi/') ? body.model : null;
+      const signal = providerSignal(abort.signal, external, timeoutMs);
       const agentId = header(req.headers['x-claude-code-agent-id']);
-      const metadata = requestIdentity(parsed, agentId);
+      const metadata = requestIdentity(
+        parsed,
+        agentId,
+        header(req.headers['x-claude-code-session-id']),
+      );
       sourceModel = external ?? '';
       sourceSession = metadata.session;
       sourceScope = metadata.scope;
@@ -504,6 +539,7 @@ export function createNativeGateway({
         res,
         body,
         parsed,
+        identity: metadata,
         raw,
         url,
         signal,
@@ -520,6 +556,12 @@ export function createNativeGateway({
           heartbeat = setInterval(() => emit('ping', {}), 15000);
         },
       };
+      if (url.pathname === '/multi/permission') {
+        return sendPermissionDecision(exchange);
+      }
+      if (url.pathname === '/multi/mode') {
+        return await recordMode(exchange);
+      }
       await dispatch(exchange, metadata, external);
     } catch (error) {
       abort.abort();
@@ -531,6 +573,14 @@ export function createNativeGateway({
 }
 
 class RequestTooLarge extends Error {}
+
+function providerSignal(disconnected: AbortSignal, model: string | null, timeoutMs: number) {
+  // Cursor owns a whole coding run; its lifetime follows the client connection.
+  if (model?.startsWith('multi/cursor/')) {
+    return disconnected;
+  }
+  return AbortSignal.any([disconnected, AbortSignal.timeout(timeoutMs)]);
+}
 
 async function readRequest(req: http.IncomingMessage) {
   const chunks: Buffer[] = [];
@@ -598,15 +648,19 @@ function evictOldest<T>(cache: Map<string, T>, capacity: number) {
   }
 }
 
-function requestIdentity(parsed: Record<string, unknown>, agentId?: string) {
-  const identity =
+function requestIdentity(
+  parsed: Record<string, unknown>,
+  agentId?: string,
+  sessionHeader?: string,
+) {
+  const rawIdentity =
     isRecord(parsed.metadata) && typeof parsed.metadata.user_id === 'string'
       ? parsed.metadata.user_id
       : undefined;
   let session = '';
-  if (identity) {
+  if (rawIdentity) {
     try {
-      const metadata: unknown = JSON.parse(identity);
+      const metadata: unknown = JSON.parse(rawIdentity);
       if (isRecord(metadata) && typeof metadata.session_id === 'string') {
         session = metadata.session_id;
       }
@@ -614,6 +668,11 @@ function requestIdentity(parsed: Record<string, unknown>, agentId?: string) {
       /* Unknown identity cannot grant auto capability. */
     }
   }
+  if (session && sessionHeader && session !== sessionHeader) {
+    throw new BadRequest('Session header and metadata disagree');
+  }
+  session = session || sessionHeader || '';
+  const identity = session || rawIdentity;
   return {
     identity,
     session,
@@ -670,6 +729,7 @@ function authorizeRequest(
       '/v1/messages/count_tokens',
       '/v1/models',
       '/api/hello',
+      '/multi/mode',
       ...(guardAuto ? ['/multi/permission'] : []),
     ].includes(url.pathname) ||
     !['POST', 'GET', 'HEAD'].includes(req.method ?? '')

@@ -28,23 +28,33 @@ define the product direction.
   coordination. Display external actions without replaying them as executable
   Claude tools. Initial text/status progress is acceptable; native tool-row
   rendering is a separate integration task. No Sand or alternate auth route.
-- The current checkpoint still uses Claude-executed callbacks and a separate
-  Bash-only reviewer. These are transition code, not the target architecture.
-  Retire the separate Cursor reviewer when native execution replaces it; do not
-  extend its internal SDK patches into a general tool-review framework.
-- Native Cursor review belongs to the originating Cursor run, including workers,
-  irrespective of Claude login availability. Do not substitute another provider's
-  reviewer. The existing callback/OpenAI routes still follow their implemented
-  no-Claude-access fallback rule until separately changed. External execution
-  must retain explicit permissions; rendering a decision is not enforcement.
+- Claude Code's existing permission-mode selector must control Cursor at prompt
+  boundaries. Use UserPromptSubmit and SubagentStart hooks plus documented worker
+  configuration/inheritance. No separate mode selector or Claude source patches.
+- Initial Cursor delegation supports Claude/OpenAI parents spawning named Cursor
+  workers. Keep Cursor-native child spawning disabled and defer Cursor-originated
+  delegation until requested; it is not a native-transition completion requirement.
+- Accept the official Cursor SDK's native Auto fallback when its classifier is
+  unavailable. Do not require guaranteed review or add a replacement reviewer.
+  Preserve explicit tool/Plan restrictions and do not label unverified calls reviewed.
+- The launcher uses the native Cursor harness. The callback runtime and separate
+  reviewer are removed; do not restore SDK source patches or a second reviewer.
+- Native Cursor review belongs to the originating run, including workers,
+  irrespective of Claude login availability. The OpenAI route retains its existing
+  no-Claude-access reviewer behavior. External execution retains explicit permissions.
+- Cursor supports Auto, Plan and Bypass at prompt boundaries. Plan excludes shell/edit;
+  Bypass disables native Auto-review while retaining explicit capability restrictions;
+  unsupported modes, unknown workers and untranslatable policies fail
+  explicitly. Settings admission currently supports Linux without WSL.
 - Preserve Claude subscription passthrough and isolate provider credentials.
   Do not add our own Claude subscription login/token pool or extract Antigravity
   tokens for direct model requests. External operations retain external permissions.
 - Targets: OpenAI, Cursor, Antigravity through its real CLI, OpenCode, llama.cpp,
-  and Grok Build. The direct GPT gateway and Cursor SDK bridge are experimental;
-  Cursor's Composer 2.5 live baseline includes main-session manual/repeated/automatic
-  compaction and disk resume. Other-model fidelity and subagent compaction remain
-  unverified; other provider bridges are planned.
+  and Grok Build. The direct GPT gateway and Cursor SDK harness are experimental.
+  Native Cursor persists and resumes SDK state. Durable run IDs permit terminal-result
+  recovery; fresh authenticated prompts or unique response anchors permit outer-history
+  continuation. Ambiguous history changes fail; native state is never rewound. Historical callback compaction
+  checks do not prove native fidelity. Other provider bridges are planned.
 
 ## Refactor scope
 
@@ -76,8 +86,13 @@ Paths below are relative to `plugins/multi/src/` unless noted.
 - `providers/openai/`: Codex authentication (`auth.ts`), models/workers (`models.ts`),
   Responses translation (`responses.ts`), local estimates (`tokens.ts`), and reviewer
   (`approval.ts`, with vendored policy/license files in `guardian/`).
-- `providers/cursor/`: SDK callbacks, retry cache, and cancellation (`bridge.ts`);
-  account model selections and native worker names (`models.ts`).
+- `providers/cursor/`: native runtime (`harness.ts`), request validation,
+  permissions, progress and account model/worker choices (`models.ts`).
+  `workspaces.ts` routes hook-reported worktrees to separate SDK instances;
+  `state-lock.ts` holds kernel file locks across native runs.
+- `gateway/mode-hook.ts` and `agent-definitions.ts`: prompt/worker permissions.
+  `gateway/cursor-settings.ts`: per-dispatch Claude settings admission.
+  `docs/cursor-refactor.md` records current native behavior and deferred limits.
 - `transports/`: retained Cursor/OpenCode CLI adapters (`cursor.mjs`, `opencode.mjs`),
   process helpers (`process.mjs`), and ACP transport (`acp/`). These are references,
   not wired gateway backends. `acp/vendor/` is generated JavaScript.
@@ -111,7 +126,7 @@ layer or duplicate it merely to make the folders look independent.
   specific rule and explain the concrete external/protocol constraint locally.
 - Knip treats the retained Cursor/OpenCode adapter modules as reference entry
   points because the architecture deliberately preserves their public transports.
-  `where.exe` is a Windows system command, not an npm dependency. Biome excludes
+  `where.exe` and Linux `flock` are system commands, not npm dependencies. Biome excludes
   the generated ACP bundle and lockfile; hand-written runtime and test code stay
   covered.
 - Preserve unrelated uncommitted work. Do not restore removed integrations from
@@ -126,8 +141,8 @@ layer or duplicate it merely to make the folders look independent.
 - Run appropriate opt-in live checks when changing a live integration path;
   these invoke real CLIs and spend provider usage. The README lists native gateway
   checks; the old companion `test:live` script was removed.
-- `npm run test:live:cursor` exercises real SDK callbacks and Claude main/subagent
-  Read/Edit. Requires the official SDK login (`--cursor-login` on the launcher).
+- `npm run test:live:cursor` exercises bounded native SDK tools, continuation and
+  disk resume with Fast disabled. Requires the official SDK login (`--cursor-login` on the launcher).
 - Definition of done: relevant checks pass, no `DEP0190` warnings, and
   `CHANGELOG.md` reflects user-facing changes.
 - Future bridges need session/worker/provider/workspace isolation as specified in

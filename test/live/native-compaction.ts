@@ -7,7 +7,6 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cursorModelOptions } from '../../plugins/multi/src/providers/cursor/models.ts';
 import { OPENAI_WORKERS } from '../../plugins/multi/src/providers/openai/models.ts';
 
 interface Event {
@@ -30,7 +29,7 @@ interface Trace {
 const args = process.argv.slice(2);
 if (args.includes('--help')) {
   console.log(
-    'Usage: npm run test:live:compaction -- [openai-luna | composer-2.5 | cursor-composer-2-5 | multi/cursor/<selection>] [--manual-only]\nRuns real manual/repeated/automatic compaction and disk resume using both subscriptions.',
+    'Usage: npm run test:live:compaction -- [openai-luna] [--manual-only]\nRuns real manual/repeated/automatic compaction and disk resume using Claude and OpenAI subscriptions. Native Cursor compaction is not supported by this test.',
   );
   process.exit(0);
 }
@@ -38,28 +37,17 @@ const manualOnly = args.includes('--manual-only');
 const positional = args.filter((arg) => arg !== '--manual-only');
 const worker = positional[0] ?? 'openai-luna';
 assert(positional.length <= 1, 'Expected one model/worker and optional --manual-only');
-async function selectedTarget() {
-  if (Object.hasOwn(OPENAI_WORKERS, worker)) {
-    const target = OPENAI_WORKERS[worker];
-    return {
-      ...target,
-      route: 'openai-request',
-      model: `multi/openai/${target.model}`,
-      traceModel: target.model,
-    };
-  }
-  const { Cursor } = await import('@cursor/sdk');
-  const options = cursorModelOptions(await Cursor.models.list());
-  const selected = options.find(
-    (option) =>
-      option.worker === worker ||
-      option.model === worker ||
-      option.model === `multi/cursor/${encodeURIComponent(worker)}`,
-  );
-  assert(selected, 'Expected a registered OpenAI worker or account Cursor model/worker');
-  return { model: selected.model, traceModel: selected.model, route: 'cursor', effort: undefined };
-}
-const target = await selectedTarget();
+assert(
+  Object.hasOwn(OPENAI_WORKERS, worker),
+  'Expected an OpenAI worker; native Cursor compaction is not supported by this test.',
+);
+const selection = OPENAI_WORKERS[worker];
+const target = {
+  ...selection,
+  route: 'openai-request',
+  model: `multi/openai/${selection.model}`,
+  traceModel: selection.model,
+};
 const model = target.model;
 const launcher = fileURLToPath(
   new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url),
@@ -209,7 +197,7 @@ async function turn(
     .split('\n')
     .filter((line) => line.startsWith('[native] '))
     .map((line) => JSON.parse(line.slice(9)))
-    .filter((event: Trace) => ['openai-request', 'cursor', 'anthropic'].includes(event.route));
+    .filter((event: Trace) => ['openai-request', 'anthropic'].includes(event.route));
   const boundaries = events
     .filter((event) => event.type === 'system' && event.subtype === 'compact_boundary')
     .map((event) => event.compact_metadata);
@@ -224,10 +212,6 @@ async function turn(
     assert(boundaries.length, `${name}: compaction did not run: ${result.result}`);
   }
   if (selectedModel === model) {
-    assert(
-      target.route !== 'cursor' || requests.every((event) => event.route === 'cursor'),
-      `${name}: Cursor stage used another provider`,
-    );
     assert(
       requests.some((event) => event.route === target.route && event.model === target.traceModel),
       `${name}: no request reached the selected provider model`,
@@ -288,7 +272,7 @@ try {
       await turn(
         '01-seed',
         `Read fixture.txt and report its exact contents. Our release code is ${decision}. Keep both identifiers in conversation memory for later work and report both now. Never write the release code to a file.`,
-        target.route === 'cursor' ? model : 'sonnet',
+        'sonnet',
         'Read',
       )
     ).text,

@@ -5,13 +5,12 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cursorModelOptions } from '../../plugins/multi/src/providers/cursor/models.ts';
 import { OPENAI_WORKERS } from '../../plugins/multi/src/providers/openai/models.ts';
 
 const args = process.argv.slice(2);
 if (args.includes('--help')) {
   console.log(
-    'Usage: node test/live/native-auto-mode.ts [sonnet|openai-luna-high|cursor-composer-2-5] [--worker]\nDefault: sonnet control, OpenAI main/worker, Cursor main/worker. Uses native logins and real usage. Keeps temporary evidence; no global settings changes.',
+    'Usage: node test/live/native-auto-mode.ts [sonnet|openai-luna-high] [--worker]\nDefault: sonnet control, OpenAI main/worker. Uses native logins and real usage. Keeps temporary evidence; no global settings changes.',
   );
   process.exit(0);
 }
@@ -25,11 +24,15 @@ assert(
     (!args.includes('--worker') || (names.length === 1 && names[0] !== 'sonnet')),
   '--worker requires an external worker name',
 );
+assert(
+  names.every((name) => name === 'sonnet' || Object.hasOwn(OPENAI_WORKERS, name)),
+  'This Claude tool-review test supports only Claude/OpenAI; native Cursor is unsupported.',
+);
 const cases = names.length
   ? [{ name: names[0], worker: args.includes('--worker') }]
   : [
       { name: 'sonnet', worker: false },
-      ...['openai-luna-high', 'cursor-composer-2-5'].flatMap((name) => [
+      ...['openai-luna-high'].flatMap((name) => [
         { name, worker: false },
         { name, worker: true },
       ]),
@@ -52,14 +55,7 @@ try {
     const cwd = path.join(artifacts, label);
     await mkdir(cwd);
     let model = 'sonnet';
-    if (item.name.startsWith('cursor-')) {
-      const { Cursor } = await import('@cursor/sdk');
-      const option = cursorModelOptions(await Cursor.models.list()).find(
-        (o) => o.nativeWorker && o.worker === item.name,
-      );
-      assert(option, `Cursor worker unavailable: ${item.name}`);
-      model = option.model;
-    } else if (item.name !== 'sonnet') {
+    if (item.name !== 'sonnet') {
       assert(Object.hasOwn(OPENAI_WORKERS, item.name), `Unknown worker: ${item.name}`);
       model = `multi/openai/${OPENAI_WORKERS[item.name].model}`;
     }
@@ -321,17 +317,14 @@ try {
       if (item.name !== 'sonnet') {
         assert(
           traces.some(
-            (t) =>
-              t.route === (item.name.startsWith('cursor-') ? 'cursor' : 'openai') &&
-              t.stopReason === 'tool_use' &&
-              t.tools?.includes('Bash'),
+            (t) => t.route === 'openai' && t.stopReason === 'tool_use' && t.tools?.includes('Bash'),
           ),
           'Provider did not supply Bash',
         );
       }
       assert(
         traces
-          .filter((t) => t.route === 'openai' || t.route === 'cursor')
+          .filter((t) => t.route === 'openai')
           .every((t) => !t.tools || t.tools.every((name: string) => name === 'Bash')),
         'External worker attempted another tool',
       );

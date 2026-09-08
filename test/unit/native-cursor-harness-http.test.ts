@@ -1,0 +1,245 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { setTimeout } from 'node:timers/promises';
+import type { AgentOptions, Run, RunResult, SDKUserMessage, SendOptions } from '@cursor/sdk';
+import { PermissionModes } from '../../plugins/multi/src/gateway/mode-hook.ts';
+import { createNativeGateway } from '../../plugins/multi/src/gateway/server.ts';
+import {
+  type CreateCursorHarnessAgent,
+  CursorHarness,
+} from '../../plugins/multi/src/providers/cursor/harness.ts';
+import { cursorModelOptions } from '../../plugins/multi/src/providers/cursor/models.ts';
+
+const options = cursorModelOptions([{ id: 'test-model', displayName: 'Test Model' }]);
+
+test('Cursor harness serves isolated main and worker SSE progress without replaying native work', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'cursor-harness-http-'));
+  let sends = 0;
+  const createAgent: CreateCursorHarnessAgent = async (_config: AgentOptions) => {
+    const agentId = `agent-${sends + 1}`;
+    return {
+      agentId,
+      close() {},
+      async send(_prompt: string | SDKUserMessage, options?: SendOptions): Promise<Run> {
+        sends++;
+        await setTimeout(30);
+        await options?.onDelta?.({ update: { type: 'summary-started' } });
+        await options?.onDelta?.({
+          update: {
+            type: 'tool-call-started',
+            callId: 'shell',
+            modelCallId: 'model',
+            toolCall: { type: 'shell', args: { command: 'printf native' } },
+          },
+        });
+        await options?.onDelta?.({ update: { type: 'text-delta', text: 'native result' } });
+        await options?.onDelta?.({
+          update: {
+            type: 'tool-call-completed',
+            callId: 'shell',
+            modelCallId: 'model',
+            toolCall: {
+              type: 'shell',
+              args: { command: 'printf native' },
+              result: {
+                status: 'success',
+                value: { exitCode: 0, signal: '', stdout: '', stderr: '', executionTime: 1 },
+              },
+            },
+          },
+        });
+        await options?.onDelta?.({ update: { type: 'summary-completed' } });
+        return {
+          id: `run-${sends}`,
+          agentId,
+          status: 'finished',
+          wait: async () => ({ id: `run-${sends}`, status: 'finished', result: 'native result' }),
+          cancel: async () => {},
+          async *stream() {},
+          conversation: async () => [],
+          supports: () => true,
+          unsupportedReason: () => undefined,
+          onDidChangeStatus: () => () => {},
+        };
+      },
+    };
+  };
+  const harness = new CursorHarness(options, {
+    cwd: directory,
+    stateDirectory: path.join(directory, 'state'),
+    createAgent,
+  });
+  const permissionModes = new PermissionModes(async () => ({ worker: {} }));
+  for (const session_id of ['session-1', 'session-cancelled']) {
+    await permissionModes.record({
+      hook_event_name: 'UserPromptSubmit',
+      session_id,
+      permission_mode: 'auto',
+    });
+  }
+  await permissionModes.record({
+    hook_event_name: 'SubagentStart',
+    session_id: 'session-1',
+    agent_id: 'worker-1',
+    agent_type: 'worker',
+    cwd: directory,
+  });
+  const server = createNativeGateway({
+    permissionModes,
+    token: 'test-token',
+    authFile: 'unused',
+    cursor: harness,
+    timeoutMs: 5,
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await harness.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  const address = server.address();
+  assert(address && typeof address !== 'string');
+  const request = (agentId?: string) =>
+    fetch(`http://127.0.0.1:${address.port}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-multi-gateway-token': 'test-token',
+        'x-claude-code-session-id': 'session-1',
+        ...(agentId ? { 'x-claude-code-agent-id': agentId } : {}),
+      },
+      body: JSON.stringify({
+        model: options[0].model,
+        messages: [{ role: 'user', content: 'Use native tools and report completion.' }],
+        stream: true,
+      }),
+    });
+
+  const first = await request();
+  assert.equal(first.status, 200);
+  // A whole Cursor run outlives the configured single-model request deadline.
+  const firstSse = await first.text();
+  assert.match(firstSse, /\[Cursor\] Compacting context/);
+  assert.match(firstSse, /\[Cursor\] Shell: printf native started/);
+  assert.match(firstSse, /\[Cursor\] Shell completed \(exit 0\)/);
+  assert.match(firstSse, /\[Cursor\] Context compacted/);
+  assert.match(firstSse, /event: message_stop/);
+  assert.doesNotMatch(firstSse, /tool_use/);
+
+  const retry = await request();
+  assert.equal(retry.status, 200);
+  assert.equal(await retry.text(), firstSse);
+  assert.equal(sends, 1, 'identical HTTP retry must replay the cached response');
+
+  const worker = await request('worker-1');
+  assert.equal(worker.status, 200);
+  assert.match(await worker.text(), /event: message_stop/);
+  assert.equal(sends, 2, 'worker scope must own a separate native agent');
+});
+
+test('native SSE cancellation stops the SDK run without reporting successful completion', {
+  timeout: 5000,
+}, async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'cursor-harness-http-cancel-'));
+  const result = Promise.withResolvers<RunResult>();
+  const started = Promise.withResolvers<void>();
+  let sends = 0;
+  let cancellations = 0;
+  const harness = new CursorHarness(options, {
+    cwd: directory,
+    stateDirectory: path.join(directory, 'state'),
+    createAgent: async () => ({
+      agentId: 'cancelled-agent',
+      close() {},
+      async send(_prompt, sendOptions): Promise<Run> {
+        sends++;
+        await sendOptions?.onDelta?.({
+          update: {
+            type: 'tool-call-started',
+            callId: 'shell',
+            modelCallId: 'model',
+            toolCall: { type: 'shell', args: { command: 'printf native' } },
+          },
+        });
+        return {
+          id: 'cancelled-run',
+          agentId: 'cancelled-agent',
+          status: 'running',
+          wait: () => {
+            started.resolve();
+            return result.promise;
+          },
+          cancel: async () => {
+            cancellations++;
+            result.resolve({ id: 'cancelled-run', status: 'cancelled' });
+          },
+          async *stream() {},
+          conversation: async () => [],
+          supports: () => true,
+          unsupportedReason: () => undefined,
+          onDidChangeStatus: () => () => {},
+        };
+      },
+    }),
+  });
+  const permissionModes = new PermissionModes(async () => ({ worker: {} }));
+  for (const session_id of ['session-1', 'session-cancelled']) {
+    await permissionModes.record({
+      hook_event_name: 'UserPromptSubmit',
+      session_id,
+      permission_mode: 'auto',
+    });
+  }
+  await permissionModes.record({
+    hook_event_name: 'SubagentStart',
+    session_id: 'session-1',
+    agent_id: 'worker-1',
+    agent_type: 'worker',
+    cwd: directory,
+  });
+  const server = createNativeGateway({
+    permissionModes,
+    token: 'test-token',
+    authFile: 'unused',
+    cursor: harness,
+  });
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await harness.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert(address && typeof address !== 'string');
+  const request = () =>
+    fetch(`http://127.0.0.1:${address.port}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-multi-gateway-token': 'test-token',
+        'x-claude-code-session-id': 'session-cancelled',
+      },
+      body: JSON.stringify({
+        model: options[0].model,
+        messages: [{ role: 'user', content: 'Use native tools.' }],
+        stream: true,
+      }),
+    });
+  const response = await request();
+  assert.equal(response.status, 200);
+  await started.promise;
+  await harness.close();
+  const sse = await response.text();
+  assert.equal(cancellations, 1);
+  assert.match(sse, /\[Cursor\] Shell: printf native started/);
+  assert.match(sse, /event: error/);
+  assert.doesNotMatch(sse, /event: message_stop|"stop_reason":"end_turn"|tool_use/);
+  const retry = await request();
+  assert.doesNotMatch(await retry.text(), /event: message_stop|tool_use/);
+  assert.equal(sends, 1);
+});

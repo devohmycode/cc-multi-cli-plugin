@@ -9,5 +9,5 @@
     "scripts/*.mjs"
   ],
   "project": ["plugins/multi/src/**/*.{ts,mjs}", "test/**/*.{ts,mjs}", "scripts/*.mjs"],
-  "ignoreBinaries": ["where.exe"]
+  "ignoreBinaries": ["where.exe", "flock"]
 }

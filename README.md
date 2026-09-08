@@ -14,11 +14,11 @@ direct GPT gateway and an experimental Cursor SDK bridge in TypeScript, plus
 retained Cursor/OpenCode transport references.
 The earlier command-based delegation system was removed in the TypeScript branch.
 
-**Next architecture:** Cursor will own its native tools, persistent session state,
-compaction, and review; Claude Code will display and coordinate the work. The
-callback bridge and separate Bash reviewer documented below are the current
-prototype, pending replacement. Initial external progress may use text/status
-rather than native tool rows. See [the ownership decision](ARCHITECTURE.md#cursor-ownership-decision--accepted-implementation-pending).
+The launcher uses Cursor's official SDK for native tools, persistent state and
+review. Claude Code supplies the session interface and outer worker coordination;
+external actions appear as attributed text/status, never executable Claude tool
+calls. The callback runtime and separate Cursor reviewer have been removed.
+See [the execution contract](ARCHITECTURE.md#cursor-native-execution).
 
 ## Direction: one session, multiple models and harnesses
 
@@ -27,14 +27,10 @@ CLIs into Claude Code's `/model` picker and named native workers. Visible subage
 rows, elapsed time, live progress, completion, and cancellation are central to
 the experience, alongside preserving each provider's supported authentication.
 
-The direct GPT path below already works experimentally: Claude Code executes its
-tools. The **Cursor SDK bridge** also hands tool execution to Claude: Cursor's
-custom-tool callbacks pause while Claude applies permissions and returns results.
-Cursor retains its own inference loop and system prompt. This route is implemented
-with offline coverage and a live Composer 2.5 contract covering Claude main-model
-and native-worker Read/Edit, cancellation, and switching back to Claude.
-A future "Gemini via Antigravity" selection would run the actual Antigravity
-harness; that separate integration remains planned.
+The direct GPT path uses Claude Code's tools and execution loop. Cursor uses
+its own SDK tools and persistent execution loop. Claude or GPT parents can spawn
+named Cursor workers; Cursor-native children remain disabled. Antigravity and the
+other external harness integrations remain planned.
 
 Our targets are OpenAI, Cursor, Antigravity, OpenCode, local models through
 llama.cpp, and Grok Build. We will maintain our adapters and reuse existing
@@ -47,7 +43,9 @@ current status, execution boundaries, and the first bridge milestone.
 
 ## Requirements
 
-Node ≥ 24.12 and Claude Code signed in normally. Enable OpenAI with Codex's ChatGPT
+Node ≥ 24.12 and Claude Code. Claude login is optional for external models.
+Native Cursor settings admission currently supports Linux without WSL.
+Enable OpenAI with Codex's ChatGPT
 login, or Cursor with the SDK login below, or both. From a checkout, run `npm install` for dependencies. `npm test`
 runs type checking and offline tests. Node runs the gateway's TypeScript directly.
 
@@ -73,7 +71,7 @@ Runtime lives in `plugins/multi/src/`:
 native-model-gateway.ts    launcher
 gateway/                  HTTP/session handling, Claude Messages, approval, tool aliases
 providers/openai/         auth, models, Responses translation, counting, reviewer policy
-providers/cursor/         SDK bridge and account model catalog
+providers/cursor/         native SDK harness, permissions, progress and model catalog
 transports/               retained CLI adapters, process helpers, ACP and its vendor bundle
 ```
 
@@ -148,7 +146,8 @@ text and native function tools, images and documents in user messages and tool
 results, JSON-schema output, streamed output, encrypted reasoning continuation,
 local stop sequences, and request cancellation. Image sources can be base64 (PNG, JPEG, GIF, WebP) or
 HTTP(S) URLs; the gateway forwards URLs to the provider without fetching them.
-The request limit is 8 MiB and the timeout is three minutes. Response streaming
+The request limit is 8 MiB. Direct providers retain a three-minute gateway timeout;
+native Cursor runs have no gateway execution deadline. Response streaming
 is bounded to 32 MiB overall and 8 MiB per SSE event.
 Both `output_config.format` and legacy `output_format` JSON schemas map to
 Responses `text.format` with strict mode. Schemas must satisfy OpenAI's strict
@@ -227,7 +226,7 @@ gateway. Exit Claude normally
 to stop its gateway. Plain `claude` launches independently of this experimental
 launcher; use session-only model selection to keep your saved default separate.
 
-## Experimental Cursor SDK bridge
+## Experimental Cursor SDK harness
 
 Sign in once through Cursor's official SDK browser flow, then launch normally:
 
@@ -274,304 +273,120 @@ Base Cursor routes and named workers explicitly disable Fast when the catalog
 advertises that parameter. Fast requires an explicit preset; it is never inherited
 from the account's default variant. Our live checks use the non-Fast base routes.
 
-Only our custom callback tools are enabled. Cursor's filesystem, shell, subagent,
-and other built-in execution tools are disabled, and ambient settings/MCP servers
-are excluded. A callback yields a fresh Claude `tool_use` request **before any
-action executes**. Claude handles permission, runs the tool, and returns its
-result to the waiting callback. Observed Cursor tool activity is never replayed
-as an executable action. Tool schemas and long-name aliases are passed dynamically.
+Cursor executes native shell/read/edit/search tools. Task and MCP capabilities
+are disabled, including ambient MCP servers. An observed external action is only
+displayed in Claude Code; it is never replayed as an executable `tool_use`.
 
-`/effort` selects an exact advertised `effort`/`reasoning_effort` value where the
-model has one; unsupported values fail explicitly. Catalog presets retain their
-own parameters. Models without an effort parameter do not acquire one, and
-legacy Claude thinking budgets are not mapped onto Cursor. Cursor's own system
-prompt remains active; Claude's session instructions and transcript are supplied
-as conversation context because full prompt replacement is account-gated.
+Claude's existing permission selector controls Cursor at the next prompt through
+UserPromptSubmit/SubagentStart hooks. Worker modes resolve from parent inheritance
+and built-in, user/project, supplied CLI or discovered plugin definitions. Unknown
+workers fail explicitly. Auto requests native SDK Auto-review; its accepted fallback
+when the classifier is unavailable may execute without review. Completion is not
+proof of classification. Plan selects SDK plan mode with only read, grep, glob and
+listing tools. Bypass selects native agent mode with Auto-review disabled, while
+retaining explicit tool restrictions and the SDK's sandbox configuration. Default,
+acceptEdits and dontAsk remain unsupported; there is no separate mode selector.
 
-The SDK run stays alive across tool-result HTTP exchanges. Completed turns, new
-user messages, restart, and compaction begin a fresh SDK agent from Claude's
-provided history. We do not resume opaque SDK checkpoints or promise identical
-behavior to a raw model API. In-memory retry responses are retained for up to ten
-minutes/256 requests. Output is capped at 32 MiB per SDK run, with at most 32
-active runs per gateway. Session and worker scopes plus tool IDs isolate results;
-modified conversation branches cannot settle another branch's callback.
-Identical in-flight requests share inference; one disconnect leaves the other
-observers running. The last disconnect and gateway shutdown cancel the run. A callback
-waiting between HTTP requests expires after ten minutes: the Messages protocol
-does not notify the gateway immediately when a user abandons a permission prompt.
+Worker tool lists, whole-tool deny rules and supported CLI restrictions intersect
+native capabilities. Settings and plugin policies are rechecked before dispatch.
+Linux managed settings and fragments support the same narrow policy translation;
+unsupported managed controls, argument/path-specific rules, ask rules, permission
+hooks and Claude sandbox policies fail explicitly. Unknown plugin definitions and
+Cursor policy files that isolated SDK settings cannot honor also fail. macOS,
+Windows and WSL policy admission remain unsupported. No policy is silently dropped.
 
-Initial limitations: strict structured output, forced tool choice, stop strings,
-PDF attachments, and per-response generation caps are unsupported. Token counts
-and displayed Messages usage estimate the submitted SDK prompt, tool schemas,
-and image allowance; cumulative SDK spend is not used as context occupancy.
-Hidden SDK prompt overhead remains unknown. Images are forwarded as prompt
-attachments and base64 callback results; model interpretation varies. Remote images
-inside a live callback result are rejected. Composer 2.5 passed real callback
-execution, cancellation while awaiting a result, main-model and native-worker
-Read/Edit, and Cursor → Claude → Cursor with saved history and fresh gateways.
-Composer 2.5 also passes manual, repeated, and automatic compaction, retained
-facts after fresh-process resume, and native edits after compaction. Run
-`npm run test:live:compaction -- composer-2.5` to repeat that main-session check.
-Full-window stress, subagent compaction, and automated UI/timer assertions remain
-outside the baseline.
+`/effort` selects an exact advertised effort value where the model supports one;
+unsupported values fail explicitly. Catalog presets retain their parameters.
+Cursor's own system prompt remains active; session instructions and initial
+conversation context are supplied to it.
 
-`npm run test:live:cursor-capabilities` separately checks an inert callback and
-image interpretation for account Auto, Composer 2.5, and Grok 4.6 selections (or
-explicit model/worker arguments). All three passed the plain callback and red-image
-probe. This is a narrow capability check, not full Claude integration coverage for
-every model. Callback arguments must be finite JSON objects and are snapshotted
-before Claude receives them.
+Completed turns retain the same native SDK agent and disk state. Changed mode/tool
+policy resumes that identity with the new configuration. Main sessions and workers
+have separate state, guarded by kernel file locks. Worktree workers use their
+hook-reported workspace for both native execution and policy checks. Identical completed requests
+replay output. An interrupted gateway commit with a saved SDK run ID can recover
+its terminal result through `Agent.getRun` without rerunning actions. Missing run
+identity or an unreadable/nonterminal result fails explicitly and preserves state.
 
-The official SDK currently brings an `undici` 5.x dependency with unresolved
-`npm audit` advisories. No incompatible dependency override has been applied.
-Recheck upstream SDK releases before treating this prototype as release-ready.
+Outer history compaction can continue from a fresh authenticated prompt whose text
+hash matches, or a unique saved-response anchor. This keeps Cursor's own history;
+it does not rewind native state or replay rewritten history. Other ambiguous edits
+and branches fail explicitly. Historical callback compaction tests are not native
+compaction evidence.
 
-`npm run test:live:cursor -- <model-or-worker>` checks a real SDK callback round
-trip, cancellation, Cursor as Claude's main model with native Read/Edit, switching
-to Claude and back through saved-session resume, and a Claude parent delegating
-to a Cursor worker. It spends Cursor and Claude usage on temporary fixtures and
-leaves synthetic transcripts in Claude's and Cursor's normal stores. Without an
-argument it chooses an advertised Composer model, failing
-if none is available. The ordinary `npm test` suite remains offline.
+Attributed text shows tool lifecycle, bounded sanitized edit diffs and shell output,
+exit status and elapsed time. Cancellation reaches the SDK run. Arbitrary native
+Claude tool cards and manual approval controls have no verified public extension
+surface. Cursor-originated delegation remains deferred. The public SDK reports
+natural compaction events but exposes no force-compaction or cheap threshold control.
 
-## Auto-mode integration check
+Strict structured output, forced tool choice (including `none`), stop strings,
+PDF attachments and per-response generation caps are unsupported. Images are
+forwarded as SDK attachments. Token counting is a local estimate, not exact native
+context occupancy or billed usage. Model-specific fidelity remains experimental.
 
-`npm run test:live:auto-mode` runs a Claude control, then Luna high and Cursor
-Composer 2.5 as both main models and native workers. It uses real provider logins
-and classifier requests. All five cases passed on 2026-09-06 with Claude Code
-2.1.263, Node 24.20.0, and Cursor SDK 1.0.31. Each case's Bash checks requested
-`claude-sonnet-5` through Anthropic passthrough. Select one case with
-`npm run test:live:auto-mode -- openai-luna-high`, or append `--worker` to check
-delegation. Cursor worker names come from `--cursor-models`.
+`npm run test:live:cursor` (also `test:live:cursor-harness`) runs the bounded native
+SDK tool/continuation/resume smoke check with Fast explicitly disabled. The ordinary
+`npm test` suite is offline. `npm run test:live:mode-hooks` checks unmodified Claude
+mode hooks against local fake responses without provider inference. Append `-- --plan`
+to the Cursor check for one read-only turn. Integrated validation passed a real
+Claude-parent Composer 2.5 worker edit, persisted SDK resume, cached retry,
+follow-up recall and read-only Plan, all with Fast disabled. Historical callback
+tests do not establish native parity. Append `-- --compact --recover` to check
+outer-history continuation and terminal SDK-run recovery using the same two turns.
+Both checks passed against Composer 2.5. A GPT-5.6 Luna parent also successfully
+delegated a native edit to Grok 4.6 at low effort. These checks do not establish
+natural Cursor compaction behavior.
 
-Each case attempts two harmless Bash writes in a temporary directory. Session-only
-`autoMode` prose rules allow one canary and forbid the other. There are no tool
-permission allowlists or approval hooks, and Claude's Bash sandbox is disabled for
-the test so sandbox auto-approval cannot substitute for classification. The check
-requires active auto mode, provider-attributed tool calls, successful Anthropic
-classifier requests and allow/deny decisions for both commands, the expected file
-effects, and an actual classifier-denial tool result returned to the calling model.
-A model refusing to request the command, a static permission denial, or a classifier
-failure does not pass. Missing log evidence also fails: diagnostic wording can change
-between Claude Code versions.
+Native runs have no gateway execution deadline. The launcher defaults Claude's
+`API_TIMEOUT_MS` to its documented maximum `2147483647`, preserving an explicit
+inherited value. Direct provider requests still have a 180-second gateway deadline.
+Claude's independent stream watchdogs and native tool limits still apply.
+See [Claude environment variables](https://code.claude.com/docs/en/env-vars).
 
-The test keeps a temporary artifact directory with a versioned `report.json`, CLI
-events, gateway routing, and debug logs. These may include local paths and synthetic
-prompts; review before sharing. It changes no global settings. Passing establishes
-this bounded permission contract, not classifier accuracy for arbitrary commands,
-all models, or all accounts. Claude Code still owns classifier selection and
-availability; external CLI execution such as the planned Antigravity bridge does
-not enter this tool-permission loop. With Anthropic credentials, the launcher
-preserves native classifier selection and passthrough. Without them, OpenAI
-classification uses the provider reviewer described below. The client-visible classifier model is recorded separately from
-the working model. This does not identify any private server-side specialization.
-See Claude's
-[permission modes](https://code.claude.com/docs/en/permission-modes) and
-[classifier configuration](https://code.claude.com/docs/en/auto-mode-config).
+The SDK currently brings an `undici` 5.x dependency with unresolved `npm audit`
+advisories. No incompatible dependency override has been applied.
 
-The ordinary launcher now selects automatic review without an extra opt-in flag:
+## OpenAI approval and permission checks
 
-- Claude reports an existing login, API key, or auth token: preserve native
-  Anthropic classification. The launcher does not read or copy Claude tokens.
-  An unreadable or invalid auth status stops launch; it is not treated as signed out.
-- No Anthropic credentials, and the Codex account catalog exposes
-  `codex-auto-review`: use that reviewer for OpenAI main agents and workers.
-  Claude's static permissions still run first. No reviewer is called from the
-  capability hook, and no second command-risk parser is added.
-- No Anthropic credentials, and Cursor is connected with the supported SDK:
-  use native Cursor review for Cursor main-agent and worker Bash calls.
-- No available reviewer, or the session starts with an unsupported provider:
-  disable auto mode using Claude's session-local permission settings.
+Claude-executed OpenAI tools retain Claude's ordinary permissions. When Claude
+credentials are available, native Anthropic classification passes through. Without
+them, the launcher uses the authenticated OpenAI account's `codex-auto-review`
+capability where available. Unsupported review actions and unavailable evidence
+fail explicitly; the working model never substitutes for a reviewer.
 
-This is the **no-Claude-access edge case**, for main agents and subagents alike.
-An external reviewer handles only tool calls originating from its own authenticated
-provider: OpenAI reviews OpenAI, and the Cursor adapter reviews Cursor
-through the SDK. The parent's model does not override a worker's provider.
-With Claude access, every provider keeps the standard Claude reviewer.
-[Subagents inherit auto mode](https://code.claude.com/docs/en/sub-agents#permission-modes)
-from the parent; that does not authorize cross-provider review.
+The OpenAI reviewer uses the bundled Guardian policy and a bounded read-only
+investigation loop. It receives the classification transcript, originating request,
+worker root context and tool working directory. Static deny/ask rules remain with
+Claude. Reviews are bounded to 60 seconds, six investigation turns and 1 MiB of
+initial context; only matching second-stage denials are reused. This does not
+reproduce the entire Codex reviewer harness or translate Claude's Auto prose policy.
+Cursor review belongs to its native run regardless of Claude login availability.
 
-**Adapter availability:** OpenAI review and experimental Cursor Bash review are
-implemented. Without Claude access, an unavailable reviewer or unsupported review
-action fails explicitly; the gateway does not substitute another provider or a
-manual approval. Static allow/deny/ask rules still belong to Claude Code.
-
-The Cursor adapter uses the same classifier-response adapter as OpenAI. An
-isolated SDK subprocess submits the exact pending Bash action and original
-main/worker authorization evidence to native Auto-review. It returns a verdict
-only from correlated native protocol/checkpoint data, never the proposing model's
-text. The command does not execute in the reviewer; Claude Code executes it only
-after receiving approval. A backend-review-disabled control failed closed.
-
-This requires in-memory hooks pinned to SDK **1.0.31** and exact source hashes;
-installed SDK files are untouched. SDK drift disables this adapter. Non-Bash
-classification requests, native investigation/tool operations outside the narrow
-review path, mismatched actions, timeouts, and missing verdicts fail closed. The
-adapter does not use Sand, external MCP, or a prompted substitute reviewer.
-`cursor-auto-review` is our attribution label, not a selectable Cursor model.
-
-`npm run test:live:cursor-review` checks real native allow/deny through the approval
-adapter and verifies the pending commands never execute. The denied case includes
-worker root authorization. `npm run test:live:provider-approval -- --cursor` checks
-the ordinary launcher with Claude Code's native permissions and Cursor review.
-`npm run test:live:approval-worker -- --worker cursor-composer-2-5` checks a real
-Cursor subagent under an OpenAI parent, with each provider using its own reviewer.
-
-Classifier retries addressed to ordinary external model inference are rejected
-when no provider reviewer is enabled. They cannot silently substitute the working
-model for the standard Claude reviewer.
-
-**Mid-session limitation:** Claude 2.1.263 does not reload the launcher's
-`--settings` file or expose a gateway operation to change permission mode.
-The guard blocks incompatible auto-mode actions, but the displayed mode can
-remain auto. A session started with auto disabled requires relaunch to enable
-it. Native availability changes across provider switches remain unfinished.
-
-The OpenAI reviewer receives the native classification transcript, original model
-request, root user context for workers, and current tool working directory. It uses Codex's bundled synchronous
-Guardian policy and a bounded read-only investigation loop: workspace file reads
-and directory listings, no shell execution or network tools. Unavailable evidence,
-malformed output, timeouts, and unsupported classifier formats cannot grant
-approval. It does not reproduce Codex's entire reviewer harness, account-specific
-policy discovery, or Guardian V2. The account catalog is checked at launch; Codex
-continues to own login refresh.
-Claude's `autoMode` prose customization is not translated into Codex policy;
-native permission deny/ask rules still apply before provider review.
-Reviews are bounded to 60 seconds, six investigation turns, and 1 MiB of initial
-context. Exceeding a limit blocks approval rather than silently discarding evidence.
-
-Provider allow/block verdicts become native auto-mode results. Only a matching
-second-stage denial is reused, scoped by session, worker, provider, working
-directory, and classification transcript. Allows are never cached. Classification
-retries naming the working model still go through the reviewer adapter, so a
-reviewer error cannot turn the working model into an alternate classifier.
-
-Run the integration checks with Node 24 and the saved provider logins:
+These opt-in checks use real logins and retain temporary diagnostics:
 
 ```sh
+npm run test:live:auto-mode
 npm run test:live:provider-approval -- --launcher
-npm run test:live:provider-approval -- --switch-provider
 npm run test:live:reviewer
 npm run test:live:approval-worker
-```
-
-The launcher test uses a fresh Claude config with no Anthropic credentials. Eight
-native tool calls exercise Read/Edit, `pwd`, explicit allow/deny/ask rules, and
-one escalated provider review. The switch check adds a real Cursor call and checks
-that review changes from OpenAI to Cursor with the originating model. Both use Python 3's standard
-library PTY on Linux/macOS. The reviewer-only check validates allow, deny, and
-actual file investigation; it never executes the proposed commands. Tests retain
-versioned temporary diagnostics and use real provider usage.
-
-The non-auto permission contract runs both OpenAI and Cursor through the ordinary
-launcher with a fresh, credential-isolated Claude config:
-
-```bash
 npm run test:live:permissions
-# Restrict a run to one provider or mode:
-npm run test:live:permissions -- --model multi/cursor/composer-2.5 --mode default
-# Target native workers (also accepts cursor-composer-2-5):
-npm run test:live:approval-worker -- --mode dontAsk --worker openai-luna-high
-npm run test:live:approval-worker -- --mode bypassPermissions --worker openai-luna-high
 ```
 
-It exercises `default`, `acceptEdits`, `plan`, `dontAsk`, and
-`bypassPermissions`. Observation-only hooks record tool origin and permission
-mode; the terminal driver answers only the fixture's native dialogs. Assertions
-check pending actions have not executed before approval, exact-once append
-results, denied-file absence, actual tool results, unchanged mode, and zero
-classifier/Anthropic traffic. Bypass's initial consent is distinct from tool
-approval. No permission rules are supplied in the main-model matrix. The
-`dontAsk` worker check allows only parent Agent delegation, leaving the worker's
-Bash command subject to native permissions.
+The Claude/OpenAI checks exercise classifier routing and Claude-executed tool
+permissions. Their historical Cursor callback cases are retired and do not prove
+native Cursor enforcement. Use the native Cursor check described above for that
+execution path. Native Auto availability changes across provider switches and the
+full interactive permission UX remain limited by Claude's public interface.
 
-Plan mode is a read-only behavior check, not a claim of an unconditional write
-security boundary: a model may decline to propose writes, while a submitted
-edit can produce a native permission prompt. The test denies any such prompt
-and records whether canary writes were attempted. Existing auto-mode switching
-and worker checks cover the reviewer-specific paths separately. These checks
-cover Claude-executed tools; future external-execution bridges need their own
-permission enforcement proof.
+## Historical implementation
 
-`--native-escalation` retains the earlier nine-call classifier-adapter proof:
-two provider reviews, including a denial reused for Claude's second stage.
-Without flags, the test retains the earlier three-call PreToolUse/manual-prompt
-proof. Only those older tests add canary-specific policy; production uses the
-bundled provider policy with an accurate execution-environment description.
-
-## Earlier commands and skills (historical)
-
-These belonged to the earlier companion-based implementation and were removed
-in the TypeScript branch. The following is historical reference, not commands
-available from this checkout. The `customize` and `multi-cli-anything` skills modify that
-interface; they do not implement native gateway integrations. Their prompts have
-not been updated for the new direction.
-
-Provider commands live under each CLI's namespace; the cross-cutting `/multi:*` commands operate the shared runtime.
-
-| Command | What it does |
-|---|---|
-| `/codex:execute` | Delegate a specific plan or plan step to Codex |
-| `/codex:rescue` | Hand a stuck or open-ended problem to Codex for an independent investigation |
-| `/codex:review` | Codex code review of your working tree or a branch (read-only) |
-| `/codex:adversarial-review` | Adversarial design/code review — challenges the approach, not just the diff (read-only) |
-| `/cursor:delegate` | Delegate an implementation task or plan step to Cursor (agentic; writes code; supports `--until-done`) |
-| `/cursor:research` | Read-only external web/documentation research via Cursor |
-| `/cursor:explore` | Read-only codebase exploration via Cursor |
-| `/opencode:delegate` | Delegate an implementation task to OpenCode (agentic; writes code; supports `--until-done`; default model: opencode/claude-opus-5 via Zen) |
-| `/opencode:research` | Read-only external web/documentation research via OpenCode |
-| `/opencode:explore` | Read-only codebase exploration via OpenCode |
-| `/multi:setup` | One-shot wizard — detects CLIs, configures Exa + Context7 MCPs |
-| `/multi:status` | Show active and recent background jobs for this repo |
-| `/multi:result` | Show the stored final output for a finished job |
-| `/multi:cancel` | Cancel an active background job |
-
-Provider model availability comes from the installed CLI and the user's account.
-The companion passes explicit model choices to its adapter; the native gateway
-currently accepts only the registered GPT models described above. Billing depends
-on the actual provider and credentials, not just a model name or prefix.
-
-## Retained transport references
-
-The earlier companion used the transports below. Cursor/OpenCode headless and ACP
-code is retained for future bridges; it is not connected to the gateway. The
-Codex app-server implementation was removed.
-
-- **Codex** → ASP (app-server behind a broker).
-- **Cursor** and **OpenCode** → headless print mode **by default**, with an optional **ACP** path (Agent Client Protocol — structured JSON-RPC over stdio, via the official `@agentclientprotocol/sdk`). ACP adds in-protocol model selection, session modes, and `session/cancel`; it's still in bake-in, so headless remains the default.
-
-Opt into ACP per CLI with environment variables (e.g. in `~/.claude/settings.json` under `env`):
-
-```json
-"env": {
-  "MULTI_TRANSPORT_CURSOR": "acp",
-  "MULTI_TRANSPORT_OPENCODE": "acp"
-}
-```
-
-Each is `acp` | `headless` (default `headless`). With no flag set, behavior is identical to before. Codex has no ACP path (it exposes no native ACP). When on the ACP path, `ACP_TRACE=1` traces the JSON-RPC wire to stderr.
-
-## Earlier companion limitations (reference for bridge work)
-
-These record earlier CLI quirks and companion limitations; revalidate them when
-building each bridge. If you hit something not listed, check the companion's stderr (the forwarders append `2>&1`) — a bad model id, an auth failure, or a sandbox block surfaces there.
-
-- **Cursor runs in headless `agent -p` mode by default** (ACP is opt-in — see [Transports](#transports)). On the headless path the adapter delivers the prompt on stdin, selects the model with `--model` (default `auto`), and parses `json`/`stream-json` output. MCP servers come from Cursor's own `~/.cursor/mcp.json`, which `/multi:setup` maintains (this holds on the ACP path too — the adapter passes no MCP servers in-protocol, so Cursor reads its own config either way).
-
-- **Cursor's shell is slow/unreliable on Windows.** Cursor's terminal tool can stall or wait out a per-command timeout on Windows (host-PATH/WSL, open upstream). So `/cursor:delegate` does **not** run build/test verification itself — it lists the commands in a `## Verification` block and Claude runs them. File writes and web/codebase reads are unaffected.
-
-- **OpenCode has no `--read-only` flag.** For read-only roles (`/opencode:research`, `/opencode:explore`), the adapter enforces read-only by injecting a custom primary agent via `OPENCODE_CONFIG_CONTENT` with write/edit/bash denied, plus an `OPENCODE_PERMISSION` deny floor. A stale bun `opencode.exe` may shadow the npm `.cmd` shim on Windows — the adapter never resolves to `opencode.exe`; set `OPENCODE_CLI_PATH` to force the right binary if needed.
-
-- **OpenCode billing depends on the selected provider and login.** Its current
-  adapter default is `opencode/claude-opus-5` through Zen, overridable with
-  `OPENCODE_CLI_DEFAULT_MODEL`. An `anthropic/*` prefix alone does not mean the
-  request uses the same Claude subscription as Claude Code.
-
-- **OpenCode `--effort` maps to `opencode run --variant`** (provider-specific reasoning effort, validated by OpenCode against the chosen model; headless transport only). `--until-done` is supported.
-
-- **OpenCode MCP servers are not managed by `/multi:setup`.** OpenCode reads MCP configuration from its own `opencode.json`; use OpenCode's interactive wizard to wire Exa/Context7 there.
-
-These notes describe the earlier companion implementation, not guarantees for the planned harness bridges.
+The old slash commands, skills, companion and separate Cursor reviewer are removed.
+Retained Cursor/OpenCode transports are reference modules, not selectable gateway
+backends. Historical investigation lives under `.agent/archive/` and `.agent/`;
+its callback compaction results and source-patch experiments are not current runtime
+contracts. [The current map](docs/cursor-refactor.md) records native behavior and
+remaining limitations.
 
 ## License
 

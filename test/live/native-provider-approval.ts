@@ -19,22 +19,16 @@ import { pty } from './native-pty.ts';
 
 if (process.argv.includes('--help')) {
   console.log(
-    'Usage: node test/live/native-provider-approval.ts [--native-escalation | --launcher | --cursor | --switch-provider]\nReal provider review and Claude terminal auto/manual approval. Requires Python 3 (stdlib PTY), Claude, and Node 24. Temporary canaries only.',
+    'Usage: node test/live/native-provider-approval.ts [--native-escalation | --launcher]\nReal provider review and Claude terminal auto/manual approval. Requires Python 3 (stdlib PTY), Claude, and Node 24. Temporary canaries only.',
   );
   process.exit(0);
 }
-const switchProvider = process.argv.includes('--switch-provider');
-const cursor = process.argv.includes('--cursor');
-const initialModel = cursor ? 'multi/cursor/composer-2.5' : 'multi/openai/gpt-5.6-luna';
-const launcher = cursor || switchProvider || process.argv.includes('--launcher');
+const initialModel = 'multi/openai/gpt-5.6-luna';
+const launcher = process.argv.includes('--launcher');
 const nativeEscalation = launcher || process.argv.includes('--native-escalation');
 assert(
-  process.argv
-    .slice(2)
-    .every((arg) =>
-      ['--native-escalation', '--launcher', '--cursor', '--switch-provider'].includes(arg),
-    ),
-  'Unknown arguments',
+  process.argv.slice(2).every((arg) => ['--native-escalation', '--launcher'].includes(arg)),
+  'Only --native-escalation and --launcher are supported; native Cursor has no separate reviewer.',
 );
 assert.notEqual(process.platform, 'win32', 'PTY proof requires Linux/macOS');
 assert.equal(spawnSync('python3', ['--version']).status, 0, 'Python 3 required');
@@ -65,7 +59,6 @@ const kinds = nativeEscalation
   : ['AUTO', 'MANUAL_ACCEPT', 'MANUAL_DENY'];
 const command = (kind: string) =>
   `node -e 'require("node:fs").appendFileSync("${kind}.txt", "${kind}\\n")'`;
-const switchCommand = command('SWITCH_CURSOR');
 const seed = path.join(artifacts, 'CONTROL.txt');
 await writeFile(seed, 'BEFORE\n');
 const controlPrompt = nativeEscalation
@@ -340,7 +333,8 @@ const child = spawn(
     prompt,
     '--model',
     initialModel,
-    ...(cursor ? [] : ['--effort', 'high']),
+    '--effort',
+    'high',
     '--permission-mode',
     'auto',
     '--tools',
@@ -350,7 +344,7 @@ const child = spawn(
     '--setting-sources',
     '',
     '--strict-mcp-config',
-    ...(switchProvider ? [] : ['--disable-slash-commands']),
+    '--disable-slash-commands',
     '--debug-file',
     debugFile,
   ],
@@ -367,7 +361,6 @@ const child = spawn(
         ? {
             MULTI_NATIVE_TRACE: '1',
             CODEX_HOME: process.env.CODEX_HOME,
-            ...(process.env.CURSOR_API_KEY ? { CURSOR_API_KEY: process.env.CURSOR_API_KEY } : {}),
           }
         : {
             ANTHROPIC_AUTH_TOKEN: token,
@@ -398,15 +391,6 @@ child.stdout.on('data', (data) => {
   output += data;
   appendFileSync(path.join(artifacts, 'terminal.log'), data, { mode: 0o600 });
   clean += stripVTControlCharacters(String(data));
-  if (
-    switchProvider &&
-    !switchConfirmed &&
-    clean.replace(/\s/g, '').includes('Yes,switchtoComposer2.5viaCursor')
-  ) {
-    switchConfirmed = true;
-    clean = '';
-    setTimeout(() => child.stdin.write('\r'), 300);
-  }
   if (!trustAnswered && clean.replace(/\s/g, '').includes('Yes,Itrustthisfolder')) {
     trustAnswered = true;
     clean = '';
@@ -467,53 +451,14 @@ const manualDenial = (entries: Awaited<ReturnType<typeof transcript>>, kind = 'M
         result.is_error === true &&
         /The user doesn't want to proceed/.test(String(result.content)),
     );
-const switchCompleted = (entries: Awaited<ReturnType<typeof transcript>>) =>
-  entries
-    .filter((entry) => entry.type === 'user')
-    .flatMap((entry) => (Array.isArray(entry.message?.content) ? entry.message.content : []))
-    .some(
-      (result) =>
-        result.type === 'tool_result' &&
-        result.tool_use_id ===
-          hookInputs.findLast((i) => i.tool_input?.command === switchCommand)?.tool_use_id &&
-        result.is_error !== true,
-    );
 // Wait for the native No decision to be persisted before exiting the terminal.
-let switchRequested = false;
-let switchPromptSent = false;
-let switchConfirmed = false;
 const completionPoll = setInterval(async () => {
   if (finishing || promptCount < 2) {
     return;
   }
   try {
     const history = await transcript();
-    if (switchProvider && !switchRequested) {
-      if (!manualDenial(history)) {
-        return;
-      }
-      switchRequested = true;
-      setTimeout(() => {
-        child.stdin.write('/model multi/cursor/composer-2.5');
-        setTimeout(() => child.stdin.write('\r'), 300);
-      }, 500);
-      return;
-    }
-    if (switchProvider && switchRequested && !switchPromptSent) {
-      const saved = JSON.parse(await readFile(path.join(config, 'settings.json'), 'utf8'));
-      if (saved.model !== 'multi/cursor/composer-2.5') {
-        return;
-      }
-      switchPromptSent = true;
-      setTimeout(() => {
-        child.stdin.write(
-          `Run this exact Bash command once: ${switchCommand}. Do not retry or change it.`,
-        );
-        setTimeout(() => child.stdin.write('\r'), 300);
-      }, 1000);
-      return;
-    }
-    if (switchProvider ? switchCompleted(history) : manualDenial(history)) {
+    if (manualDenial(history)) {
       finishing = true;
       child.stdin.write('\x03');
       // A running turn consumes the first interrupt; idle Claude needs two to exit.
@@ -555,17 +500,7 @@ try {
     calls.map((call) => call.id),
     hookInputs.map((input) => input.tool_use_id),
   );
-  assert(
-    calls.slice(0, switchProvider ? -1 : undefined).every((call) => call.model === initialModel),
-  );
-  if (switchProvider) {
-    assert.equal(calls.at(-1)?.model, 'multi/cursor/composer-2.5');
-    assert(switchCompleted(history));
-    assert.equal(
-      await readFile(path.join(artifacts, 'SWITCH_CURSOR.txt'), 'utf8'),
-      'SWITCH_CURSOR\n',
-    );
-  }
+  assert(calls.every((call) => call.model === initialModel));
   assert.equal(
     await readFile(path.join(config, '.credentials.json'), 'utf8').catch(() => null),
     null,
@@ -583,9 +518,6 @@ try {
   }
   if (launcher) {
     expectedCalls = 8;
-  }
-  if (switchProvider) {
-    expectedCalls = 9;
   }
   assert.equal(new Set(hookInputs.map((i) => i.tool_use_id)).size, expectedCalls);
   for (const kind of kinds) {
@@ -613,11 +545,6 @@ try {
       cached = [false];
       classifierRequests = 1;
     }
-    if (switchProvider) {
-      outcomes = ['allow', 'allow'];
-      cached = [false, false];
-      classifierRequests = 2;
-    }
     assert.deepEqual(
       classifications.map((c) => c.outcome),
       outcomes,
@@ -642,17 +569,6 @@ try {
       );
     }
     assert.equal([...debug.matchAll(/classifier_request_started /g)].length, classifierRequests);
-    if (switchProvider) {
-      assert.deepEqual(
-        classifications.map((item) => item.model),
-        ['codex-auto-review', 'cursor-auto-review'],
-      );
-    } else if (cursor) {
-      assert.deepEqual(
-        classifications.map((item) => item.model),
-        ['cursor-auto-review'],
-      );
-    }
   } else {
     assert(!debug.includes('classifier_request_started'), 'Native classifier attempted');
   }
@@ -665,7 +581,7 @@ try {
       'Native filtering; two OpenAI reviews, zero for native rules/read/edit/pwd; native Yes/No preserved.';
   }
   if (launcher) {
-    message = `Ordinary launcher, runtime ${cursor ? 'Cursor' : 'OpenAI'} review, native filtering and manual rules.`;
+    message = 'Ordinary launcher, runtime OpenAI review, native filtering and manual rules.';
   }
   console.log(`PASS: ${message}`);
 } catch (error) {
@@ -689,7 +605,6 @@ try {
         {
           passed: !failure,
           launcher,
-          switchProvider,
           nativeEscalation,
           permissionInputs,
           code,
