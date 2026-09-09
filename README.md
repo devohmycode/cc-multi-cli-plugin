@@ -508,11 +508,14 @@ replay output. An interrupted gateway commit with a saved SDK run ID can recover
 its terminal result through `Agent.getRun` without rerunning actions. Missing run
 identity or an unreadable/nonterminal result fails explicitly and preserves state.
 
-Outer history compaction can continue from a fresh authenticated prompt whose text
-hash matches, or a unique saved-response anchor. This keeps Cursor's own history;
-it does not rewind native state or replay rewritten history. Other ambiguous edits
-and branches fail explicitly. Historical callback compaction tests are not native
-compaction evidence.
+Once a session has a prior response, the gateway sends only the newest turn:
+everything after the last assistant message, resumed on the same native SDK agent.
+A request whose history ends with an assistant message, or that has no new user
+message after it, fails explicitly. If the outer history no longer contains the
+previous turn's response — compaction or an edited transcript — the gateway
+streams "[Cursor] Outer history changed; the native conversation continues with
+its own record." and continues anyway; native state is never rewound or replayed.
+Historical callback compaction tests are not native compaction evidence.
 
 Attributed text shows tool lifecycle, bounded sanitized edit diffs and shell output,
 exit status and elapsed time. Cancellation reaches the SDK run. Arbitrary native

@@ -12,7 +12,6 @@ import {
 } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
 import { CursorHarness } from '../../plugins/multi-cursor/src/harness.ts';
 import { cursorModelOptions } from '../../plugins/multi-cursor/src/models.ts';
-import { cursorHistoryHash } from '../../plugins/multi-cursor/src/request.ts';
 
 const plan = process.argv.includes('--plan');
 const compact = process.argv.includes('--compact');
@@ -191,11 +190,8 @@ async function emulateInterruptedCommit(directory: string, runId: string) {
   const pendingRun = {
     runId,
     key: saved.replay.key,
-    historyLength: saved.historyLength,
-    historyHash: saved.historyHash,
     model: saved.response.model,
     inputTokens: saved.response.usage.input_tokens,
-    submissionId: saved.submissionId,
   };
   // Remove both reply sources so only Agent.getRun can recover the first turn.
   for (const archive of files.filter((name) => name.endsWith('.response.json'))) {
@@ -205,8 +201,6 @@ async function emulateInterruptedCommit(directory: string, runId: string) {
     file,
     JSON.stringify({
       ...saved,
-      historyLength: 0,
-      historyHash: cursorHistoryHash([]),
       response: undefined,
       replay: undefined,
       pending: true,

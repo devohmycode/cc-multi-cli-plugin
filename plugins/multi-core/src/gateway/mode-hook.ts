@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import type { WorkerPermissions } from './agent-definitions.ts';
 
@@ -7,7 +7,6 @@ type PermissionMode = (typeof MODES)[number];
 export interface PermissionContext extends WorkerPermissions {
   permissionMode: PermissionMode;
   cwd?: string;
-  submission?: { id: string; promptHash: string };
   compaction?: string;
 }
 
@@ -44,14 +43,7 @@ export class PermissionModes {
     if (input.hook_event_name === 'UserPromptSubmit') {
       // Clear first: a malformed new snapshot must not retain earlier permissions.
       this.parents.delete(session);
-      const context: PermissionContext = { permissionMode: permissionMode(input.permission_mode) };
-      if (typeof input.prompt === 'string') {
-        context.submission = {
-          id: randomUUID(),
-          promptHash: createHash('sha256').update(input.prompt).digest('hex'),
-        };
-      }
-      remember(this.parents, session, context);
+      remember(this.parents, session, { permissionMode: permissionMode(input.permission_mode) });
       return;
     }
     if (input.hook_event_name !== 'SubagentStart') {
@@ -92,7 +84,6 @@ export class PermissionModes {
           ? (previous?.permissionMode ?? 'plan')
           : permissionMode(input.permission_mode),
       cwd: requiredString(input.cwd, 'cwd'),
-      ...(previous?.submission ? { submission: previous.submission } : {}),
       compaction: randomUUID(),
     });
   }

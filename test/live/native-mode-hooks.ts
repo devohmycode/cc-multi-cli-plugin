@@ -173,8 +173,6 @@ console.log(`Offline hook proof: ${root}/report.json`);
 assert.equal(code, 0);
 assert(events.some((e) => e.agentId && e.permissionContext?.permissionMode === 'plan'));
 assert(events.some((e) => !e.agentId && e.permissionContext?.permissionMode === 'default'));
-assert(events.some((e) => !e.agentId && e.permissionContext?.submission?.promptHash));
-assert(events.every((e) => !e.agentId || !e.permissionContext?.submission));
 if (worktree) {
   assert(
     events.some((e) => e.agentId && e.permissionContext?.cwd && e.permissionContext.cwd !== root),

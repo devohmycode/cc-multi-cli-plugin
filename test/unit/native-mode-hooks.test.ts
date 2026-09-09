@@ -3,7 +3,7 @@ import test from 'node:test';
 import { PermissionModes } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
 import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 
-test('authenticated compaction snapshots establish mode without inventing a user submission', async () => {
+test('authenticated compaction snapshots establish mode', async () => {
   const modes = new PermissionModes(async () => ({ coder: { tools: ['Read'] } }));
   const compact = (session: string) =>
     modes.record({
@@ -16,15 +16,12 @@ test('authenticated compaction snapshots establish mode without inventing a user
     });
   await compact('resumed');
   assert.equal(modes.resolve('resumed').permissionMode, 'plan');
-  assert.equal(modes.resolve('resumed').submission, undefined);
   assert(modes.resolve('resumed').compaction);
   await modes.record({
     hook_event_name: 'UserPromptSubmit',
     session_id: 'active',
     permission_mode: 'auto',
-    prompt: 'Original authenticated prompt',
   });
-  const original = modes.resolve('active').submission;
   await modes.record({
     hook_event_name: 'SubagentStart',
     session_id: 'active',
@@ -33,17 +30,14 @@ test('authenticated compaction snapshots establish mode without inventing a user
     cwd: '/tmp',
   });
   await compact('active');
-  assert.deepEqual(modes.resolve('active').submission, original);
   assert.equal(modes.resolve('active', 'worker').compaction, undefined);
   assert.deepEqual(modes.resolve('active', 'worker').tools, ['Read']);
   await modes.record({
     hook_event_name: 'UserPromptSubmit',
     session_id: 'active',
     permission_mode: 'auto',
-    prompt: 'Continue',
   });
   assert.equal(modes.resolve('active').compaction, undefined);
-  assert.notDeepEqual(modes.resolve('active').submission, original);
 });
 
 test('PreCompact without a mode retains the snapshot or confines a restored session to Plan', async () => {
@@ -60,12 +54,9 @@ test('PreCompact without a mode retains the snapshot or confines a restored sess
     hook_event_name: 'UserPromptSubmit',
     session_id: 'session',
     permission_mode: 'auto',
-    prompt: 'work',
   });
-  const previous = modes.resolve('session').submission;
   await modes.record(hook);
   assert.equal(modes.resolve('session').permissionMode, 'auto');
-  assert.deepEqual(modes.resolve('session').submission, previous);
   await assert.rejects(modes.record({ ...hook, permission_mode: 'invalid' }), /unsupported/);
   assert.throws(() => modes.resolve('session'), /unavailable/);
 });
@@ -214,33 +205,4 @@ test('authenticated hooks supply Cursor request context without prompt markers',
   assert.deepEqual(observed, ['plan', 'auto', 'auto']);
   assert.deepEqual(delivered, observed);
   assert.equal(calls, 3);
-});
-
-test('submission fingerprints authorize only fresh main prompts without exposing their text', async () => {
-  const modes = new PermissionModes(async () => ({ coder: {} }));
-  const hook = {
-    hook_event_name: 'UserPromptSubmit',
-    session_id: 'one',
-    permission_mode: 'auto',
-    prompt: 'private prompt',
-  };
-  await modes.record(hook);
-  const first = modes.resolve('one');
-  assert(first.submission);
-  assert.match(first.submission.promptHash, /^[a-f0-9]{64}$/);
-  assert.doesNotMatch(JSON.stringify(first), /private prompt/);
-  await modes.record(hook);
-  const second = modes.resolve('one');
-  assert.notEqual(second.submission?.id, first.submission.id);
-  assert.equal(second.submission?.promptHash, first.submission.promptHash);
-  await modes.record({
-    hook_event_name: 'SubagentStart',
-    session_id: 'one',
-    agent_id: 'worker',
-    agent_type: 'coder',
-    cwd: '/tmp',
-  });
-  assert.equal(modes.resolve('one', 'worker').submission, undefined);
-  await assert.rejects(modes.record({ ...hook, permission_mode: 'invalid' }));
-  assert.throws(() => modes.resolve('one'), /unavailable/);
 });

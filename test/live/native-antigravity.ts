@@ -2,7 +2,7 @@
 // two paid turns: one native write and one native read, with a cached replay
 // between them proving that a saved response does not repeat the write.
 import assert from 'node:assert/strict';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -50,10 +50,6 @@ assert(
 
 function fullModel(value: string): string {
   return value.startsWith('multi/antigravity/') ? value : `multi/antigravity/${value}`;
-}
-
-function promptHash(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
 }
 
 function text(response: MessagesResponse): string {
@@ -198,10 +194,7 @@ try {
         ? 'After outer history compaction, continue with a native read-only status check.'
         : `After outer history compaction, use no tools and recall the exact nonce written to ${target}. Report the nonce from our conversation.`;
     const compactMessages = [{ role: 'user', content: compactPrompt }];
-    latestResponse = await turn(harness, nextModel, compactMessages, {
-      ...context,
-      submission: { id: randomUUID(), promptHash: promptHash(compactPrompt) },
-    });
+    latestResponse = await turn(harness, nextModel, compactMessages);
     latestMessages = [...compactMessages, { role: 'assistant', content: latestResponse.content }];
     assert(text(latestResponse).length > 0, 'Compaction continuation returned no text');
     if (requestedMode !== 'plan') {

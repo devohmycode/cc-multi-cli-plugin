@@ -29,30 +29,21 @@ export type CreateCursorHarnessAgent = (options: AgentOptions) => Promise<Agent>
 type PendingRun = {
   key: string;
   runId?: string;
-  historyLength: number;
-  historyHash: string;
   model: string;
   inputTokens: number;
-  submissionId?: string;
 };
 type SavedSession = {
-  version: 1;
+  version: 2;
   agentId: string;
-  historyLength: number;
-  historyHash: string;
   response?: MessagesResponse;
   replay?: { key: string; events: Event[] };
   pending: boolean;
   pendingRun?: PendingRun;
-  submissionId?: string;
-  needsPrompt?: boolean;
 };
 type Event = [StreamEventName, StreamEventBody];
 type Session = {
   agent: Agent;
   file: string;
-  historyLength: number;
-  historyHash: string;
   response?: MessagesResponse;
   replay?: { key: string; events: Event[] };
   busy: boolean;
@@ -61,8 +52,6 @@ type Session = {
   unlock?: Promise<void>;
   release: () => Promise<void>;
   pendingRun?: PendingRun;
-  submissionId?: string;
-  needsPrompt?: boolean;
   policy: string;
 };
 type Exchange = {
@@ -309,13 +298,7 @@ export class CursorHarness {
           path.join(this.stateDirectory, `${pending.key}.failure.json`),
           cursorRunError(result).failure,
         );
-        await atomicJson(file, {
-          ...saved,
-          pending: false,
-          pendingRun: undefined,
-          submissionId: pending.submissionId,
-          needsPrompt: true,
-        });
+        await atomicJson(file, { ...saved, pending: false, pendingRun: undefined });
         return;
       }
       const events: Event[] = [];
@@ -327,10 +310,6 @@ export class CursorHarness {
         ...saved,
         pending: false,
         pendingRun: undefined,
-        historyLength: pending.historyLength,
-        historyHash: pending.historyHash,
-        submissionId: pending.submissionId,
-        needsPrompt: false,
         response: response.finish(),
         replay: { key: pending.key, events },
       });
@@ -349,17 +328,10 @@ export class CursorHarness {
       if (session.failed) {
         throw new Error('Cursor previous run failed; refusing to replay native work');
       }
-      const messages =
-        session.response || session.needsPrompt
-          ? continuation(session, body, context)
-          : body.messages;
-      const reconciled =
-        session.needsPrompt ||
-        (session.response &&
-          cursorHistoryHash(body.messages?.slice(0, session.historyLength)) !==
-            session.historyHash);
+      const messages = session.response ? continuation(body) : (body.messages ?? []);
+      const rewound = historyRewound(session, body.messages ?? []);
       session.busy = true;
-      return { session, messages, reconciled };
+      return { session, messages, rewound };
     } finally {
       this.creating.delete(scope);
     }
@@ -406,15 +378,11 @@ export class CursorHarness {
       const session: Session = {
         agent,
         file,
-        historyLength: saved?.historyLength ?? 0,
-        historyHash: saved?.historyHash ?? cursorHistoryHash([]),
         response: saved?.response,
         replay: saved?.replay,
         busy: false,
         failed: false,
         release,
-        submissionId: saved?.submissionId,
-        needsPrompt: saved?.needsPrompt,
         policy: cursorPermissionPolicy(context).identity,
       };
       await this.saveSession(session);
@@ -450,16 +418,12 @@ export class CursorHarness {
 
   private saveSession(session: Session, pending = false) {
     return atomicJson(session.file, {
-      version: 1,
+      version: 2,
       agentId: session.agent.agentId,
-      historyLength: session.historyLength,
-      historyHash: session.historyHash,
       response: session.response,
       replay: session.replay,
       pending,
       pendingRun: pending ? session.pendingRun : undefined,
-      submissionId: session.submissionId,
-      needsPrompt: session.needsPrompt,
     });
   }
 
@@ -473,21 +437,8 @@ export class CursorHarness {
     }
   }
 
-  private async persistDispatch(
-    session: Session,
-    body: MessagesRequest,
-    context: PermissionContext,
-    key: string,
-    inputTokens: number,
-  ) {
-    session.pendingRun = {
-      key,
-      inputTokens,
-      historyLength: body.messages?.length ?? 0,
-      historyHash: cursorHistoryHash(body.messages ?? []),
-      model: body.model ?? '',
-      submissionId: context.submission?.id,
-    };
+  private async persistDispatch(session: Session, key: string, model: string, inputTokens: number) {
+    session.pendingRun = { key, model, inputTokens };
     await this.saveSession(session, true);
     return session.pendingRun;
   }
@@ -509,8 +460,6 @@ export class CursorHarness {
       path.join(this.stateDirectory, `${pending.key}.failure.json`),
       cursorRunError(result).failure,
     );
-    session.submissionId = pending.submissionId;
-    session.needsPrompt = true;
     await this.saveSession(session);
     session.failed = false;
   }
@@ -525,7 +474,7 @@ export class CursorHarness {
   ) {
     const signal = exchange.controller.signal;
     signal.throwIfAborted();
-    const { session, messages, reconciled } = await this.session(scope, body, context);
+    const { session, messages, rewound } = await this.session(scope, body, context);
     let text = '';
     let cancelled = false;
     let pending = false;
@@ -543,9 +492,9 @@ export class CursorHarness {
     try {
       const prepared = prepareCursorRequest({ ...body, messages });
       const stream = new HarnessResponse(body.model ?? '', prepared.inputTokens, emit);
-      if (reconciled) {
+      if (rewound) {
         stream.text(
-          '[Cursor] Continuing with retained native history; outer history edits or compaction did not undo prior actions.\n',
+          '[Cursor] Outer history changed; the native conversation continues with its own record.\n',
         );
       }
       signal.throwIfAborted();
@@ -556,9 +505,8 @@ export class CursorHarness {
       await this.archiveReply(session);
       const dispatch = await this.persistDispatch(
         session,
-        body,
-        context,
         replay.key,
+        body.model ?? '',
         prepared.inputTokens,
       );
       pending = true;
@@ -593,12 +541,8 @@ export class CursorHarness {
       }
       stream.text(cursorTerminalSuffix(text, result.result ?? ''));
       const response = stream.finish();
-      session.historyLength = body.messages?.length ?? 0;
-      session.historyHash = cursorHistoryHash(body.messages ?? []);
       session.response = response;
       session.replay = replay;
-      session.submissionId = context.submission?.id;
-      session.needsPrompt = false;
       // Completion and its replayable HTTP reply must commit together.
       await this.saveSession(session);
       exchange.committed = true;
@@ -658,71 +602,35 @@ export class CursorHarness {
   }
 }
 
-function continuation(session: Session, body: MessagesRequest, context: PermissionContext) {
+/**
+ * The newest turn: everything after the last assistant message (the newest user
+ * message plus any trailing inline system reminders). The persistent SDK agent
+ * already holds everything before it; only the delta needs to be sent on resume.
+ */
+function continuation(body: MessagesRequest): NonNullable<MessagesRequest['messages']> {
   const messages = body.messages ?? [];
-  if (session.failed) {
-    throw new Error('Cursor previous run failed; use a new session');
+  const lastAssistant = messages.findLastIndex((message) => message.role === 'assistant');
+  if (lastAssistant === messages.length - 1) {
+    throw new Error('Cursor continuation requires a message after the last assistant turn');
   }
-  const count = session.historyLength;
-  if (
-    session.needsPrompt ||
-    !session.response ||
-    cursorHistoryHash(messages.slice(0, count)) !== session.historyHash
-  ) {
-    return reconcileHistory(session, body, context);
-  }
-  const assistant = messages[count];
-  const expected = [{ role: 'assistant', content: session.response.content }];
-  if (!assistant || cursorHistoryHash([assistant]) !== cursorHistoryHash(expected)) {
-    throw new Error(
-      'Cursor continuation does not match its previous response; refusing to replay history',
-    );
-  }
-  const delta = messages.slice(count + 1);
-  if (!delta.length) {
-    throw new Error('Cursor continuation contains no new message');
+  const delta = messages.slice(lastAssistant + 1);
+  if (!delta.some((message) => message.role === 'user')) {
+    throw new Error('Cursor continuation requires a new user message');
   }
   return delta;
 }
 
-function plainText(content: unknown): string | undefined {
-  if (
-    !Array.isArray(content) ||
-    !content.every((block) => block?.type === 'text' && typeof block.text === 'string')
-  ) {
-    return undefined;
+/** True when the outer history no longer contains the previous turn's response. */
+function historyRewound(
+  session: Session,
+  messages: NonNullable<MessagesRequest['messages']>,
+): boolean {
+  if (!session.response) {
+    return false;
   }
-  return content.map((block) => block.text).join('');
-}
-
-function reconcileHistory(session: Session, body: MessagesRequest, context: PermissionContext) {
-  const messages = body.messages ?? [];
-  const last = messages.at(-1);
-  const content = last?.content;
-  const text = typeof content === 'string' ? content : plainText(content);
-  const submission = context.submission;
-  if (
-    last?.role === 'user' &&
-    text !== undefined &&
-    submission &&
-    submission.id !== session.submissionId &&
-    createHash('sha256').update(text).digest('hex') === submission.promptHash
-  ) {
-    // The hook proves this is a newly submitted prompt. Keep SDK history intact;
-    // neither the external summary nor rewritten prior actions are new work.
-    return [last];
-  }
-  if (!session.needsPrompt && session.response) {
-    const expected = cursorHistoryHash([{ role: 'assistant', content: session.response.content }]);
-    const anchors = messages.flatMap((message, index) =>
-      cursorHistoryHash([message]) === expected ? [index] : [],
-    );
-    if (anchors.length === 1 && anchors[0] < messages.length - 1) {
-      return messages.slice(anchors[0] + 1);
-    }
-  }
-  throw new Error(
-    'Cursor history changed or was compacted externally without a new observed prompt or unique response anchor; native state is preserved',
+  const expected = cursorHistoryHash([{ role: 'assistant', content: session.response.content }]);
+  return !messages.some(
+    (message) => message.role === 'assistant' && cursorHistoryHash([message]) === expected,
   );
 }
 
@@ -814,23 +722,19 @@ async function readSession(file: string): Promise<SavedSession | undefined> {
   if (saved === undefined) {
     return undefined;
   }
+  if (saved.version !== 2) {
+    // The native SDK agent is never deleted; an older or unknown session file
+    // is ignored and the session starts fresh instead of refusing to load.
+    return undefined;
+  }
   if (
-    saved?.version !== 1 ||
     typeof saved.agentId !== 'string' ||
     !saved.agentId ||
-    !Number.isSafeInteger(saved.historyLength) ||
-    typeof saved.historyLength !== 'number' ||
-    saved.historyLength < 0 ||
-    !isHash(saved.historyHash) ||
     typeof saved.pending !== 'boolean' ||
     !validSessionReply(saved) ||
-    !validPendingRun(saved.pendingRun) ||
-    (saved.needsPrompt !== undefined && typeof saved.needsPrompt !== 'boolean') ||
-    (saved.submissionId !== undefined && typeof saved.submissionId !== 'string')
+    !validPendingRun(saved.pendingRun)
   ) {
-    throw new Error(
-      'Cursor session has incompatible or invalid state; refusing to replay native actions',
-    );
+    throw new Error('Cursor session has invalid state; refusing to replay native actions');
   }
   return saved as SavedSession;
 }
@@ -840,15 +744,11 @@ function validPendingRun(pending: PendingRun | undefined) {
     pending === undefined ||
     (pending !== null &&
       isHash(pending.key) &&
-      isHash(pending.historyHash) &&
-      Number.isSafeInteger(pending.historyLength) &&
-      pending.historyLength > 0 &&
       typeof pending.model === 'string' &&
       Number.isSafeInteger(pending.inputTokens) &&
       pending.inputTokens >= 0 &&
       (pending.runId === undefined ||
-        (typeof pending.runId === 'string' && pending.runId.length > 0)) &&
-      (pending.submissionId === undefined || typeof pending.submissionId === 'string'))
+        (typeof pending.runId === 'string' && pending.runId.length > 0)))
   );
 }
 
@@ -858,7 +758,7 @@ function isHash(value: unknown): value is string {
 
 function validSessionReply(saved: Partial<SavedSession>) {
   if (saved.response === undefined && saved.replay === undefined) {
-    return saved.historyLength === 0 && saved.historyHash === cursorHistoryHash([]);
+    return true;
   }
   return (
     typeof saved.response?.id === 'string' &&

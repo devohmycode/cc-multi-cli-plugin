@@ -44,6 +44,17 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   own system prompt remains active; the request is one fixed preamble plus the
   conversation text, with no "session instructions" JSON field or saved
   instructions hash.
+- Resume the newest turn on the persistent SDK agent once a session has a prior
+  response: everything after the last assistant message, matching the
+  Antigravity continuation rule. A request whose history ends with an assistant
+  message, or that has no new user message after it, fails explicitly. If the
+  outer history no longer contains the previous response, stream a notice and
+  continue on the native record instead of refusing or replaying rewritten
+  history. Delete the anchor-matching and hook-confirmed-prompt reconciliation
+  path and the now-unused `PermissionContext.submission`/`promptHash` fields.
+  Bump the saved session schema to version 2; an older or foreign-version
+  session file is ignored and the session starts fresh (the native SDK agent
+  is never deleted).
 
 ### Model picker
 

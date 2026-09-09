@@ -15,7 +15,6 @@ import {
   CursorHarness,
 } from '../../plugins/multi-cursor/src/harness.ts';
 import { cursorModelOptions } from '../../plugins/multi-cursor/src/models.ts';
-import { cursorHistoryHash } from '../../plugins/multi-cursor/src/request.ts';
 import { lockCursorSession } from '../../plugins/multi-cursor/src/state-lock.ts';
 
 const models = cursorModelOptions([
@@ -207,13 +206,6 @@ async function fixture(t: test.TestContext) {
   };
 }
 
-function submission(id: string, prompt: string): PermissionContext {
-  return {
-    permissionMode: 'auto',
-    submission: { id, promptHash: createHash('sha256').update(prompt).digest('hex') },
-  };
-}
-
 async function interruptedManifest(f: Awaited<ReturnType<typeof fixture>>) {
   const harness = f.make();
   await harness.handle(body, 'main', signal());
@@ -225,14 +217,10 @@ async function interruptedManifest(f: Awaited<ReturnType<typeof fixture>>) {
       ...saved,
       response: undefined,
       replay: undefined,
-      historyLength: 0,
-      historyHash: cursorHistoryHash([]),
       pending: true,
       pendingRun: {
         key: saved.replay.key,
         runId: 'run',
-        historyLength: saved.historyLength,
-        historyHash: saved.historyHash,
         inputTokens: saved.response.usage.input_tokens,
         model: body.model,
       },
@@ -341,10 +329,9 @@ test('completed requests deduplicate across disk resume and follow-ups use the s
   const first = f.make();
   const response = await first.handle(body, 'main', signal());
   const saved = JSON.parse(await readFile(f.sessionFile, 'utf8'));
-  assert.equal(saved.version, 1);
-  assert.equal(saved.historyLength, 1);
-  assert.match(saved.historyHash, /^[a-f0-9]{64}$/);
+  assert.equal(saved.version, 2);
   assert(!('history' in saved));
+  assert(!('historyLength' in saved));
   assert.doesNotMatch(JSON.stringify(saved), /first request/);
   await first.close();
   const second = f.make();
@@ -391,8 +378,6 @@ test('terminal cancellation is durable and a new observed prompt can continue in
     { ...body, messages: [{ role: 'user', content: 'new task' }] },
     'main',
     signal(),
-    undefined,
-    submission('new', 'new task'),
   );
   while (f.sends.length < 2) {
     await tick();
@@ -405,18 +390,10 @@ test('terminal cancellation is durable and a new observed prompt can continue in
   assert.equal(f.sends.length, 2);
 });
 
-test('changed history fails explicitly and a second gateway cannot take a live scope', async (t) => {
+test('a second gateway cannot take a live scope while its session file is locked', async (t) => {
   const f = await fixture(t);
   const harness = f.make();
   await harness.handle(body, 'main', signal());
-  await assert.rejects(
-    harness.handle(
-      { ...body, messages: [{ role: 'user', content: 'rewritten' }] },
-      'main',
-      signal(),
-    ),
-    /history changed/,
-  );
   await assert.rejects(
     f
       .make()
@@ -428,6 +405,61 @@ test('changed history fails explicitly and a second gateway cannot take a live s
     /locked/,
   );
   assert.equal(f.sends.length, 1);
+});
+
+test('continuation requires a message after the last assistant turn and a new user message', async (t) => {
+  const f = await fixture(t);
+  const harness = f.make();
+  const response = await harness.handle(body, 'main', signal());
+  await assert.rejects(
+    harness.handle(
+      {
+        ...body,
+        messages: [...(body.messages ?? []), { role: 'assistant', content: response.content }],
+      },
+      'main',
+      signal(),
+    ),
+    /message after the last assistant turn/,
+  );
+  await assert.rejects(
+    harness.handle(
+      {
+        ...body,
+        messages: [
+          ...(body.messages ?? []),
+          { role: 'assistant', content: response.content },
+          { role: 'system', content: 'a reminder with no new user turn' },
+        ],
+      },
+      'main',
+      signal(),
+    ),
+    /new user message/,
+  );
+});
+
+test('outer history changes stream a rewind notice and continue on the native record', async (t) => {
+  const f = await fixture(t);
+  const harness = f.make();
+  const response = await harness.handle(body, 'main', signal());
+  const matching = await harness.handle(follow(response), 'main', signal());
+  assert.doesNotMatch(JSON.stringify(matching.content), /Outer history changed/);
+  const rewritten: MessagesRequest = {
+    ...body,
+    messages: [
+      { role: 'assistant', content: [{ type: 'text', text: 'a different remembered reply' }] },
+      { role: 'user', content: 'New anchored task' },
+    ],
+  };
+  const changed = await harness.handle(rewritten, 'main', signal());
+  assert(changed.content[0].type === 'text');
+  assert.match(changed.content[0].text, /Outer history changed; the native conversation continues/);
+  assert.match(JSON.stringify(f.sends[2].prompt), /New anchored task/);
+  assert.doesNotMatch(
+    JSON.stringify(f.sends[2].prompt),
+    /a different remembered reply|first request/,
+  );
 });
 
 test('shutdown during delayed agent creation closes the late agent without sending', async (t) => {
@@ -676,7 +708,7 @@ test('resumed history fingerprints ignore moved cache markers and send only the 
       { role: 'user', content: 'new turn only' },
     ],
   };
-  await second.handle(continued, 'main', signal());
+  const continuedResponse = await second.handle(continued, 'main', signal());
   assert.deepEqual(f.resumed, ['agent-1']);
   assert.equal(f.sends.length, 2);
   assert.match(JSON.stringify(f.sends[1].prompt), /new turn only/);
@@ -684,29 +716,16 @@ test('resumed history fingerprints ignore moved cache markers and send only the 
     JSON.stringify(f.sends[1].prompt),
     /private prior context|Compacting context/,
   );
-  await assert.rejects(
-    second.handle(
-      { ...continued, messages: [{ role: 'user', content: 'edited past' }] },
-      'main',
-      signal(),
-    ),
-    /history changed/,
-  );
-  assert.equal(f.sends.length, 2);
+  assert.doesNotMatch(JSON.stringify(continuedResponse.content), /Outer history changed/);
 });
 
-test('incompatible and malformed manifests fail before replay or SDK resume', async (t) => {
+test('malformed manifests fail before replay or SDK resume', async (t) => {
   const f = await fixture(t);
   const first = f.make();
   await first.handle(body, 'main', signal());
   await first.close();
   const saved = JSON.parse(await readFile(f.sessionFile, 'utf8'));
   for (const patch of [
-    { version: undefined, history: body.messages },
-    { version: 2 },
-    { historyLength: -1 },
-    { historyLength: 1.5 },
-    { historyHash: 'invalid' },
     { pending: 'false' },
     { replay: { key: 'invalid', events: [] } },
     {
@@ -715,11 +734,29 @@ test('incompatible and malformed manifests fail before replay or SDK resume', as
         content: [{ type: 'tool_use', id: 'tool', name: 'Bash', input: {} }],
       },
     },
+    { pendingRun: { key: 'invalid', model: 'x', inputTokens: 1 } },
   ]) {
     await writeFile(f.sessionFile, JSON.stringify({ ...saved, ...patch }));
-    await assert.rejects(f.make().handle(body, 'main', signal()), /incompatible or invalid state/);
+    await assert.rejects(f.make().handle(body, 'main', signal()), /invalid state/);
   }
   assert.equal(f.sends.length, 1);
+  assert.equal(f.resumed.length, 0);
+});
+
+test('a manifest with a foreign or missing version starts a fresh native agent', async (t) => {
+  const f = await fixture(t);
+  const first = f.make();
+  await first.handle(body, 'main', signal());
+  await first.close();
+  const saved = JSON.parse(await readFile(f.sessionFile, 'utf8'));
+  assert.equal(saved.version, 2);
+  for (const patch of [{ version: 1 }, { version: undefined }]) {
+    await writeFile(f.sessionFile, JSON.stringify({ ...saved, ...patch }));
+    const harness = f.make();
+    await harness.handle(body, 'main', signal());
+    await harness.close();
+  }
+  assert.equal(f.configurations.length, 3, 'each foreign-version manifest starts a fresh agent');
   assert.equal(f.resumed.length, 0);
 });
 
@@ -770,86 +807,11 @@ test('recovered SDK failure stays a failed retry while a new observed turn retai
   const harness = f.make();
   await assert.rejects(harness.handle(body, 'main', signal()), /native action failed/);
   const next = { ...body, messages: [{ role: 'user', content: 'Inspect current state' }] };
-  await assert.rejects(harness.handle(next, 'main', signal()), /new observed prompt/);
-  await harness.handle(
-    next,
-    'main',
-    signal(),
-    undefined,
-    submission('next', 'Inspect current state'),
-  );
+  await harness.handle(next, 'main', signal());
   assert.equal(f.sends.length, 2);
   assert.deepEqual(f.resumed, ['agent-1']);
   assert.doesNotMatch(JSON.stringify(f.sends[1].prompt), /first request/);
   await assert.rejects(harness.handle(body, 'main', signal()), /native action failed/);
-});
-
-test('external compaction uses only a new hook-confirmed prompt and preserves SDK state', async (t) => {
-  const f = await fixture(t);
-  const first = f.make();
-  await first.handle(body, 'main', signal(), undefined, submission('initial', 'first request'));
-  await first.close();
-  const harness = f.make();
-  const compacted: MessagesRequest = {
-    ...body,
-    messages: [
-      { role: 'user', content: 'Compacted summary containing already completed actions' },
-      { role: 'assistant', content: 'Summary acknowledged' },
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: 'Continue ' },
-          { type: 'text', text: 'safely' },
-        ],
-      },
-    ],
-  };
-  await assert.rejects(
-    harness.handle(
-      compacted,
-      'main',
-      signal(),
-      undefined,
-      submission('initial', 'Continue safely'),
-    ),
-    /new observed prompt/,
-  );
-  await harness.handle(
-    compacted,
-    'main',
-    signal(),
-    undefined,
-    submission('fresh', 'Continue safely'),
-  );
-  assert.equal(f.configurations.length, 1);
-  assert.deepEqual(f.resumed, ['agent-1']);
-  assert.match(JSON.stringify(f.sends[1].prompt), /Continue/);
-  assert.doesNotMatch(
-    JSON.stringify(f.sends[1].prompt),
-    /Compacted summary|first request|Summary acknowledged/,
-  );
-  const changed = { ...compacted, messages: [{ role: 'user', content: 'Continue safely' }] };
-  await assert.rejects(
-    harness.handle(changed, 'main', signal(), undefined, submission('fresh', 'Continue safely')),
-    /new observed prompt/,
-  );
-  assert.equal(f.sends.length, 2);
-});
-
-test('rewritten history uses a unique retained response anchor', async (t) => {
-  const f = await fixture(t);
-  const harness = f.make();
-  const response = await harness.handle(body, 'main', signal());
-  const next: MessagesRequest = {
-    ...body,
-    messages: [
-      { role: 'user', content: 'Rewritten or compacted earlier context' },
-      { role: 'assistant', content: response.content },
-      { role: 'user', content: 'New anchored task' },
-    ],
-  };
-  await harness.handle(next, 'main', signal());
-  assert.doesNotMatch(JSON.stringify(f.sends[1].prompt), /Rewritten|first request/);
 });
 
 test('idle agent eviction retains disk state and resumes the original native agent', async (t) => {

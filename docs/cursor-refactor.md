@@ -22,7 +22,7 @@ They never become executable Claude tool calls.
 | Other modes | Bypass disables native Auto-review while retaining explicit tools and SDK sandbox; default, acceptEdits and dontAsk fail. |
 | Tool/settings policy | Conservative capability intersection; whole-tool rules, CLI restrictions and discovered plugin policy translate; unsupported restrictions and unknown workers reject admission. Files rechecked before dispatch. |
 | Platforms | Native settings admission supports Linux without WSL; Linux managed settings/fragments support narrow policy translation; unsupported controls and other platforms reject. |
-| Continuation | Persistent SDK agent and disk resume; changed mode/tools resume with the new whitelist. Fresh authenticated prompt hashes or unique response anchors admit outer-history continuation without native rewind. |
+| Continuation | Persistent SDK agent and disk resume; changed mode/tools resume with the new whitelist. Once a session has a prior response, only the newest turn (everything after the last assistant message) is forwarded; a request whose history ends with an assistant message, or that has no new user message after it, fails explicitly. If the outer history no longer contains the previous response, the gateway streams a notice and continues on the native record; native state is never rewound. |
 | Retries/failures | Completed identical requests replay output. Cancellation reaches SDK; durable pending run IDs recover terminal results via Agent.getRun; missing identity or ambiguous history preserves state and fails. |
 | Delegation | Native Cursor task and MCP capabilities disabled; no Cursor children or Cursor-originated cross-provider delegation. |
 
