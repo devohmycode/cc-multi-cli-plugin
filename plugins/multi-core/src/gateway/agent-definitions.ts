@@ -4,7 +4,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { parseDocument } from 'yaml';
-import { assertCursorClaudeSettings } from '../providers/cursor/permissions.ts';
+import { assertCursorClaudeSettings } from '../../../multi-cursor/src/permissions.ts';
 
 export interface WorkerPermissions {
   permissionMode?: string;

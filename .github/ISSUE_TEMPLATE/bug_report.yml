@@ -36,7 +36,7 @@ body:
       label: What happened?
       description: What did you run, what did you expect, what did you get?
       placeholder: |
-        I ran `node plugins/multi/src/native-model-gateway.ts` and asked openai-luna-high to fix foo.js.
+        I ran `node plugins/multi-core/src/launcher.ts` and asked openai-luna-high to fix foo.js.
         I expected the worker to edit foo.js and report what it changed.
         Instead the worker failed with "OpenAI returned HTTP 400" after 8 minutes.
     validations:

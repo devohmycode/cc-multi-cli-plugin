@@ -1,12 +1,12 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
-    "plugins/multi/src/native-model-gateway.ts",
-    "plugins/multi/src/gateway/permission-hook.ts",
+    "plugins/multi-core/src/launcher.ts",
+    "plugins/multi-core/src/gateway/permission-hook.ts",
     "test/unit/**/*.test.ts",
     "test/live/*.ts",
     "scripts/banner.mjs"
   ],
-  "project": ["plugins/multi/src/**/*.ts", "test/**/*.ts", "scripts/banner.mjs"],
+  "project": ["plugins/*/src/**/*.ts", "test/**/*.ts", "scripts/banner.mjs"],
   "ignoreBinaries": ["flock", "codex"]
 }

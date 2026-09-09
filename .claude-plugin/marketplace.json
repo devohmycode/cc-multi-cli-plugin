@@ -16,7 +16,7 @@
       "author": {
         "name": "greenpolo"
       },
-      "source": "./plugins/multi"
+      "source": "./plugins/multi-core"
     }
   ]
 }

@@ -4,15 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { AuthenticationError, ConfigurationError, NetworkError, RateLimitError } from '@cursor/sdk';
-import type { Emit, MessagesRequest } from '../../plugins/multi/src/gateway/messages.ts';
-import { createNativeGateway } from '../../plugins/multi/src/gateway/server.ts';
+import type { Emit, MessagesRequest } from '../../plugins/multi-core/src/gateway/messages.ts';
+import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 import {
   CursorProviderError,
   cursorFailure,
   sanitizeCursorErrorMessage,
-} from '../../plugins/multi/src/providers/cursor/errors.ts';
-import { CursorHarness } from '../../plugins/multi/src/providers/cursor/harness.ts';
-import { cursorModelOptions } from '../../plugins/multi/src/providers/cursor/models.ts';
+} from '../../plugins/multi-cursor/src/errors.ts';
+import { CursorHarness } from '../../plugins/multi-cursor/src/harness.ts';
+import { cursorModelOptions } from '../../plugins/multi-cursor/src/models.ts';
 
 test('Cursor SDK classes preserve the provider error contract', () => {
   const authentication = cursorFailure(new AuthenticationError('Bearer secret-token'));

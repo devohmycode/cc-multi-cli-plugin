@@ -5,10 +5,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { MessagesResponse } from '../../plugins/multi/src/gateway/messages.ts';
-import { createNativeGateway } from '../../plugins/multi/src/gateway/server.ts';
-import type { ResponsesRequest } from '../../plugins/multi/src/providers/openai/responses.ts';
-import { readSse } from '../../plugins/multi/src/providers/openai/responses.ts';
+import type { MessagesResponse } from '../../plugins/multi-core/src/gateway/messages.ts';
+import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
+import type { ResponsesRequest } from '../../plugins/multi-openai/src/responses.ts';
+import { readSse } from '../../plugins/multi-openai/src/responses.ts';
 
 interface Sample {
   turn: number;

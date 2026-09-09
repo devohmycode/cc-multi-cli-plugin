@@ -1,4 +1,4 @@
-import type { PermissionContext } from '../../gateway/mode-hook.ts';
+import type { PermissionContext } from '../../multi-core/src/gateway/mode-hook.ts';
 
 const CAPABILITIES = [
   ['view_file', ['Read']],

@@ -27,7 +27,7 @@ const cwd = await mkdtemp(path.join(tmpdir(), 'native-main-switch-'));
 const nonce = randomBytes(8).toString('hex');
 await writeFile(path.join(cwd, 'fixture.txt'), `alpha ${nonce}\n`);
 const launcher = fileURLToPath(
-  new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url),
+  new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url),
 );
 const child = spawn(
   process.execPath,

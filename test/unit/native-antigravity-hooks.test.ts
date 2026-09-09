@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { installAntigravityHook } from '../../plugins/multi/src/providers/antigravity/hooks.ts';
+import { installAntigravityHook } from '../../plugins/multi-antigravity/src/hooks.ts';
 
 async function fixture(t: test.TestContext, value: Record<string, unknown>) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'antigravity-hooks-'));

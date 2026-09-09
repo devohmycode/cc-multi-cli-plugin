@@ -6,8 +6,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cursorModelOptions } from '../../plugins/multi/src/providers/cursor/models.ts';
-import { OPENAI_WORKERS } from '../../plugins/multi/src/providers/openai/models.ts';
+import { cursorModelOptions } from '../../plugins/multi-cursor/src/models.ts';
+import { OPENAI_WORKERS } from '../../plugins/multi-openai/src/models.ts';
 
 /** The Claude Code stream-json events this reproducer inspects. */
 interface ClaudeEvent {
@@ -45,7 +45,7 @@ if (cursor) {
   );
 }
 const launcher = fileURLToPath(
-  new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url),
+  new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url),
 );
 const cwd = await mkdtemp(path.join(os.tmpdir(), 'native-live-smoke-'));
 const nonce = randomBytes(6).toString('hex');

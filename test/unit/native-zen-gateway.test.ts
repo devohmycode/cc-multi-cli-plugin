@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
-import type { GatewayFetch, GatewayOptions } from '../../plugins/multi/src/gateway/server.ts';
-import { createNativeGateway } from '../../plugins/multi/src/gateway/server.ts';
+import type { GatewayFetch, GatewayOptions } from '../../plugins/multi-core/src/gateway/server.ts';
+import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 
 const model = 'multi/zen/gpt-5.6-luna';
 const request = {

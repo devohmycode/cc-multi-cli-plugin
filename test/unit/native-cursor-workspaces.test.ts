@@ -3,9 +3,9 @@ import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import type { MessagesResponse } from '../../plugins/multi/src/gateway/messages.ts';
-import { CursorHarness } from '../../plugins/multi/src/providers/cursor/harness.ts';
-import { CursorWorkspaces } from '../../plugins/multi/src/providers/cursor/workspaces.ts';
+import type { MessagesResponse } from '../../plugins/multi-core/src/gateway/messages.ts';
+import { CursorHarness } from '../../plugins/multi-cursor/src/harness.ts';
+import { CursorWorkspaces } from '../../plugins/multi-cursor/src/workspaces.ts';
 
 test('worktree workers route to their canonical workspace and close all SDK harnesses', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cursor-workspaces-'));

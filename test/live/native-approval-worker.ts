@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { OPENAI_WORKERS } from '../../plugins/multi/src/providers/openai/models.ts';
+import { OPENAI_WORKERS } from '../../plugins/multi-openai/src/models.ts';
 
 const { values } = parseArgs({
   options: {
@@ -53,7 +53,7 @@ await writeFile(
 const child = spawn(
   process.execPath,
   [
-    fileURLToPath(new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url)),
+    fileURLToPath(new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url)),
     '--',
     '-p',
     prompt,

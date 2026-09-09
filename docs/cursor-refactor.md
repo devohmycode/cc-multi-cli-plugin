@@ -28,17 +28,17 @@ They never become executable Claude tool calls.
 
 ## Code ownership
 
-Paths below are relative to `plugins/multi/src/`:
+Paths below are relative to `plugins/multi-core/src/`:
 
-- `native-model-gateway.ts`: launcher, model picker, workers and settings callback.
+- `launcher.ts`: launcher, model picker, workers and settings callback.
 - `gateway/server.ts`: canonical identity, routing and lifecycle.
 - `gateway/mode-hook.ts`, `agent-definitions.ts`, `cursor-settings.ts`: mode snapshots,
   worker permission resolution and effective settings admission.
-- `providers/cursor/harness.ts`: SDK state, dispatch, replay and cancellation.
-- `providers/cursor/permissions.ts`: mode/tool translation and policy admission.
-- `providers/cursor/request.ts`, `progress.ts`, `errors.ts`: native input validation,
+- `../../multi-cursor/src/harness.ts`: SDK state, dispatch, replay and cancellation.
+- `../../multi-cursor/src/permissions.ts`: mode/tool translation and policy admission.
+- `../../multi-cursor/src/request.ts`, `progress.ts`, `errors.ts`: native input validation,
   display-only progress and sanitized failures.
-- `providers/cursor/models.ts`: account selections and worker choices.
+- `../../multi-cursor/src/models.ts`: account selections and worker choices.
 
 The direct OpenAI path and shared gateway approval modules retain their existing
 Claude-executed tool behavior. The obsolete Cursor/OpenCode CLI/ACP transports

@@ -4,17 +4,17 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import type { PermissionContext } from '../../plugins/multi/src/gateway/mode-hook.ts';
-import type { AntigravityRunOptions } from '../../plugins/multi/src/providers/antigravity/cli.ts';
-import { AntigravityHarness } from '../../plugins/multi/src/providers/antigravity/harness.ts';
+import type { AntigravityRunOptions } from '../../plugins/multi-antigravity/src/cli.ts';
+import { AntigravityHarness } from '../../plugins/multi-antigravity/src/harness.ts';
 import {
   checkAntigravityHooks,
   installAntigravityHook,
-} from '../../plugins/multi/src/providers/antigravity/hooks.ts';
+} from '../../plugins/multi-antigravity/src/hooks.ts';
 import {
   antigravityHistoryHash,
   prepareAntigravityRequest,
-} from '../../plugins/multi/src/providers/antigravity/request.ts';
+} from '../../plugins/multi-antigravity/src/request.ts';
+import type { PermissionContext } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
 
 const model = {
   id: 'gemini-test-low',

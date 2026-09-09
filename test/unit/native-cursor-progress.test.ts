@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { InteractionUpdate } from '@cursor/sdk';
-import { formatCursorProgress } from '../../plugins/multi/src/providers/cursor/progress.ts';
+import { formatCursorProgress } from '../../plugins/multi-cursor/src/progress.ts';
 
 const shell = {
   type: 'shell',

@@ -4,8 +4,8 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test, { mock } from 'node:test';
-import { loadWorkerPermissions } from '../../plugins/multi/src/gateway/agent-definitions.ts';
-import { cursorPermissionPolicy } from '../../plugins/multi/src/providers/cursor/permissions.ts';
+import { loadWorkerPermissions } from '../../plugins/multi-core/src/gateway/agent-definitions.ts';
+import { cursorPermissionPolicy } from '../../plugins/multi-cursor/src/permissions.ts';
 
 async function writeAgent(directory: string, name: string, source: string) {
   const agents = path.join(directory, '.claude', 'agents');

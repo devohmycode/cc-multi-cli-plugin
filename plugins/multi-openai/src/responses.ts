@@ -6,8 +6,8 @@ import type {
   MessagesResponse,
   ResponseContentBlock,
   StopReason,
-} from '../../gateway/messages.ts';
-import { callId, toolName } from '../../gateway/tools.ts';
+} from '../../multi-core/src/gateway/messages.ts';
+import { callId, toolName } from '../../multi-core/src/gateway/tools.ts';
 
 // Anthropic Messages <-> OpenAI Responses, for native Claude Code workers.
 const SIGNATURE_PREFIX = 'multi-openai:';

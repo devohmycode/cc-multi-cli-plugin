@@ -1,6 +1,6 @@
 import { realpath } from 'node:fs/promises';
-import type { MessagesRequest } from '../../gateway/messages.ts';
-import type { PermissionContext } from '../../gateway/mode-hook.ts';
+import type { MessagesRequest } from '../../multi-core/src/gateway/messages.ts';
+import type { PermissionContext } from '../../multi-core/src/gateway/mode-hook.ts';
 import type { CursorHarness } from './harness.ts';
 
 /** A Claude worktree must use its own SDK workspace and effective settings. */

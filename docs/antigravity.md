@@ -10,9 +10,9 @@ Use Node 24.12 or newer and Linux without WSL. Install and sign in to the offici
 Antigravity CLI interactively, then run from this checkout:
 
 ```sh
-node plugins/multi/src/native-model-gateway.ts --antigravity-models
-node plugins/multi/src/native-model-gateway.ts --antigravity-setup
-MULTI_ANTIGRAVITY=1 node plugins/multi/src/native-model-gateway.ts
+node plugins/multi-core/src/launcher.ts --antigravity-models
+node plugins/multi-core/src/launcher.ts --antigravity-setup
+MULTI_ANTIGRAVITY=1 node plugins/multi-core/src/launcher.ts
 ```
 
 The setup command installs one `multi-cli-antigravity` entry in

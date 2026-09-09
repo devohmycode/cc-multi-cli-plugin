@@ -6,23 +6,23 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type {
-  MessagesRequest,
-  MessagesResponse,
-} from '../../plugins/multi/src/gateway/messages.ts';
-import type { PermissionContext } from '../../plugins/multi/src/gateway/mode-hook.ts';
 import {
   type AntigravityRunOptions,
   type AntigravityStreamEvent,
   runAntigravity,
-} from '../../plugins/multi/src/providers/antigravity/cli.ts';
-import { AntigravityHarness } from '../../plugins/multi/src/providers/antigravity/harness.ts';
-import { checkAntigravityHooks } from '../../plugins/multi/src/providers/antigravity/hooks.ts';
+} from '../../plugins/multi-antigravity/src/cli.ts';
+import { AntigravityHarness } from '../../plugins/multi-antigravity/src/harness.ts';
+import { checkAntigravityHooks } from '../../plugins/multi-antigravity/src/hooks.ts';
 import {
   type AntigravityModel,
   discoverAntigravityModels,
-} from '../../plugins/multi/src/providers/antigravity/models.ts';
-import { antigravityPermissionPolicy } from '../../plugins/multi/src/providers/antigravity/permissions.ts';
+} from '../../plugins/multi-antigravity/src/models.ts';
+import { antigravityPermissionPolicy } from '../../plugins/multi-antigravity/src/permissions.ts';
+import type {
+  MessagesRequest,
+  MessagesResponse,
+} from '../../plugins/multi-core/src/gateway/messages.ts';
+import type { PermissionContext } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
 
 const args = process.argv.slice(2);
 if (args.includes('--help')) {

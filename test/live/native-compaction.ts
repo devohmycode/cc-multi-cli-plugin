@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { OPENAI_WORKERS } from '../../plugins/multi/src/providers/openai/models.ts';
+import { OPENAI_WORKERS } from '../../plugins/multi-openai/src/models.ts';
 
 interface Event {
   type: string;
@@ -50,7 +50,7 @@ const target = {
 };
 const model = target.model;
 const launcher = fileURLToPath(
-  new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url),
+  new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url),
 );
 const artifacts = await mkdtemp(path.join(tmpdir(), 'native-compaction-'));
 const cwd = path.join(artifacts, 'workspace');

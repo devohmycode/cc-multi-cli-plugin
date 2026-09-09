@@ -7,7 +7,7 @@ import {
   AntigravityCliError,
   type AntigravityStreamEvent,
   runAntigravity,
-} from '../../plugins/multi/src/providers/antigravity/cli.ts';
+} from '../../plugins/multi-antigravity/src/cli.ts';
 
 const script = `#!/bin/bash
 if [[ -n "$AGY_ARGS_FILE" ]]; then printf '%s\\n' "$@" > "$AGY_ARGS_FILE"; fi

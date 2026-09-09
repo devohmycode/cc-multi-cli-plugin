@@ -6,7 +6,7 @@ import path from 'node:path';
 import {
   createOpenAIApproval,
   discoverOpenAIReviewer,
-} from '../../plugins/multi/src/providers/openai/approval.ts';
+} from '../../plugins/multi-openai/src/approval.ts';
 
 if (process.argv.includes('--help')) {
   console.log(

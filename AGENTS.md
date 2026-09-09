@@ -81,20 +81,20 @@ instructions. Keep new scratch research in gitignored `.agent/`.
 
 ## Current code map
 
-Paths below are relative to `plugins/multi/src/` unless noted.
+Paths below are relative to `plugins/multi-core/src/` unless noted.
 
-- `native-model-gateway.ts`: launcher, session-local model picker, worker registration.
+- `launcher.ts`: launcher, session-local model picker, worker registration.
 - `gateway/server.ts`: HTTP routing, Claude passthrough, and request/session lifecycle.
 - `gateway/messages.ts`: shared Claude Messages request/response and stream types.
   `gateway/tools.ts`: stable tool aliases. `gateway/approval.ts` and
   `gateway/permission-hook.ts`: native approval protocol and capability checks.
-- `providers/openai/`: Codex authentication and CLI-owned renewal (`auth.ts`), models/workers (`models.ts`),
+- `../../multi-openai/src/`: Codex authentication and CLI-owned renewal (`auth.ts`), models/workers (`models.ts`),
   Responses translation (`responses.ts`), local estimates (`tokens.ts`), and reviewer
   (`approval.ts`, with vendored policy/license files in `guardian/`).
-- `providers/zen/`: direct API-key auth, bounded model catalog, Chat Completions translation
+- `../../multi-zen/src/`: direct API-key auth, bounded model catalog, Chat Completions translation
   and Responses reuse. Claude executes tools; Zen has no independent reviewer.
   Cache affinity and model-owned reasoning survive gateway restarts.
-- `providers/cursor/`: native runtime (`harness.ts`), request validation,
+- `../../multi-cursor/src/`: native runtime (`harness.ts`), request validation,
   permissions, progress and account model/worker choices (`models.ts`).
   `workspaces.ts` routes hook-reported worktrees to separate SDK instances;
   `state-lock.ts` holds kernel file locks across native runs.

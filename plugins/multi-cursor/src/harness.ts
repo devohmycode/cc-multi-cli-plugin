@@ -3,16 +3,16 @@ import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { AgentOptions, Run, RunResult, SDKAgent } from '@cursor/sdk';
-import type { WorkerPermissions } from '../../gateway/agent-definitions.ts';
+import type { WorkerPermissions } from '../../multi-core/src/gateway/agent-definitions.ts';
 import type {
   Emit,
   MessagesRequest,
   MessagesResponse,
   StreamEventBody,
   StreamEventName,
-} from '../../gateway/messages.ts';
-import type { PermissionContext } from '../../gateway/mode-hook.ts';
-import { estimateTextTokens } from '../openai/tokens.ts';
+} from '../../multi-core/src/gateway/messages.ts';
+import type { PermissionContext } from '../../multi-core/src/gateway/mode-hook.ts';
+import { estimateTextTokens } from '../../multi-openai/src/tokens.ts';
 import { CursorProviderError, cursorRunError } from './errors.ts';
 import { type CursorModelOption, cursorSelection } from './models.ts';
 import {

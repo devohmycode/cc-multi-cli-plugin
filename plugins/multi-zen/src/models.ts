@@ -1,4 +1,4 @@
-import type { Effort } from '../openai/responses.ts';
+import type { Effort } from '../../multi-openai/src/responses.ts';
 
 type ZenProtocol = 'responses' | 'chat';
 

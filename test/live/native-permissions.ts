@@ -69,7 +69,7 @@ for (const model of models) {
         '-c',
         pty,
         process.execPath,
-        fileURLToPath(new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url)),
+        fileURLToPath(new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url)),
         '--',
         prompt,
         '--model',

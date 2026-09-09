@@ -9,7 +9,7 @@ import {
   cursorPermissionMode,
   cursorPermissionPolicy,
   mergeCursorPermissions,
-} from '../../plugins/multi/src/providers/cursor/permissions.ts';
+} from '../../plugins/multi-cursor/src/permissions.ts';
 
 test('native Cursor permissions retain SDK review and sandbox defaults without ambient tools', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cursor-permissions-'));

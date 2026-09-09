@@ -63,13 +63,13 @@ Connect the providers you want:
 | Provider | Connect |
 | --- | --- |
 | OpenAI | `codex -c cli_auth_credentials_store='"file"' login` — sign in with ChatGPT |
-| Cursor | `node plugins/multi/src/native-model-gateway.ts --cursor-login` — official SDK browser login |
+| Cursor | `node plugins/multi-core/src/launcher.ts --cursor-login` — official SDK browser login |
 | OpenCode Zen | OpenCode `/connect` → OpenCode Zen, or set `OPENCODE_API_KEY` locally |
 
 Then launch Claude with Multi and open `/model`:
 
 ```sh
-node plugins/multi/src/native-model-gateway.ts
+node plugins/multi-core/src/launcher.ts
 ```
 
 Run the launcher by its absolute path from another project to work in that project.
@@ -93,8 +93,8 @@ same runtime and authentication paths as manual installation.
 Use the official `agy` login, then install the scoped native permission hook:
 
 ```sh
-node plugins/multi/src/native-model-gateway.ts --antigravity-setup
-MULTI_ANTIGRAVITY=1 node plugins/multi/src/native-model-gateway.ts
+node plugins/multi-core/src/launcher.ts --antigravity-setup
+MULTI_ANTIGRAVITY=1 node plugins/multi-core/src/launcher.ts
 ```
 
 This enables experimental selections and incoming workers. Auto uses native edit acceptance and
@@ -122,28 +122,34 @@ stale generated banner. See [asset editing notes](docs/assets/README.md).
 
 ## Source layout
 
-Runtime lives in `plugins/multi/src/`:
+Runtime is split into core and provider directories:
 
 ```text
-native-model-gateway.ts    launcher
-gateway/                  HTTP/session handling, Claude Messages, approval, tool aliases
-providers/openai/         auth, models, Responses translation, counting, reviewer policy
-providers/cursor/         native SDK harness, permissions, progress and model catalog
+plugins/
+  multi-core/src/
+    launcher.ts          session launcher
+    gateway/             HTTP/session handling, Claude Messages, permissions
+  multi-openai/src/      auth, models, Responses translation, counting, reviewer policy
+  multi-cursor/src/      native SDK harness, permissions, progress and model catalog
+  multi-zen/src/         API-key auth, models and Chat Completions translation
+  multi-antigravity/src/ native CLI harness, permissions and model catalog
 ```
 
 The launcher imports concrete gateway/provider modules. Shared Claude protocol types
 live in `gateway/messages.ts`; provider credentials and catalogs stay with their
 provider. Cursor currently reuses OpenAI normalization/counting helpers. Development
 utilities live in root `scripts/`, with tests under `test/unit/` and `test/live/`.
-The obsolete CLI/ACP adapters and companion helpers have been removed; OpenCode
-and the other roadmap providers have no active gateway route yet.
+This is a source-layout split. Runtime dependencies remain in the root package,
+and imports between core and providers still resolve within the checkout.
+Independent provider packaging, enabled-plugin discovery and the setup command
+are subsequent work; this move does not activate marketplace installation.
 
 ## Experimental native OpenAI models
 
 From a checkout, start a new Claude Code session with:
 
 ```sh
-node plugins/multi/src/native-model-gateway.ts
+node plugins/multi-core/src/launcher.ts
 ```
 
 Run `/model` to select GPT-6 Astra or GPT-5.6 Sol, Terra, or Luna as the **main
@@ -315,7 +321,7 @@ comma-separated list of full model IDs, in your preferred display order:
 
 ```sh
 export MULTI_MODELS=multi/zen/kimi-k3,multi/zen/glm-5.3,multi/zen/deepseek-v4-flash
-node plugins/multi/src/native-model-gateway.ts
+node plugins/multi-core/src/launcher.ts
 ```
 
 This works across providers: use `multi/openai/<model-id>` or the Cursor routes
@@ -354,8 +360,8 @@ native worker execution. Connect **OpenCode Zen** through OpenCode's `/connect`,
 or set `OPENCODE_API_KEY` locally, then start the existing launcher:
 
 ```sh
-node plugins/multi/src/native-model-gateway.ts
-node plugins/multi/src/native-model-gateway.ts --zen-models
+node plugins/multi-core/src/launcher.ts
+node plugins/multi-core/src/launcher.ts --zen-models
 ```
 
 The key is read from the environment or OpenCode's `opencode` API entry in
@@ -424,9 +430,9 @@ coverage does not establish provider cache-hit guarantees.
 Sign in once through Cursor's official SDK browser flow, then launch normally:
 
 ```sh
-node plugins/multi/src/native-model-gateway.ts --cursor-login
-node plugins/multi/src/native-model-gateway.ts --cursor-models
-node plugins/multi/src/native-model-gateway.ts
+node plugins/multi-core/src/launcher.ts --cursor-login
+node plugins/multi-core/src/launcher.ts --cursor-models
+node plugins/multi-core/src/launcher.ts
 ```
 
 The launcher discovers models and presets available to your Cursor account. Its
@@ -446,7 +452,7 @@ launching. For example, this adds Gemini and GPT through Cursor:
 
 ```sh
 MULTI_CURSOR_EXTRA_MODELS=gemini-3.8-flash,gpt-5.6-sol \
-  node plugins/multi/src/native-model-gateway.ts
+  node plugins/multi-core/src/launcher.ts
 ```
 
 Choose comma-separated **`selection.id`** values from `--cursor-models`, rather

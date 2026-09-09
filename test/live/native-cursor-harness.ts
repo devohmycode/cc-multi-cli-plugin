@@ -5,14 +5,14 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Agent, type AgentOptions, Cursor } from '@cursor/sdk';
-import type { MessagesRequest } from '../../plugins/multi/src/gateway/messages.ts';
+import type { MessagesRequest } from '../../plugins/multi-core/src/gateway/messages.ts';
 import {
   type PermissionContext,
   PermissionModes,
-} from '../../plugins/multi/src/gateway/mode-hook.ts';
-import { CursorHarness } from '../../plugins/multi/src/providers/cursor/harness.ts';
-import { cursorModelOptions } from '../../plugins/multi/src/providers/cursor/models.ts';
-import { cursorHistoryHash } from '../../plugins/multi/src/providers/cursor/request.ts';
+} from '../../plugins/multi-core/src/gateway/mode-hook.ts';
+import { CursorHarness } from '../../plugins/multi-cursor/src/harness.ts';
+import { cursorModelOptions } from '../../plugins/multi-cursor/src/models.ts';
+import { cursorHistoryHash } from '../../plugins/multi-cursor/src/request.ts';
 
 const plan = process.argv.includes('--plan');
 const compact = process.argv.includes('--compact');

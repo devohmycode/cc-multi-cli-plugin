@@ -10,7 +10,7 @@ interface HookResult {
 }
 
 const hook = fileURLToPath(
-  new URL('../../plugins/multi/src/providers/antigravity/permission-hook.ts', import.meta.url),
+  new URL('../../plugins/multi-antigravity/src/permission-hook.ts', import.meta.url),
 );
 
 function runHook(input: string, policy?: string): HookResult {

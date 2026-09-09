@@ -56,7 +56,7 @@ Reuse active gateway/provider helpers when they save concrete work.
 
 ## Cursor native execution
 
-The launcher selects `providers/cursor/harness.ts`. Native actions are displayed as
+The launcher selects `plugins/multi-cursor/src/harness.ts`. Native actions are displayed as
 attributed text/status and never replayed as executable Claude `tool_use` calls.
 The SDK owns its system prompt, tools and ongoing conversation. Bounded text diff
 and shell-output previews are implemented; custom native cards and manual approval
@@ -178,14 +178,14 @@ applied and workers do not advertise effort variants.
 
 ## Runtime map and verification
 
-Paths are relative to `plugins/multi/src/`:
+Paths are relative to `plugins/multi-core/src/`:
 
-- `native-model-gateway.ts`: session launcher, login/catalog discovery and workers.
+- `launcher.ts`: session launcher, login/catalog discovery and workers.
 - `gateway/server.ts`: routing, identity and request lifecycle; `messages.ts` owns
   the shared protocol. `mode-hook.ts`, `agent-definitions.ts` and `cursor-settings.ts`
   own prompt permissions and settings admission.
-- `providers/openai/`: auth, catalog, Responses translation, token estimates and reviewer.
-- `providers/cursor/`: native harness, permissions, request validation, progress and catalog.
+- `../../multi-openai/src/`: auth, catalog, Responses translation, token estimates and reviewer.
+- `../../multi-cursor/src/`: native harness, permissions, request validation, progress and catalog.
   Existing reuse of OpenAI normalization/counting remains explicit.
 
 Run `npm run check` before completion, then bounded live checks appropriate to the

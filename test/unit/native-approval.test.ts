@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { ApprovalContext } from '../../plugins/multi/src/gateway/approval.ts';
-import { NativeApprovalBridge } from '../../plugins/multi/src/gateway/approval.ts';
-import { createNativeGateway } from '../../plugins/multi/src/gateway/server.ts';
+import type { ApprovalContext } from '../../plugins/multi-core/src/gateway/approval.ts';
+import { NativeApprovalBridge } from '../../plugins/multi-core/src/gateway/approval.ts';
+import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 
 const request = (stage = 1, session = 'session-one', command = 'node harmless-test.js') => ({
   model: 'claude-sonnet-5',

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createNativeGateway } from '../../plugins/multi/src/gateway/server.ts';
+import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 
 test('Cursor uses canonical session and worker identity and rejects contradictory metadata', async (t) => {
   const scopes: string[] = [];

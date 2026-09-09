@@ -3,17 +3,13 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import {
-  readZenKey,
-  validateZenKey,
-  ZenAuthError,
-} from '../../plugins/multi/src/providers/zen/auth.ts';
+import { readZenKey, validateZenKey, ZenAuthError } from '../../plugins/multi-zen/src/auth.ts';
 import {
   ZEN_MODELS,
   ZEN_WORKERS,
   zenModelOptions,
   zenPickerOptions,
-} from '../../plugins/multi/src/providers/zen/models.ts';
+} from '../../plugins/multi-zen/src/models.ts';
 
 async function withEnvironment(
   values: Record<string, string | undefined>,

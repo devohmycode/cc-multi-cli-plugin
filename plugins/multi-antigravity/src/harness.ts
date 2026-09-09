@@ -9,9 +9,9 @@ import type {
   RequestMessage,
   StreamEventBody,
   StreamEventName,
-} from '../../gateway/messages.ts';
-import type { PermissionContext } from '../../gateway/mode-hook.ts';
-import { lockCursorSession } from '../cursor/state-lock.ts';
+} from '../../multi-core/src/gateway/messages.ts';
+import type { PermissionContext } from '../../multi-core/src/gateway/mode-hook.ts';
+import { lockCursorSession } from '../../multi-cursor/src/state-lock.ts';
 import type {
   AntigravityResult,
   AntigravityRunOptions,

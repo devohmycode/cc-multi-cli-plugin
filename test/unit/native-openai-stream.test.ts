@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { Emit, StreamEventBody } from '../../plugins/multi/src/gateway/messages.ts';
-import { fromResponses, toResponses } from '../../plugins/multi/src/providers/openai/responses.ts';
+import type { Emit, StreamEventBody } from '../../plugins/multi-core/src/gateway/messages.ts';
+import { fromResponses, toResponses } from '../../plugins/multi-openai/src/responses.ts';
 
 const model = 'multi/openai/gpt-6-astra';
 const created = { type: 'response.created', response: { id: 'resp' } };

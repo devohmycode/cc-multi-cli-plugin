@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import type { MessagesResponse } from '../../plugins/multi/src/gateway/messages.ts';
-import { PermissionModes } from '../../plugins/multi/src/gateway/mode-hook.ts';
-import { hookCommand } from '../../plugins/multi/src/gateway/permission-hook.ts';
-import type { GatewayEvent } from '../../plugins/multi/src/gateway/server.ts';
-import { createNativeGateway } from '../../plugins/multi/src/gateway/server.ts';
+import type { MessagesResponse } from '../../plugins/multi-core/src/gateway/messages.ts';
+import { PermissionModes } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
+import { hookCommand } from '../../plugins/multi-core/src/gateway/permission-hook.ts';
+import type { GatewayEvent } from '../../plugins/multi-core/src/gateway/server.ts';
+import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 
 const root = await mkdtemp('/tmp/mode-hook-cli-');
 const worktree = process.argv.includes('--worktree');
@@ -104,7 +104,7 @@ const server = createNativeGateway({
 });
 await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
 const command = hookCommand(
-  new URL('../../plugins/multi/src/gateway/mode-hook.ts', import.meta.url),
+  new URL('../../plugins/multi-core/src/gateway/mode-hook.ts', import.meta.url),
 );
 await writeFile(
   `${root}/settings.json`,

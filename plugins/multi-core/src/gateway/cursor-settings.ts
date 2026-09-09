@@ -5,7 +5,7 @@ import {
   assertCursorClaudeSettings,
   cursorPermissionPolicy,
   mergeCursorPermissions,
-} from '../providers/cursor/permissions.ts';
+} from '../../../multi-cursor/src/permissions.ts';
 import { pluginPermissions, type WorkerPermissions } from './agent-definitions.ts';
 import type { PermissionContext } from './mode-hook.ts';
 

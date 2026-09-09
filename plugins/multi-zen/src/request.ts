@@ -1,7 +1,7 @@
-import type { MessagesRequest } from '../../gateway/messages.ts';
-import type { ResponsesInputContent, ResponsesRequest } from '../openai/responses.ts';
-import { toResponses } from '../openai/responses.ts';
-import { estimateInputTokens, estimateTextTokens } from '../openai/tokens.ts';
+import type { MessagesRequest } from '../../multi-core/src/gateway/messages.ts';
+import type { ResponsesInputContent, ResponsesRequest } from '../../multi-openai/src/responses.ts';
+import { toResponses } from '../../multi-openai/src/responses.ts';
+import { estimateInputTokens, estimateTextTokens } from '../../multi-openai/src/tokens.ts';
 import { toChat } from './chat.ts';
 import type { ZenModel } from './models.ts';
 import { zenModel } from './models.ts';

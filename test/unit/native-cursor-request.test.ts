@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { MessagesRequest } from '../../plugins/multi/src/gateway/messages.ts';
-import { prepareCursorRequest } from '../../plugins/multi/src/providers/cursor/request.ts';
-import { estimateTextTokens } from '../../plugins/multi/src/providers/openai/tokens.ts';
+import type { MessagesRequest } from '../../plugins/multi-core/src/gateway/messages.ts';
+import { prepareCursorRequest } from '../../plugins/multi-cursor/src/request.ts';
+import { estimateTextTokens } from '../../plugins/multi-openai/src/tokens.ts';
 
 const body: MessagesRequest = {
   model: 'multi/cursor/test',

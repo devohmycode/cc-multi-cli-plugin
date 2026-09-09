@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { Emit, StreamEventBody } from '../../plugins/multi/src/gateway/messages.ts';
-import { toolName } from '../../plugins/multi/src/gateway/tools.ts';
-import { fromChat, toChat } from '../../plugins/multi/src/providers/zen/chat.ts';
+import type { Emit, StreamEventBody } from '../../plugins/multi-core/src/gateway/messages.ts';
+import { toolName } from '../../plugins/multi-core/src/gateway/tools.ts';
+import { fromChat, toChat } from '../../plugins/multi-zen/src/chat.ts';
 
 const model = 'multi/zen/kimi-k2.7-code';
 const tools = [{ name: 'Read File', description: 'read', input_schema: { type: 'object' } }];

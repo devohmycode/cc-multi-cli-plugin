@@ -1,8 +1,8 @@
 import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { hookCommand } from '../../gateway/permission-hook.ts';
-import { lockCursorSession } from '../cursor/state-lock.ts';
+import { hookCommand } from '../../multi-core/src/gateway/permission-hook.ts';
+import { lockCursorSession } from '../../multi-cursor/src/state-lock.ts';
 
 const namespace = 'multi-cli-antigravity';
 

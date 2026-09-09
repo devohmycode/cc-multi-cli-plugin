@@ -10,28 +10,28 @@ import type {
   RequestMessage,
   StreamEventBody,
   StreamEventName,
-} from '../../plugins/multi/src/gateway/messages.ts';
-import type { GatewayFetch } from '../../plugins/multi/src/gateway/server.ts';
-import { createNativeGateway } from '../../plugins/multi/src/gateway/server.ts';
+} from '../../plugins/multi-core/src/gateway/messages.ts';
+import type { GatewayFetch } from '../../plugins/multi-core/src/gateway/server.ts';
+import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 import {
   originalToolNames,
   toolName,
   callId as wireCallId,
-} from '../../plugins/multi/src/gateway/tools.ts';
-import { readCodexAuth } from '../../plugins/multi/src/providers/openai/auth.ts';
-import { OPENAI_WORKERS } from '../../plugins/multi/src/providers/openai/models.ts';
+} from '../../plugins/multi-core/src/gateway/tools.ts';
+import { readCodexAuth } from '../../plugins/multi-openai/src/auth.ts';
+import { OPENAI_WORKERS } from '../../plugins/multi-openai/src/models.ts';
 import type {
   ResponsesInputContent,
   ResponsesInputItem,
   ResponsesRequest,
-} from '../../plugins/multi/src/providers/openai/responses.ts';
+} from '../../plugins/multi-openai/src/responses.ts';
 import {
   forAnthropic,
   fromResponses,
   readSse,
   toResponses,
-} from '../../plugins/multi/src/providers/openai/responses.ts';
-import { estimateInputTokens } from '../../plugins/multi/src/providers/openai/tokens.ts';
+} from '../../plugins/multi-openai/src/responses.ts';
+import { estimateInputTokens } from '../../plugins/multi-openai/src/tokens.ts';
 
 /** A test double for one OpenAI Responses SSE event; sent as JSON, never typed upstream. */
 interface SseEvent {

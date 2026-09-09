@@ -9,11 +9,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
-import { NativeApprovalBridge } from '../../plugins/multi/src/gateway/approval.ts';
-import type { GatewayEvent } from '../../plugins/multi/src/gateway/server.ts';
-import { createNativeGateway } from '../../plugins/multi/src/gateway/server.ts';
-import { readCodexAuth } from '../../plugins/multi/src/providers/openai/auth.ts';
-import { readSse } from '../../plugins/multi/src/providers/openai/responses.ts';
+import { NativeApprovalBridge } from '../../plugins/multi-core/src/gateway/approval.ts';
+import type { GatewayEvent } from '../../plugins/multi-core/src/gateway/server.ts';
+import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
+import { readCodexAuth } from '../../plugins/multi-openai/src/auth.ts';
+import { readSse } from '../../plugins/multi-openai/src/responses.ts';
 import type { HookInput } from './native-events.ts';
 import { pty } from './native-pty.ts';
 
@@ -67,7 +67,7 @@ const controlPrompt = nativeEscalation
 const prompt =
   controlPrompt +
   `This is a harmless permission integration test. Submit these exact Bash calls once each, separately, in order:\n${kinds.map(command).join('\n')}\nKeep them in the foreground. Let the harness decide permissions. Continue to the next listed command after a permission denial; never retry or change a denied command. Do not use other tools. End with PROBE_COMPLETE.`;
-const policyDir = new URL('../../plugins/multi/src/providers/openai/guardian/', import.meta.url);
+const policyDir = new URL('../../plugins/multi-openai/src/guardian/', import.meta.url);
 const [basePolicy, template] = await Promise.all([
   readFile(new URL('policy.md', policyDir), 'utf8'),
   readFile(new URL('policy-template.md', policyDir), 'utf8'),
@@ -324,9 +324,7 @@ const child = spawn(
     ...(launcher
       ? [
           process.execPath,
-          fileURLToPath(
-            new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url),
-          ),
+          fileURLToPath(new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url)),
           '--',
         ]
       : ['claude']),

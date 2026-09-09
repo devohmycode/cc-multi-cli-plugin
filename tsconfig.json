@@ -12,6 +12,6 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["plugins/multi/src/**/*.ts", "test/**/*.ts"],
+  "include": ["plugins/*/src/**/*.ts", "test/**/*.ts"],
   "exclude": ["node_modules"]
 }

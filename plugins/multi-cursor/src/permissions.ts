@@ -2,8 +2,8 @@ import { lstat, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { AgentModeOption, AgentOptions } from '@cursor/sdk';
-import type { WorkerPermissions } from '../../gateway/agent-definitions.ts';
-import type { PermissionContext } from '../../gateway/mode-hook.ts';
+import type { WorkerPermissions } from '../../multi-core/src/gateway/agent-definitions.ts';
+import type { PermissionContext } from '../../multi-core/src/gateway/mode-hook.ts';
 
 const TOOL_CAPABILITIES = [
   ['shell', ['Bash']],

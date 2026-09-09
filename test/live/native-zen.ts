@@ -6,15 +6,15 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { MessagesResponse } from '../../plugins/multi/src/gateway/messages.ts';
+import type { MessagesResponse } from '../../plugins/multi-core/src/gateway/messages.ts';
 import {
   createNativeGateway,
   type GatewayFetch,
   type GatewayOptions,
-} from '../../plugins/multi/src/gateway/server.ts';
-import { readSse } from '../../plugins/multi/src/providers/openai/responses.ts';
-import { readZenKey } from '../../plugins/multi/src/providers/zen/auth.ts';
-import { zenModel } from '../../plugins/multi/src/providers/zen/models.ts';
+} from '../../plugins/multi-core/src/gateway/server.ts';
+import { readSse } from '../../plugins/multi-openai/src/responses.ts';
+import { readZenKey } from '../../plugins/multi-zen/src/auth.ts';
+import { zenModel } from '../../plugins/multi-zen/src/models.ts';
 
 interface UsageSample {
   stage: string;

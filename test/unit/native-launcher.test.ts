@@ -24,7 +24,7 @@ const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'ut
     { mode: 0o755 },
   );
   const launcher = fileURLToPath(
-    new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url),
+    new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url),
   );
   for (const auth of ['no', 'yes', 'api']) {
     const { stdout } = await promisify(execFile)(
@@ -126,7 +126,7 @@ console.log(JSON.stringify({settings,agents:Object.keys(agents),models:args.filt
     { mode: 0o755 },
   );
   const launcher = fileURLToPath(
-    new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url),
+    new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url),
   );
   const { stdout } = await promisify(execFile)(
     process.execPath,
@@ -216,7 +216,7 @@ console.log(JSON.stringify({settings,models:args.filter(x=>x.startsWith('multi/'
     { mode: 0o755 },
   );
   const launcher = fileURLToPath(
-    new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url),
+    new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url),
   );
   const { stdout } = await promisify(execFile)(process.execPath, [launcher], {
     cwd,
@@ -241,7 +241,7 @@ console.log(JSON.stringify({settings,models:args.filter(x=>x.startsWith('multi/'
 
 test('the Zen model listing is available without authentication', async () => {
   const launcher = fileURLToPath(
-    new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url),
+    new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url),
   );
   const { stdout } = await promisify(execFile)(process.execPath, [launcher, '--zen-models'], {
     timeout: 20000,

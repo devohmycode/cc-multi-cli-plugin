@@ -4,7 +4,7 @@ import {
   cursorModelOptions,
   cursorPickerOptions,
   cursorSelection,
-} from '../../plugins/multi/src/providers/cursor/models.ts';
+} from '../../plugins/multi-cursor/src/models.ts';
 
 const options = cursorModelOptions([
   {

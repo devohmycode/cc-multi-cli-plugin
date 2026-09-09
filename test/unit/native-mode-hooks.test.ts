@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PermissionModes } from '../../plugins/multi/src/gateway/mode-hook.ts';
-import { createNativeGateway } from '../../plugins/multi/src/gateway/server.ts';
+import { PermissionModes } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
+import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 
 test('authenticated compaction snapshots establish mode without inventing a user submission', async () => {
   const modes = new PermissionModes(async () => ({ coder: { tools: ['Read'] } }));

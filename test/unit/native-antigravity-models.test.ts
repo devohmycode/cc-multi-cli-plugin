@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   parseAntigravityModels,
   selectAntigravityModel,
-} from '../../plugins/multi/src/providers/antigravity/models.ts';
+} from '../../plugins/multi-antigravity/src/models.ts';
 
 test('Antigravity catalog resolves only advertised effort variants', () => {
   const models = parseAntigravityModels(

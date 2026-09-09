@@ -4,6 +4,9 @@
 
 Multi's experimental runtime currently requires a checkout, Node >= 24.12,
 npm, and Claude Code. The marketplace manifest does not yet bootstrap the gateway.
+The source directories are now split into `multi-core` and `multi-<provider>`,
+but they still use checkout-relative imports and root npm dependencies. They are
+not yet independently installable provider packages.
 Follow [the manual installation steps](../README.md#for-humans). Cursor currently
 supports Linux without WSL. Install Codex only if using the OpenAI integration;
 Zen needs a key but does not require an OpenCode CLI during inference.
@@ -21,7 +24,7 @@ integration: use [OpenCode's connection flow](https://opencode.ai/docs/zen/#how-
 or a local environment variable. Never put a key in a Claude prompt or command argument.
 
 To verify without inference charges, run `node --version`, `claude --version`,
-and `node plugins/multi/src/native-model-gateway.ts --help`. For Cursor,
+and `node plugins/multi-core/src/launcher.ts --help`. For Cursor,
 `--cursor-models` checks its authenticated catalog. `--zen-models` lists supported
 models but does not verify credentials. Finally launch an interactive session and
 check `/model`. Only claim live inference was verified if an actual request ran.

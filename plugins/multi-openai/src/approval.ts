@@ -2,9 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open, readdir, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import type { ApprovalAction, ApprovalContext, ApprovalVerdict } from '../../gateway/approval.ts';
-import { NativeApprovalBridge } from '../../gateway/approval.ts';
-import type { GatewayFetch } from '../../gateway/server.ts';
+import type {
+  ApprovalAction,
+  ApprovalContext,
+  ApprovalVerdict,
+} from '../../multi-core/src/gateway/approval.ts';
+import { NativeApprovalBridge } from '../../multi-core/src/gateway/approval.ts';
+import type { GatewayFetch } from '../../multi-core/src/gateway/server.ts';
 import { codexRequest } from './auth.ts';
 import { readSse } from './responses.ts';
 

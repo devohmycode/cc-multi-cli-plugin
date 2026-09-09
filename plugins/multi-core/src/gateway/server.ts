@@ -7,17 +7,17 @@ import { pipeline } from 'node:stream/promises';
 import {
   type AntigravityHarness,
   AntigravityProviderError,
-} from '../providers/antigravity/harness.ts';
-import { CursorProviderError } from '../providers/cursor/errors.ts';
-import type { CursorHarness } from '../providers/cursor/harness.ts';
-import { CodexAuthError, codexRequest } from '../providers/openai/auth.ts';
-import { MODELS } from '../providers/openai/models.ts';
-import type { Effort, ResponsesRequest } from '../providers/openai/responses.ts';
-import { forAnthropic, fromResponses, toResponses } from '../providers/openai/responses.ts';
-import { estimateInputTokens } from '../providers/openai/tokens.ts';
-import { validateZenKey } from '../providers/zen/auth.ts';
-import { fromChat } from '../providers/zen/chat.ts';
-import { zenRequest } from '../providers/zen/request.ts';
+} from '../../../multi-antigravity/src/harness.ts';
+import { CursorProviderError } from '../../../multi-cursor/src/errors.ts';
+import type { CursorHarness } from '../../../multi-cursor/src/harness.ts';
+import { CodexAuthError, codexRequest } from '../../../multi-openai/src/auth.ts';
+import { MODELS } from '../../../multi-openai/src/models.ts';
+import type { Effort, ResponsesRequest } from '../../../multi-openai/src/responses.ts';
+import { forAnthropic, fromResponses, toResponses } from '../../../multi-openai/src/responses.ts';
+import { estimateInputTokens } from '../../../multi-openai/src/tokens.ts';
+import { validateZenKey } from '../../../multi-zen/src/auth.ts';
+import { fromChat } from '../../../multi-zen/src/chat.ts';
+import { zenRequest } from '../../../multi-zen/src/request.ts';
 import type { ApprovalContext, NativeApprovalBridge } from './approval.ts';
 import { isApprovalRequest, parseApprovalRequest } from './approval.ts';
 import type {

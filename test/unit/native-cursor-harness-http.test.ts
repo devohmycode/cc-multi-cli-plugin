@@ -5,13 +5,13 @@ import path from 'node:path';
 import test from 'node:test';
 import { setTimeout } from 'node:timers/promises';
 import type { AgentOptions, Run, RunResult, SDKUserMessage, SendOptions } from '@cursor/sdk';
-import { PermissionModes } from '../../plugins/multi/src/gateway/mode-hook.ts';
-import { createNativeGateway } from '../../plugins/multi/src/gateway/server.ts';
+import { PermissionModes } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
+import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 import {
   type CreateCursorHarnessAgent,
   CursorHarness,
-} from '../../plugins/multi/src/providers/cursor/harness.ts';
-import { cursorModelOptions } from '../../plugins/multi/src/providers/cursor/models.ts';
+} from '../../plugins/multi-cursor/src/harness.ts';
+import { cursorModelOptions } from '../../plugins/multi-cursor/src/models.ts';
 
 const options = cursorModelOptions([{ id: 'test-model', displayName: 'Test Model' }]);
 

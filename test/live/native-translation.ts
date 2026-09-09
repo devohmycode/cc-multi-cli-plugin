@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import type { MessagesResponse } from '../../plugins/multi/src/gateway/messages.ts';
-import { createNativeGateway } from '../../plugins/multi/src/gateway/server.ts';
+import type { MessagesResponse } from '../../plugins/multi-core/src/gateway/messages.ts';
+import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 
 // Generated 64x64 solid red and blue PNGs; no external image fetches.
 const red =

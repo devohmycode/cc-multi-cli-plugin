@@ -8,15 +8,15 @@ import type {
   Emit,
   MessagesRequest,
   MessagesResponse,
-} from '../../plugins/multi/src/gateway/messages.ts';
-import type { PermissionContext } from '../../plugins/multi/src/gateway/mode-hook.ts';
+} from '../../plugins/multi-core/src/gateway/messages.ts';
+import type { PermissionContext } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
 import {
   type CreateCursorHarnessAgent,
   CursorHarness,
-} from '../../plugins/multi/src/providers/cursor/harness.ts';
-import { cursorModelOptions } from '../../plugins/multi/src/providers/cursor/models.ts';
-import { cursorHistoryHash } from '../../plugins/multi/src/providers/cursor/request.ts';
-import { lockCursorSession } from '../../plugins/multi/src/providers/cursor/state-lock.ts';
+} from '../../plugins/multi-cursor/src/harness.ts';
+import { cursorModelOptions } from '../../plugins/multi-cursor/src/models.ts';
+import { cursorHistoryHash } from '../../plugins/multi-cursor/src/request.ts';
+import { lockCursorSession } from '../../plugins/multi-cursor/src/state-lock.ts';
 
 const models = cursorModelOptions([
   { id: 'test-model', displayName: 'Test Model' },

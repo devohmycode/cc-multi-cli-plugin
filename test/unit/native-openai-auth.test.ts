@@ -8,7 +8,7 @@ import {
   CodexAuthError,
   codexRequest,
   readCodexAuth,
-} from '../../plugins/multi/src/providers/openai/auth.ts';
+} from '../../plugins/multi-openai/src/auth.ts';
 
 const jwt = (exp: number) =>
   `header.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.signature`;

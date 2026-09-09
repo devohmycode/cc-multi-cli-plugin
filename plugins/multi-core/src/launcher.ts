@@ -5,30 +5,33 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { AntigravityHarness } from '../../multi-antigravity/src/harness.ts';
+import {
+  checkAntigravityHooks,
+  installAntigravityHook,
+} from '../../multi-antigravity/src/hooks.ts';
+import {
+  type AntigravityModel,
+  discoverAntigravityModels,
+} from '../../multi-antigravity/src/models.ts';
+import { antigravityPermissionPolicy } from '../../multi-antigravity/src/permissions.ts';
+import { CursorHarness } from '../../multi-cursor/src/harness.ts';
+import type { CursorModelOption } from '../../multi-cursor/src/models.ts';
+import { cursorModelOptions, cursorPickerOptions } from '../../multi-cursor/src/models.ts';
+import { mergeCursorPermissions } from '../../multi-cursor/src/permissions.ts';
+import { CursorWorkspaces } from '../../multi-cursor/src/workspaces.ts';
+import { createOpenAIApproval, discoverOpenAIReviewer } from '../../multi-openai/src/approval.ts';
+import { readCodexAuth } from '../../multi-openai/src/auth.ts';
+import { MODELS, OPENAI_WORKERS } from '../../multi-openai/src/models.ts';
+import type { Effort } from '../../multi-openai/src/responses.ts';
+import { readZenKey } from '../../multi-zen/src/auth.ts';
+import { ZEN_MODELS, ZEN_WORKERS, zenPickerOptions } from '../../multi-zen/src/models.ts';
 import { loadWorkerPermissions } from './gateway/agent-definitions.ts';
 import { checkCursorSettings } from './gateway/cursor-settings.ts';
 import { PermissionModes } from './gateway/mode-hook.ts';
 import { hookCommand } from './gateway/permission-hook.ts';
 import type { GatewayEvent } from './gateway/server.ts';
 import { createNativeGateway } from './gateway/server.ts';
-import { AntigravityHarness } from './providers/antigravity/harness.ts';
-import { checkAntigravityHooks, installAntigravityHook } from './providers/antigravity/hooks.ts';
-import {
-  type AntigravityModel,
-  discoverAntigravityModels,
-} from './providers/antigravity/models.ts';
-import { antigravityPermissionPolicy } from './providers/antigravity/permissions.ts';
-import { CursorHarness } from './providers/cursor/harness.ts';
-import type { CursorModelOption } from './providers/cursor/models.ts';
-import { cursorModelOptions, cursorPickerOptions } from './providers/cursor/models.ts';
-import { mergeCursorPermissions } from './providers/cursor/permissions.ts';
-import { CursorWorkspaces } from './providers/cursor/workspaces.ts';
-import { createOpenAIApproval, discoverOpenAIReviewer } from './providers/openai/approval.ts';
-import { readCodexAuth } from './providers/openai/auth.ts';
-import { MODELS, OPENAI_WORKERS } from './providers/openai/models.ts';
-import type { Effort } from './providers/openai/responses.ts';
-import { readZenKey } from './providers/zen/auth.ts';
-import { ZEN_MODELS, ZEN_WORKERS, zenPickerOptions } from './providers/zen/models.ts';
 
 /** One `--agents` entry: an external worker using Claude Code's native tools. */
 interface AgentDefinition {
@@ -484,7 +487,7 @@ async function handleCommand(command?: string) {
   }
   if (command === '--help') {
     console.log(
-      'Usage: node native-model-gateway.ts [--cursor-login | --cursor-models | --zen-models | --antigravity-models | --antigravity-setup] [-- <claude arguments>]\nLaunch Claude with external models and native coding workers.\n--cursor-login: official Cursor SDK browser sign-in\n--cursor-models: list account model choices and worker names\n--zen-models: list supported Zen models and capabilities\nMULTI_ANTIGRAVITY=1: enable experimental native Antigravity models and workers\n--antigravity-setup: install the scoped native permission hook\n--antigravity-models: inspect the official Antigravity CLI catalog (native login required)\nOPENCODE_API_KEY: Zen key (or use OpenCode /connect)\nMULTI_ZEN_MODELS: comma-separated Zen model IDs to show, leaving other providers unchanged\nMULTI_MODELS: comma-separated full model IDs to show in /model (unset: defaults; empty: hide external rows)\nMULTI_CURSOR_EXTRA_MODELS: comma-separated Cursor model IDs to add to Auto, Grok 4.6, and Composer 2.5 in /model',
+      'Usage: node plugins/multi-core/src/launcher.ts [--cursor-login | --cursor-models | --zen-models | --antigravity-models | --antigravity-setup] [-- <claude arguments>]\nLaunch Claude with external models and native coding workers.\n--cursor-login: official Cursor SDK browser sign-in\n--cursor-models: list account model choices and worker names\n--zen-models: list supported Zen models and capabilities\nMULTI_ANTIGRAVITY=1: enable experimental native Antigravity models and workers\n--antigravity-setup: install the scoped native permission hook\n--antigravity-models: inspect the official Antigravity CLI catalog (native login required)\nOPENCODE_API_KEY: Zen key (or use OpenCode /connect)\nMULTI_ZEN_MODELS: comma-separated Zen model IDs to show, leaving other providers unchanged\nMULTI_MODELS: comma-separated full model IDs to show in /model (unset: defaults; empty: hide external rows)\nMULTI_CURSOR_EXTRA_MODELS: comma-separated Cursor model IDs to add to Auto, Grok 4.6, and Composer 2.5 in /model',
     );
     process.exit(0);
   }

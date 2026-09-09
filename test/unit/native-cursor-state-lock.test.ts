@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
-import { lockCursorSession } from '../../plugins/multi/src/providers/cursor/state-lock.ts';
+import { lockCursorSession } from '../../plugins/multi-cursor/src/state-lock.ts';
 
 test('kernel lock excludes concurrent owners and releases after a gateway crash', {
   timeout: 10000,
@@ -11,7 +11,7 @@ test('kernel lock excludes concurrent owners and releases after a gateway crash'
   const directory = await mkdtemp('/tmp/cursor-lock-test-');
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = path.join(directory, 'session.lock');
-  const module = new URL('../../plugins/multi/src/providers/cursor/state-lock.ts', import.meta.url);
+  const module = new URL('../../plugins/multi-cursor/src/state-lock.ts', import.meta.url);
   const child = spawn(
     process.execPath,
     [

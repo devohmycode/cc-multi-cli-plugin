@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { MessagesResponse } from '../../plugins/multi/src/gateway/messages.ts';
-import { PermissionModes } from '../../plugins/multi/src/gateway/mode-hook.ts';
-import { createNativeGateway } from '../../plugins/multi/src/gateway/server.ts';
+import type { MessagesResponse } from '../../plugins/multi-core/src/gateway/messages.ts';
+import { PermissionModes } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
+import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 
 const reply: MessagesResponse = {
   id: 'agy-test',

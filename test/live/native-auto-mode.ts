@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { OPENAI_WORKERS } from '../../plugins/multi/src/providers/openai/models.ts';
+import { OPENAI_WORKERS } from '../../plugins/multi-openai/src/models.ts';
 
 const args = process.argv.slice(2);
 if (args.includes('--help')) {
@@ -39,7 +39,7 @@ const cases = names.length
     ];
 const artifacts = await mkdtemp(path.join(os.tmpdir(), 'native-auto-mode-'));
 const launcher = fileURLToPath(
-  new URL('../../plugins/multi/src/native-model-gateway.ts', import.meta.url),
+  new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url),
 );
 const report: { claude: string; node: string; passed: boolean; cases: Record<string, unknown>[] } =
   {

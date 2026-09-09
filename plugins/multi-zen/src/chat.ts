@@ -5,9 +5,9 @@ import type {
   MessagesResponse,
   ResponseContentBlock,
   StopReason,
-} from '../../gateway/messages.ts';
-import { callId, toolName } from '../../gateway/tools.ts';
-import { prefixSafeLength, readSse } from '../openai/responses.ts';
+} from '../../multi-core/src/gateway/messages.ts';
+import { callId, toolName } from '../../multi-core/src/gateway/tools.ts';
+import { prefixSafeLength, readSse } from '../../multi-openai/src/responses.ts';
 
 const SIGNATURE_PREFIX = 'multi-zen-chat:';
 const IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);

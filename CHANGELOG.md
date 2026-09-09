@@ -6,6 +6,11 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Move shared runtime into `plugins/multi-core/src/` and each provider into
+  `plugins/multi-<provider>/src/`. Launch with `node plugins/multi-core/src/launcher.ts`.
+  Update imports, checks and documentation without changing provider behavior;
+  independent marketplace packaging and setup remain subsequent work.
+
 - Document manual and agent installation paths, provider-owned authentication,
   and the planned marketplace setup/login commands separately from current behavior.
 
@@ -228,7 +233,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   `providers/openai/`, `providers/cursor/`, and retained `transports/` modules.
   Moved shared Claude Messages types out of the OpenAI translator and OpenAI
   authentication/model registration out of the HTTP server. The launcher path
-  remains `plugins/multi/src/native-model-gateway.ts`.
+  remains `plugins/multi-core/src/launcher.ts`.
 - Updated direct imports, permission-hook and policy paths, ACP build/drift checks,
   Knip, TypeScript, documentation, and license notices. No compatibility wrappers
   or intended provider behavior changes.
@@ -275,7 +280,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ### Repository layout
 
-- Moved plugin runtime code from `plugins/multi/scripts/` to `plugins/multi/src/` and live integration checks to `test/live/`. Root `scripts/` remains for development utilities. Updated imports, npm scripts, and documented launcher commands to the new paths.
+- Moved plugin runtime code from `plugins/multi/scripts/` to `plugins/multi-core/src/` and live integration checks to `test/live/`. Root `scripts/` remains for development utilities. Updated imports, npm scripts, and documented launcher commands to the new paths.
 
 ### Experimental Cursor SDK bridge
 

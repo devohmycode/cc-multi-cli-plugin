@@ -4,13 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
 import test from 'node:test';
-import { approvalCapabilityGuard } from '../../plugins/multi/src/gateway/permission-hook.ts';
-import type { GatewayFetch } from '../../plugins/multi/src/gateway/server.ts';
+import { approvalCapabilityGuard } from '../../plugins/multi-core/src/gateway/permission-hook.ts';
+import type { GatewayFetch } from '../../plugins/multi-core/src/gateway/server.ts';
 import {
   createOpenAIApproval,
   discoverOpenAIReviewer,
   inspectApprovalPath,
-} from '../../plugins/multi/src/providers/openai/approval.ts';
+} from '../../plugins/multi-openai/src/approval.ts';
 
 const request = (model = 'claude-sonnet-5') => ({
   model,

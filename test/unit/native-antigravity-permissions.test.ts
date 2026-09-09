@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   antigravityPermissionPolicy,
   antigravityToolDecision,
-} from '../../plugins/multi/src/providers/antigravity/permissions.ts';
+} from '../../plugins/multi-antigravity/src/permissions.ts';
 
 test('Antigravity Auto uses native permission fallback and Plan excludes side effects', () => {
   const auto = antigravityPermissionPolicy({ permissionMode: 'auto', disallowedTools: ['Write'] });
