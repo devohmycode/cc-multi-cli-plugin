@@ -60,11 +60,14 @@ schemas and stop sequences are rejected instead of silently discarded.
 State is isolated by Claude session, worker, provider and canonical workspace.
 New conversations get a fresh native project; every run explicitly selects its
 workspace with `--add-dir`. Process cwd alone is insufficient.
-The gateway retains native conversation IDs and sends incremental messages after
-initial context. Returning to Antigravity resumes its state; changing the selected
-native model takes effect on the next prompt. A fresh authenticated prompt or a
-unique response anchor admits continuation after outer history changes. Ambiguous
-history changes fail without rewinding or reconstructing native history.
+The gateway retains native conversation IDs and, once one exists, sends only the
+newest turn: everything after the last assistant message, resumed with
+`--conversation`. A request whose history ends with an assistant message, or that
+has no new user message after it, fails explicitly. Returning to Antigravity
+resumes its state; changing the selected native model takes effect on the next
+prompt. If the outer history no longer contains the previous turn's response,
+the gateway streams a notice and continues anyway on the native conversation's
+own record; native state is never rewound.
 
 Completed identical requests replay persisted output without another native run.
 Interrupted requests with uncertain completion preserve state and fail instead of

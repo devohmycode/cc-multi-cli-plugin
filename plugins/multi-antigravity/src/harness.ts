@@ -6,7 +6,6 @@ import type {
   Emit,
   MessagesRequest,
   MessagesResponse,
-  RequestMessage,
   StreamEventBody,
   StreamEventName,
 } from '../../multi-core/src/gateway/messages.ts';
@@ -44,22 +43,17 @@ type Pending = {
   historyHash: string;
   model: string;
   inputTokens: number;
-  submissionId?: string;
 };
 type Saved = {
-  version: 1;
+  version: 2;
   provider: 'antigravity';
   identity: string;
-  historyLength: number;
-  historyHash: string;
   response?: MessagesResponse;
   replay?: { key: string; events: Event[] };
   pending: boolean;
   pendingRun?: Pending;
   conversationId?: string;
   usage?: AntigravityUsage;
-  submissionId?: string;
-  needsPrompt?: boolean;
   policyIdentity?: string;
 };
 type Session = Saved & {
@@ -80,7 +74,6 @@ type Exchange = {
 };
 
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const textDigest = (value: string) => createHash('sha256').update(value).digest('hex');
 
 function modelEffort(model: AntigravityModel): AntigravityRunOptions['effort'] {
   if (model.effort) {
@@ -182,7 +175,7 @@ export class AntigravityHarness {
       if (this.exchanges.size >= 256) {
         throw new Error('Too many concurrent Antigravity requests');
       }
-      exchange = this.startExchange(body, scope, context, model, cwd, identity, key);
+      exchange = this.startExchange(body, context, model, cwd, identity, key);
       this.exchanges.set(key, exchange);
     }
     return observe(exchange, signal, emit);
@@ -190,7 +183,6 @@ export class AntigravityHarness {
 
   private startExchange(
     body: MessagesRequest,
-    scope: string,
     context: PermissionContext,
     model: AntigravityModel,
     cwd: string,
@@ -215,7 +207,7 @@ export class AntigravityHarness {
       mayHaveRun: false,
       committed: false,
       result: Promise.resolve().then(() =>
-        this.cachedExecute(body, scope, context, model, cwd, identity, key, exchange, forward),
+        this.cachedExecute(body, context, model, cwd, identity, key, exchange, forward),
       ),
     };
     void exchange.result.then(
@@ -237,7 +229,6 @@ export class AntigravityHarness {
 
   private async cachedExecute(
     body: MessagesRequest,
-    scope: string,
     context: PermissionContext,
     model: AntigravityModel,
     cwd: string,
@@ -281,12 +272,11 @@ export class AntigravityHarness {
     if (failure !== undefined) {
       throw new AntigravityProviderError(failure);
     }
-    return this.execute(body, scope, context, model, cwd, identity, key, exchange, emit);
+    return this.execute(body, context, model, cwd, identity, key, exchange, emit);
   }
 
   private async execute(
     body: MessagesRequest,
-    scope: string,
     context: PermissionContext,
     model: AntigravityModel,
     cwd: string,
@@ -295,13 +285,7 @@ export class AntigravityHarness {
     exchange: Exchange,
     emit: Emit,
   ): Promise<MessagesResponse> {
-    const { session, messages, reconciled } = await this.session(
-      body,
-      scope,
-      context,
-      cwd,
-      identity,
-    );
+    const { session, messages, rewound } = await this.session(body, identity);
     const signal = exchange.controller.signal;
     const initSaves: Promise<void>[] = [];
     try {
@@ -316,7 +300,7 @@ export class AntigravityHarness {
         bypass: policy.bypass,
         notice,
       });
-      writeNotices(response, session, reconciled, notice, policyIdentity);
+      writeNotices(response, session, rewound, notice, policyIdentity);
       session.policyIdentity = policyIdentity;
       session.pending = true;
       const pending: Pending = {
@@ -326,7 +310,6 @@ export class AntigravityHarness {
         historyHash: antigravityHistoryHash(body.messages ?? []),
         model: model.id,
         inputTokens: prepared.inputTokens,
-        submissionId: context.submission?.id,
       };
       session.pendingRun = pending;
       await this.saveSession(session);
@@ -377,8 +360,6 @@ export class AntigravityHarness {
       session.pendingRun = undefined;
       session.conversationId = result.conversation_id;
       session.usage = result.usage;
-      session.historyLength = body.messages?.length ?? 0;
-      session.historyHash = antigravityHistoryHash(body.messages ?? []);
       session.response = finished;
       session.replay = {
         key,
@@ -387,8 +368,6 @@ export class AntigravityHarness {
           ...terminalEvents.map(([name, value]) => [name, structuredClone(value)] as Event),
         ],
       };
-      session.submissionId = context.submission?.id;
-      session.needsPrompt = false;
       await this.saveSession(session);
       await atomicJson(path.join(this.stateDirectory, `${key}.response.json`), {
         response: finished,
@@ -442,13 +421,7 @@ export class AntigravityHarness {
     }
   }
 
-  private async session(
-    body: MessagesRequest,
-    _scope: string,
-    context: PermissionContext,
-    _cwd: string,
-    identity: string,
-  ) {
+  private async session(body: MessagesRequest, identity: string) {
     const current = this.sessions.get(identity);
     if (current?.busy || this.creating.has(identity)) {
       throw new Error('A different request is already running for this Antigravity agent');
@@ -456,17 +429,10 @@ export class AntigravityHarness {
     this.creating.add(identity);
     try {
       const session = current ?? (await this.loadSession(identity));
-      const messages =
-        session.response || session.needsPrompt
-          ? continuation(session, body, context)
-          : body.messages;
-      const reconciled =
-        !!session.needsPrompt ||
-        (!!session.response &&
-          antigravityHistoryHash(body.messages?.slice(0, session.historyLength)) !==
-            session.historyHash);
+      const messages = session.conversationId ? continuation(body) : (body.messages ?? []);
+      const rewound = historyRewound(session, body.messages ?? []);
       session.busy = true;
-      return { session, messages, reconciled };
+      return { session, messages, rewound };
     } finally {
       this.creating.delete(identity);
     }
@@ -489,11 +455,9 @@ export class AntigravityHarness {
       }
       const session: Session = {
         ...(saved ?? {
-          version: 1,
+          version: 2,
           provider: 'antigravity',
           identity,
-          historyLength: 0,
-          historyHash: antigravityHistoryHash([]),
           pending: false,
         }),
         file,
@@ -524,7 +488,6 @@ export class AntigravityHarness {
     });
     session.pending = false;
     session.pendingRun = undefined;
-    session.needsPrompt = true;
     await this.saveSession(session);
   }
 
@@ -680,16 +643,16 @@ async function awaitSaves(saves: readonly Promise<void>[]) {
 function writeNotices(
   response: HarnessResponse,
   session: Session,
-  reconciled: boolean,
+  rewound: boolean,
   notice: string,
   policyIdentity: string,
 ) {
   if (!session.response || session.policyIdentity !== policyIdentity) {
     response.text(`[Antigravity] ${notice}\n`);
   }
-  if (reconciled) {
+  if (rewound) {
     response.text(
-      '[Antigravity] Continuing with retained native history; outer history changes did not undo prior actions.\n',
+      '[Antigravity] Outer history changed; the native conversation continues with its own record.\n',
     );
   }
 }
@@ -707,110 +670,38 @@ function safeText(value: string) {
   );
 }
 
-function continuation(session: Session, body: MessagesRequest, context: PermissionContext) {
+/**
+ * The newest turn: everything after the last assistant message (the newest user
+ * message plus any trailing inline system reminders). The native `agy` conversation
+ * already holds everything before it; only the delta needs to be sent on resume.
+ */
+function continuation(body: MessagesRequest): NonNullable<MessagesRequest['messages']> {
   const messages = body.messages ?? [];
-  const count = session.historyLength;
-  if (
-    session.needsPrompt ||
-    !session.response ||
-    antigravityHistoryHash(messages.slice(0, count)) !== session.historyHash
-  ) {
-    return reconcileHistory(session, messages, context);
+  const lastAssistant = messages.findLastIndex((message) => message.role === 'assistant');
+  if (lastAssistant === messages.length - 1) {
+    throw new Error('Antigravity continuation requires a message after the last assistant turn');
   }
-  const assistant = messages[count];
-  const expected = antigravityHistoryHash([
-    { role: 'assistant', content: session.response.content },
-  ]);
-  if (!assistant || antigravityHistoryHash([assistant]) !== expected) {
-    throw new Error('Antigravity continuation does not match its previous response');
-  }
-  const delta = messages.slice(count + 1);
-  if (!delta.length) {
-    throw new Error('Antigravity continuation contains no new message');
+  const delta = messages.slice(lastAssistant + 1);
+  if (!delta.some((message) => message.role === 'user')) {
+    throw new Error('Antigravity continuation requires a new user message');
   }
   return delta;
 }
 
-function reconcileHistory(
+/** True when the outer history no longer contains the previous turn's response. */
+function historyRewound(
   session: Session,
   messages: NonNullable<MessagesRequest['messages']>,
-  context: PermissionContext,
-) {
-  if (context.compaction !== undefined) {
-    if (!context.compaction || context.compaction.length > 128) {
-      throw new Error('Invalid Antigravity compaction marker');
-    }
-    // PreCompact is an authenticated Claude hook event. Claude may replace the
-    // outer history and system prompt while asking the provider for a summary;
-    // retain the native conversation and pass only this bounded summary request.
-    return messages;
-  }
-  if (context.submission && context.submission.id !== session.submissionId) {
-    const userIndex = messages.findLastIndex((message) => message.role === 'user');
-    const content = authenticatedContent(
-      messages[userIndex]?.content,
-      context.submission.promptHash,
-    );
-    if (
-      userIndex >= 0 &&
-      content !== undefined &&
-      messages.slice(userIndex + 1).every((message) => message.role === 'system')
-    ) {
-      // Claude may append inline system reminders after the authenticated prompt.
-      // Keep those records with the prompt; they are part of this request's context.
-      return [{ ...messages[userIndex], content }, ...messages.slice(userIndex + 1)];
-    }
+): boolean {
+  if (!session.response) {
+    return false;
   }
   const expected = antigravityHistoryHash([
-    { role: 'assistant', content: session.response?.content ?? [] },
+    { role: 'assistant', content: session.response.content },
   ]);
-  const anchors = messages.flatMap((message, index) =>
-    antigravityHistoryHash([message]) === expected ? [index] : [],
+  return !messages.some(
+    (message) => message.role === 'assistant' && antigravityHistoryHash([message]) === expected,
   );
-  if (anchors.length === 1 && anchors[0] < messages.length - 1) {
-    return messages.slice(anchors[0] + 1);
-  }
-  throw new Error(
-    'Antigravity history changed without an authenticated prompt or unique response anchor; native state is preserved',
-  );
-}
-
-function authenticatedContent(content: RequestMessage['content'] | undefined, hash: string) {
-  const text = plainText(content);
-  if (text !== undefined && textDigest(text) === hash) {
-    return content;
-  }
-  if (!Array.isArray(content)) {
-    return undefined;
-  }
-  // Claude can merge the compact summary and the fresh prompt into one user
-  // message. Match an exact text block, never a substring of historical text.
-  const index = content.findLastIndex(
-    (block) =>
-      block.type === 'text' && typeof block.text === 'string' && textDigest(block.text) === hash,
-  );
-  return index < 0 ? undefined : content.slice(index);
-}
-
-function plainText(content: unknown): string | undefined {
-  if (typeof content === 'string') {
-    return content;
-  }
-  if (
-    Array.isArray(content) &&
-    content.every(
-      (block) =>
-        block &&
-        typeof block === 'object' &&
-        'type' in block &&
-        block.type === 'text' &&
-        'text' in block &&
-        typeof block.text === 'string',
-    )
-  ) {
-    return content.map((block) => (block as { text: string }).text).join('');
-  }
-  return undefined;
 }
 
 async function observe(exchange: Exchange, signal: AbortSignal, emit?: Emit) {
@@ -845,12 +736,14 @@ async function readSession(file: string): Promise<Saved | undefined> {
   if (saved === undefined) {
     return undefined;
   }
+  if (saved.version !== 2) {
+    // The native agy conversation is never deleted; an older or unknown session
+    // file is ignored and the session starts fresh instead of refusing to load.
+    return undefined;
+  }
   if (
-    saved.version !== 1 ||
     saved.provider !== 'antigravity' ||
     typeof saved.identity !== 'string' ||
-    !isHash(saved.historyHash) ||
-    !Number.isSafeInteger(saved.historyLength) ||
     (saved.policyIdentity !== undefined && !isHash(saved.policyIdentity)) ||
     typeof saved.pending !== 'boolean' ||
     !validUsage(saved.usage) ||

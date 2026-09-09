@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -145,101 +144,77 @@ test('an interrupted pending request refuses an uncertain rerun', async (t) => {
   assert.equal(setupResult.calls.length, 0);
 });
 
-test('outer compaction accepts a prompt hash from the mode hook', async (t) => {
+test('continuation requires a new message and a new user turn after the last assistant reply', async (t) => {
   const setupResult = await setup();
   const harness = new AntigravityHarness([model], { ...setupResult, checkPermissions: policy });
   t.after(() => harness.close());
-  await harness.handle(
-    { model: model.model, messages: [{ role: 'user', content: 'seed' }] },
-    'compact-worker',
+  const seed = { model: model.model, messages: [{ role: 'user', content: 'seed' }] };
+  const first = await harness.handle(
+    seed,
+    'continuation-worker',
     new AbortController().signal,
     undefined,
     context,
   );
-  const compactPrompt = 'continue after compact';
-  await harness.handle(
-    {
-      model: model.model,
-      messages: [
-        { role: 'user', content: compactPrompt },
-        { role: 'system', content: 'inline reminder from Claude' },
-      ],
-    },
-    'compact-worker',
-    new AbortController().signal,
-    undefined,
-    {
-      ...context,
-      submission: {
-        id: 'compact-submission',
-        promptHash: createHash('sha256').update(compactPrompt).digest('hex'),
+  await assert.rejects(
+    harness.handle(
+      {
+        model: model.model,
+        messages: [...seed.messages, { role: 'assistant', content: first.content }],
       },
-    },
+      'continuation-worker',
+      new AbortController().signal,
+      undefined,
+      context,
+    ),
+    /message after the last assistant turn/,
   );
-  assert.equal(setupResult.calls.length, 2);
   await assert.rejects(
     harness.handle(
       {
         model: model.model,
         messages: [
-          { role: 'user', content: compactPrompt },
-          { role: 'user', content: 'different latest prompt' },
-          { role: 'system', content: 'inline reminder from Claude' },
+          ...seed.messages,
+          { role: 'assistant', content: first.content },
+          { role: 'system', content: 'a reminder with no new user turn' },
         ],
       },
-      'compact-worker',
+      'continuation-worker',
       new AbortController().signal,
       undefined,
-      {
-        ...context,
-        submission: {
-          id: 'stale-submission',
-          promptHash: createHash('sha256').update(compactPrompt).digest('hex'),
-        },
-      },
+      context,
     ),
-    /history changed/,
+    /new user message/,
   );
 });
 
-test('a compact summary merged with the authenticated user text forwards only the fresh prompt', async (t) => {
-  const fixture = await setup();
-  const harness = new AntigravityHarness([model], { ...fixture, checkPermissions: policy });
+test('outer history changes stream a rewind notice and continue on the native record', async (t) => {
+  const setupResult = await setup();
+  const harness = new AntigravityHarness([model], { ...setupResult, checkPermissions: policy });
   t.after(() => harness.close());
   await harness.handle(
-    { model: model.model, messages: [{ role: 'user', content: 'first' }] },
-    'merged',
+    { model: model.model, messages: [{ role: 'user', content: 'seed' }] },
+    'rewind-worker',
     new AbortController().signal,
     undefined,
     context,
   );
-  const prompt = 'Continue the task';
-  await harness.handle(
+  const changed = await harness.handle(
     {
       model: model.model,
       messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: 'Historical compact summary' },
-            { type: 'text', text: prompt },
-          ],
-        },
-        { role: 'system', content: 'Current runtime reminder' },
+        { role: 'assistant', content: [{ type: 'text', text: 'a different remembered reply' }] },
+        { role: 'user', content: 'continue' },
       ],
     },
-    'merged',
+    'rewind-worker',
     new AbortController().signal,
     undefined,
-    {
-      ...context,
-      submission: { id: 'fresh', promptHash: createHash('sha256').update(prompt).digest('hex') },
-    },
+    context,
   );
-  assert.equal(fixture.calls.length, 2);
-  assert.match(fixture.calls[1].prompt, /Continue the task/);
-  assert.match(fixture.calls[1].prompt, /Current runtime reminder/);
-  assert(!fixture.calls[1].prompt.includes('Historical compact summary'));
+  assert.equal(setupResult.calls.length, 2);
+  assert(changed.content[0].type === 'text');
+  assert.match(changed.content[0].text, /Outer history changed; the native conversation continues/);
 });
 
 test('authenticated compaction ignores Claude system content and disables tools', async (t) => {
