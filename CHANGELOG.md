@@ -6,6 +6,79 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Document manual and agent installation paths, provider-owned authentication,
+  and the planned marketplace setup/login commands separately from current behavior.
+
+### Antigravity native CLI
+
+- Add opt-in official CLI models and named incoming workers, with native login,
+  streamed progress, persisted conversation resume and completed-request replay.
+- Add a scoped native pre-tool hook: Auto falls back to native edit acceptance
+  without a reviewer; Plan and Bypass preserve explicit capability restrictions.
+- Keep native actions display-only, reject unsupported policy/content, and refuse
+  uncertain retries. Cache reuse and native compaction retain experimental status.
+- Authenticate main-session compaction through Claude's PreCompact hook and deny
+  native tools while generating the outer summary.
+
+### Model picker
+
+- Add `MULTI_MODELS` to limit and order external `/model` entries across providers.
+  Preserve explicit selections and workers; use the first visible model as the
+  no-Claude-login default when no model is selected.
+
+### OpenCode Zen direct gateway
+
+- Default the Zen picker to DeepSeek V4 Pro/Flash, Kimi K3, GLM 5.3/Flash, and
+  Muse Spark 1.3. Keep the broader catalog available through explicit selection.
+
+- Add the current non-deprecated free Zen models, including Muse Spark Responses,
+  and `MULTI_ZEN_MODELS` to filter Zen without hiding subscription providers.
+
+- Add isolated Zen API-key discovery, explicit GPT Responses and selected Chat
+  Completions models, native workers and a `--zen-models` capability listing.
+- Preserve native Claude tools/permissions and explicit bypass; gate unavailable
+  Zen automatic review without borrowing another provider's reviewer.
+- Keep stable Zen session/cache affinity across restarts, model-owned reasoning
+  replay and deterministic prefixes. Report upstream cache reads/writes separately
+  from fresh input; recognize Responses cache-write usage for accurate accounting.
+- Add offline translation, routing, permissions, cancellation and launcher checks,
+  plus bounded opt-in live cache, resume, switching and compaction validation.
+
+
+### Repository release preparation
+
+- Replace the raster banner with an accessible, self-contained SVG generated from
+  one provider list. Preserve the original monospace title, pixel mascot and
+  provider-spoke composition on pure black with Anthropic orange. Show only
+  implemented integrations, lay out added providers automatically and check
+  generated output in CI.
+- Remove the unused Cursor/OpenCode headless and ACP adapters, process helpers,
+  fixtures, tests, vendored SDK and bundle builder. Drop the ACP SDK, esbuild and
+  zod as direct development dependencies and remove obsolete tooling exceptions.
+- Refresh README, development guidance and GitHub issue templates for the current
+  native gateway. Correct privacy documentation for persistent Cursor state and
+  Codex-owned credential renewal; preserve historical data-removal guidance.
+
+### OpenAI gateway reliability
+
+- Renew expiring Codex ChatGPT credentials through the official CLI app-server.
+  Share concurrent renewal and retry an HTTP 401 once, checking account identity;
+  never replay accepted inference or expose credential-bearing RPC errors.
+- Remove the default three-minute OpenAI gateway deadline while retaining client
+  cancellation and explicit limits. Anthropic passthrough keeps its existing timer.
+- Recover terminal-only Responses text, tools and encrypted reasoning, including
+  `response.done`. Reconcile partial output without duplicate tool calls and reject
+  conflicting or unusable output. Extend the bounded cache check with a
+  `--terminal-only` native-tool regression.
+
+### OpenAI cache verification
+
+- Add a bounded Astra live cache regression through Claude's native Read loop and
+  two saved-session resumes with fresh gateways. Verify provider cached-token
+  reuse and exact Claude usage accounting; measured 99.4% and 99.2% warm hits.
+- Document that cache-hit evidence does not establish subscription quota charges
+  or long-idle/compaction/worker cache behavior. No runtime cache changes.
+
 ### Cursor native lifecycle and compatibility
 
 - Remove the single-model request deadline from whole Cursor runs. Preserve

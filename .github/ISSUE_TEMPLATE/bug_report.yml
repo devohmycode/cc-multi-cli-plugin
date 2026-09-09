@@ -1,5 +1,5 @@
 name: Bug report
-description: Something doesn't work — a CLI hangs, errors silently, or behaves wrong.
+description: Report a gateway, provider, tool or session problem.
 labels: [bug]
 body:
   - type: markdown
@@ -7,28 +7,27 @@ body:
       value: |
         Thanks for taking the time to file a bug! A few quick things that make these much faster to triage:
 
-        - **Try `ACP_TRACE=1`** if the issue is silent/stalling. Re-run the failing command with that env var set and paste the stderr — it shows the JSON-RPC traffic between Claude and the CLI and almost always points at the cause.
-        - **Note your CLI version** for whichever CLI is involved (`<cli> --version` or `<cli> about`).
-        - **Check [README › Known issues](../../#known-issues)** for documented upstream bugs already being tracked.
+        - Re-run with **`MULTI_NATIVE_TRACE=1`** for gateway routing, model/effort and status diagnostics.
+        - Include your Claude Code, Node and relevant provider CLI/SDK versions.
+        - Identify the model/worker and permission mode, and redact private workspace paths from logs.
 
   - type: dropdown
     id: cli
     attributes:
-      label: Which CLI is involved?
+      label: Which integration is involved?
       options:
-        - codex
-        - gemini
-        - cursor
-        - copilot
-        - qwen
-        - other / N/A
+        - OpenAI / Codex login
+        - Cursor SDK
+        - Claude passthrough
+        - Gateway / model picker / workers
+        - Other
     validations:
       required: true
 
   - type: input
     id: cli-version
     attributes:
-      label: CLI version
+      label: Claude Code, Node and provider versions
       placeholder: "e.g. 2026.04.17-787b533"
 
   - type: textarea
@@ -46,8 +45,8 @@ body:
   - type: textarea
     id: trace
     attributes:
-      label: ACP_TRACE output (if applicable)
-      description: Re-run with `MULTI_NATIVE_TRACE=1` (gateway) or `ACP_TRACE=1` (ACP transport) and paste the stderr.
+      label: Gateway trace (if applicable)
+      description: Re-run with `MULTI_NATIVE_TRACE=1` and paste the relevant stderr. Do not include credentials or private task content.
       render: shell
 
   - type: input

@@ -1,6 +1,6 @@
 # Cursor native integration status
 
-Updated 2026-09-08. [ARCHITECTURE.md](../ARCHITECTURE.md) owns product direction;
+Updated 2026-09-09. [ARCHITECTURE.md](../ARCHITECTURE.md) owns product direction;
 [README.md](../README.md) explains usage. Earlier migration waves, source-patch
 experiments and callback proofs are historical research under `.agent/`.
 
@@ -41,8 +41,8 @@ Paths below are relative to `plugins/multi/src/`:
 - `providers/cursor/models.ts`: account selections and worker choices.
 
 The direct OpenAI path and shared gateway approval modules retain their existing
-Claude-executed tool behavior. Retained Cursor/OpenCode transports are references,
-not a fallback runtime. Do not recreate deleted callback or reviewer modules.
+Claude-executed tool behavior. The obsolete Cursor/OpenCode CLI/ACP transports
+are removed. Do not recreate deleted callback or reviewer modules.
 
 ## Public interface boundaries and remaining validation
 
@@ -61,8 +61,8 @@ not a fallback runtime. Do not recreate deleted callback or reviewer modules.
 - Plugin discovery, whole-tool restrictions and narrow Linux managed-policy
   translation are implemented. Richer argument/path policies and other operating
   systems still require enforcement work; unsupported policies fail explicitly.
-- Native runs have no gateway execution deadline. Direct providers retain 180
-  seconds. The launcher defaults `API_TIMEOUT_MS` to the documented maximum
+- Native runs have no gateway execution deadline. OpenAI has no default gateway
+  deadline; Anthropic passthrough retains 180 seconds. The launcher defaults `API_TIMEOUT_MS` to the documented maximum
   2147483647, preserving an explicit inherited value; Claude stream watchdogs and
   native tool limits remain. [Environment variables](https://code.claude.com/docs/en/env-vars)
 - Cursor-originated delegation remains deferred until requested.

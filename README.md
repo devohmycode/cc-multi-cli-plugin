@@ -1,4 +1,4 @@
-![cc-multi-cli-plugin](docs/assets/banner.png)
+![multi-cli — plugin for claude code](docs/assets/banner.svg)
 
 # cc-multi-cli-plugin
 
@@ -8,11 +8,9 @@
 [![Node 24.12+](https://img.shields.io/badge/Node-%E2%89%A524.12-555)](#requirements)
 [![Stars](https://img.shields.io/github/stars/greenpolo/cc-multi-cli-plugin?style=social)](https://github.com/greenpolo/cc-multi-cli-plugin/stargazers)
 
-cc-multi-cli-plugin is being refactored to bring external models and coding
-harnesses into one Claude Code session. The checkout contains an experimental
-direct GPT gateway and an experimental Cursor SDK bridge in TypeScript, plus
-retained Cursor/OpenCode transport references.
-The earlier command-based delegation system was removed in the TypeScript branch.
+cc-multi-cli-plugin brings external models and coding harnesses into one Claude
+Code session. The TypeScript gateway supports experimental OpenAI models and
+the official Cursor SDK harness, and direct OpenCode Zen APIs, with Claude subscription passthrough.
 
 The launcher uses Cursor's official SDK for native tools, persistent state and
 review. Claude Code supplies the session interface and outer worker coordination;
@@ -29,15 +27,13 @@ the experience, alongside preserving each provider's supported authentication.
 
 The direct GPT path uses Claude Code's tools and execution loop. Cursor uses
 its own SDK tools and persistent execution loop. Claude or GPT parents can spawn
-named Cursor workers; Cursor-native children remain disabled. Antigravity and the
-other external harness integrations remain planned.
+named Cursor workers; Cursor-native children remain disabled. Antigravity now has
+an opt-in experimental native CLI bridge; other external harnesses remain planned.
 
 Our targets are OpenAI, Cursor, Antigravity, OpenCode, local models through
 llama.cpp, and Grok Build. We will maintain our adapters and reuse existing
 process/session infrastructure. There is no planned replacement with a general
-gateway engine or a user-facing backend choice. The old commands, skills, and
-forwarders were removed in the TypeScript branch; their design is not a requirement
-for the new integrations.
+gateway engine or a user-facing backend choice. Future integrations will follow the same session and provider isolation rules.
 [ARCHITECTURE.md](ARCHITECTURE.md) is the authoritative direction, including
 current status, execution boundaries, and the first bridge milestone.
 
@@ -49,6 +45,62 @@ Enable OpenAI with Codex's ChatGPT
 login, or Cursor with the SDK login below, or both. From a checkout, run `npm install` for dependencies. `npm test`
 runs type checking and offline tests. Node runs the gateway's TypeScript directly.
 
+## Installation
+
+### For humans
+
+The current experimental runtime runs from a checkout. Installing the marketplace
+manifest alone does not yet activate the gateway.
+
+```sh
+git clone https://github.com/greenpolo/cc-multi-cli-plugin.git
+cd cc-multi-cli-plugin
+npm ci
+```
+
+Connect the providers you want:
+
+| Provider | Connect |
+| --- | --- |
+| OpenAI | `codex -c cli_auth_credentials_store='"file"' login` — sign in with ChatGPT |
+| Cursor | `node plugins/multi/src/native-model-gateway.ts --cursor-login` — official SDK browser login |
+| OpenCode Zen | OpenCode `/connect` → OpenCode Zen, or set `OPENCODE_API_KEY` locally |
+
+Then launch Claude with Multi and open `/model`:
+
+```sh
+node plugins/multi/src/native-model-gateway.ts
+```
+
+Run the launcher by its absolute path from another project to work in that project.
+Restart through the launcher after connecting a new provider. See the
+[installation guide](docs/installation.md) for verification and planned marketplace setup.
+
+### For agents
+
+Give your coding agent this prompt alongside the repository URL or checkout:
+
+> Install and configure cc-multi-cli-plugin using docs/installation.md in this
+> repository. Check prerequisites, ask which providers I want, reuse existing
+> logins, and verify the installation. Let me complete browser sign-in and enter
+> any API key locally; do not ask me to paste credentials into chat.
+
+The [agent installation instructions](docs/installation.md#for-agents) use the
+same runtime and authentication paths as manual installation.
+
+## Experimental Antigravity CLI
+
+Use the official `agy` login, then install the scoped native permission hook:
+
+```sh
+node plugins/multi/src/native-model-gateway.ts --antigravity-setup
+MULTI_ANTIGRAVITY=1 node plugins/multi/src/native-model-gateway.ts
+```
+
+This enables experimental selections and incoming workers. Auto uses native edit acceptance and
+native command policy, without a reviewer model. See [setup, permissions and
+continuation limits](docs/antigravity.md). Prompt-cache reuse remains experimental.
+
 ## Development checks
 
 Run `npm run check` for Biome formatting/lint checks, Knip unused-code analysis,
@@ -59,9 +111,14 @@ Use `npm run format` to format and `npm run lint:fix` for safe lint fixes;
 Biome enforces braces, single variable declarations, simple conditionals, and a
 cognitive-complexity limit of 15. Explicit `any`, non-null assertions, parameter
 reassignment, focused/skipped tests, and unused imports/variables are rejected.
-Runtime and tests use the same rules. The generated ACP bundle and lockfile are
-excluded from Biome. Knip preserves the deliberately retained Cursor/OpenCode
-transport entry points. See AGENTS.md for authoring and suppression rules.
+Runtime and tests use the same rules; only the dependency lockfile is excluded
+from Biome. Knip checks the active gateway, providers, tests and scripts.
+See AGENTS.md for authoring and suppression rules.
+
+The README banner is a self-contained SVG. Edit the provider list in
+[`scripts/banner.mjs`](scripts/banner.mjs), then run `npm run banner:generate`.
+Provider icons and spokes are laid out automatically; `npm run check` catches a
+stale generated banner. See [asset editing notes](docs/assets/README.md).
 
 ## Source layout
 
@@ -72,14 +129,14 @@ native-model-gateway.ts    launcher
 gateway/                  HTTP/session handling, Claude Messages, approval, tool aliases
 providers/openai/         auth, models, Responses translation, counting, reviewer policy
 providers/cursor/         native SDK harness, permissions, progress and model catalog
-transports/               retained CLI adapters, process helpers, ACP and its vendor bundle
 ```
 
 The launcher imports concrete gateway/provider modules. Shared Claude protocol types
 live in `gateway/messages.ts`; provider credentials and catalogs stay with their
-provider. Cursor currently reuses OpenAI normalization/counting helpers. The retained
-CLI transports have offline tests but are not connected to the gateway. Development
+provider. Cursor currently reuses OpenAI normalization/counting helpers. Development
 utilities live in root `scripts/`, with tests under `test/unit/` and `test/live/`.
+The obsolete CLI/ACP adapters and companion helpers have been removed; OpenCode
+and the other roadmap providers have no active gateway route yet.
 
 ## Experimental native OpenAI models
 
@@ -146,9 +203,14 @@ text and native function tools, images and documents in user messages and tool
 results, JSON-schema output, streamed output, encrypted reasoning continuation,
 local stop sequences, and request cancellation. Image sources can be base64 (PNG, JPEG, GIF, WebP) or
 HTTP(S) URLs; the gateway forwards URLs to the provider without fetching them.
-The request limit is 8 MiB. Direct providers retain a three-minute gateway timeout;
-native Cursor runs have no gateway execution deadline. Response streaming
+The request limit is 8 MiB. OpenAI requests and native Cursor runs have no default
+gateway execution deadline; Claude cancellation and explicit client timeouts still
+apply. Anthropic passthrough retains a three-minute gateway timeout. Response streaming
 is bounded to 32 MiB overall and 8 MiB per SSE event.
+Completed Responses output can recover missing incremental text, tool arguments,
+and encrypted reasoning, including the `response.done` terminal alias. Completed
+items are reconciled without emitting duplicate tool calls; conflicting or
+unusable output fails explicitly.
 Both `output_config.format` and legacy `output_format` JSON schemas map to
 Responses `text.format` with strict mode. Schemas must satisfy OpenAI's strict
 subset (including required properties and `additionalProperties: false`);
@@ -171,11 +233,15 @@ low because the registered models do not offer a no-reasoning level.
 Stop strings are enforced locally across streamed text chunks; matching text and
 later output are withheld and the upstream request is cancelled. Usage on an early
 local stop is unavailable and reported as zero. The subscription endpoint does not
-accept a per-request output-token cap. Codex owns token refresh; renew its login
-if the gateway reports 401. Credential stores that do not expose `auth.json` are
-not supported yet. Direct OpenCode Zen integration and external harness-backed
-workers for Antigravity and Grok Build are not implemented; neither is
-the llama.cpp route.
+accept a per-request output-token cap. The gateway asks the official Codex CLI to
+renew expiring ChatGPT tokens using `account/read` with `refreshToken: true`; Codex
+owns OAuth and credential persistence. Keep `codex` on PATH. Concurrent requests
+share renewal within the gateway. An HTTP 401 triggers at most one renewal and
+retry, with an account-identity check; accepted inference streams are never
+replayed. If renewal fails, run `codex login`. Credential stores that do not expose
+`auth.json` are not supported yet. Grok Build workers and the llama.cpp route
+are not implemented. OpenCode Zen and Antigravity have separate experimental
+integrations described above.
 The full built-in tool definitions are accepted, but this is not complete feature
 parity: unsupported content also prevents switching an existing conversation
 that contains it. Auxiliary features with incompatible schemas can still fail.
@@ -193,6 +259,24 @@ Offline checks run with `npm test`. The opt-in integration check
 subscriptions to delegate a real native Read/Edit task in a temporary directory
 and asserts the upstream model and reasoning level. Omit the name to test Astra
 at medium effort.
+
+`node test/live/native-openai-cache.ts` checks Astra prompt-cache reuse through
+unmodified Claude with its default system prompt and full built-in tool catalog.
+It reads a synthetic fixture, then resumes the saved Claude session twice with
+fresh gateway instances. It expects at least 90% warm cache reuse and verifies
+Claude's cached/uncached input and output totals against upstream usage. It uses
+Codex login, low effort and at most six upstream requests; evidence stays in `/tmp`.
+The 2026-09-08 run used four requests: the two resumed turns reused 20,480 of
+20,610 and 20,651 input tokens (99.4% and 99.2%). No runtime cache change was needed.
+Append `--terminal-only` to move actual completed upstream items into the terminal
+output array, withhold incremental events, and verify the same native tool loop
+and saved-session resumes. This also exercises endpoints that omit that array.
+This establishes short-interval main-session cache reuse, not subscription-quota
+charging parity with Codex, worker-cache behavior, long-idle retention, or cache
+reuse after compaction/model/tool changes. Claude's dollar estimate is not a
+subscription bill. OpenAI documents prefix stability and cache controls in its
+[prompt caching guide](https://developers.openai.com/api/docs/guides/prompt-caching).
+
 `node test/live/native-main-switch.ts` tests Claude → GPT main
 → native delegation → Claude in one conversation with generated fixtures.
 `node test/live/native-translation.ts` tests modern and legacy
@@ -221,10 +305,119 @@ and [compaction environment settings](https://code.claude.com/docs/en/env-vars).
 
 Set `MULTI_NATIVE_TRACE=1` to print routing, upstream model/effort, HTTP status, and tool-name diagnostics
 without logging prompts, response bodies, or credentials. Upstream HTTP failures
-preserve status and `Retry-After`; inference is not automatically replayed by the
-gateway. Exit Claude normally
+preserve status and `Retry-After`, except for the single authentication retry
+described above. Accepted inference is not automatically replayed by the gateway. Exit Claude normally
 to stop its gateway. Plain `claude` launches independently of this experimental
 launcher; use session-only model selection to keep your saved default separate.
+
+To limit the launcher's external entries in `/model`, set `MULTI_MODELS` to a
+comma-separated list of full model IDs, in your preferred display order:
+
+```sh
+export MULTI_MODELS=multi/zen/kimi-k3,multi/zen/glm-5.3,multi/zen/deepseek-v4-flash
+node plugins/multi/src/native-model-gateway.ts
+```
+
+This works across providers: use `multi/openai/<model-id>` or the Cursor routes
+shown by `--cursor-models` too. Each entry must already be available in the
+launcher's picker (including any `MULTI_CURSOR_EXTRA_MODELS`); unknown or
+unavailable entries fail at startup. Unset `MULTI_MODELS` restores the default
+list; an empty value hides all external rows. Claude's built-in rows, named
+workers and explicit/saved model selections remain available. With the filter set,
+without a Claude login or an existing selection, the first visible external model
+is the default.
+Add the export to your shell configuration to keep the filter across launches.
+
+## Experimental OpenCode Zen models
+
+The shipped Zen picker defaults to DeepSeek V4 Pro and Flash, Kimi K3, GLM 5.3
+and Flash, and Muse Spark 1.3 (verified September 9, 2026). These are paid Zen
+API routes. Muse is included as an anticipated open-weight release; its weights
+are not currently open. Other catalog models remain available through explicit
+selection and named workers.
+
+Use `MULTI_ZEN_MODELS` for a Zen-only picker filter, keeping other providers visible:
+
+```sh
+export MULTI_ZEN_MODELS=mimo-v2.5-free,ling-3.0-flash-fin-free,nemotron-3-ultra-free,nemotron-3.5-lightning-free,muse-spark-1.3-contributor-free,muse-spark-1.2-contributor-free,big-pickle
+```
+
+These seven IDs were listed with zero input/output prices on September 9, 2026;
+free offers can change. The API also lists `deepseek-v4-flash-free`, but its model
+metadata marks it deprecated, so it is excluded. Muse uses Responses with
+low/medium/high/xhigh effort; the other free models use native Chat reasoning.
+Unset the variable to restore the curated Zen defaults. `MULTI_MODELS`, if set,
+further filters the combined picker.
+
+Zen uses its direct API while Claude Code owns tools, permissions, history and
+native worker execution. Connect **OpenCode Zen** through OpenCode's `/connect`,
+or set `OPENCODE_API_KEY` locally, then start the existing launcher:
+
+```sh
+node plugins/multi/src/native-model-gateway.ts
+node plugins/multi/src/native-model-gateway.ts --zen-models
+```
+
+The key is read from the environment or OpenCode's `opencode` API entry in
+`$XDG_DATA_HOME/opencode/auth.json` (default `~/.local/share/opencode/auth.json`).
+It is sent only to Zen, omitted from diagnostics and removed from the launched
+Claude process's environment. No OpenCode CLI process is needed during inference.
+Zen is API usage billing, separate from Codex or Claude subscription passthrough.
+
+| Models | Route | Effort |
+| --- | --- | --- |
+| GPT-5.6 Luna, Terra, Sol | Responses | low, medium, high, xhigh, max |
+| Kimi K2.7 Code, GLM-5.2, MiniMax-M2.7, Big Pickle | Chat Completions | Provider-native reasoning |
+
+Select `multi/zen/<model-id>` with `/model`. Workers are named `zen-<model-id>`,
+for example `zen-gpt-5.6-luna-low` or `zen-glm-5.2`. GPT workers have the advertised
+effort suffixes; Chat workers have no effort variants. Claude sends an inherited
+`output_config.effort` even for custom models: Chat routes leave it unapplied,
+as indicated in the picker, and use provider-native reasoning. They do not claim
+that `/effort` changes a model without an exposed effort setting.
+
+Ordinary Claude tool permissions apply. With Claude access, existing native
+classification remains available. Without it, Zen has no independent reviewer:
+Auto is unavailable and the existing capability hook prevents a provider switch
+or worker from borrowing Codex's reviewer. Users can explicitly choose Claude's
+bypass mode with `-- --dangerously-skip-permissions`; the gateway never converts
+Auto into bypass. OpenCode's own `--auto` approves non-denied permission requests
+rather than invoking a model-based reviewer.
+
+### Prompt caching and continuation
+
+- Stable translated instructions, tool ordering and history preserve reusable
+  prefixes. Zen's `x-opencode-session` stays stable for the Claude session,
+  worker, model and gateway workspace across restarts. Responses also receives
+  the same identity as `prompt_cache_key`. No random marker is added to prompts.
+- Cache reads and cache writes are reported separately from fresh input tokens;
+  output already includes reasoning tokens and is not counted twice. Trace mode
+  (`MULTI_NATIVE_TRACE=1`) includes actual returned usage without prompt bodies.
+  Claude's displayed dollar estimate for a custom model is **not a Zen bill**.
+- Cache hits depend on Zen's upstream routing, expiry and model support. Switching
+  to another model or compacting history can make the next request cold. The
+  live check tests warm reuse separately from the first post-compaction request.
+  Cancellation or an interrupted stream may leave final usage unavailable.
+- Reasoning signatures belong to their Zen model and survive saved-session
+  continuation. Foreign reasoning is not replayed to another provider/model;
+  visible conversation history still transfers when switching. Claude owns
+  compaction, so no external conversation state needs reconciliation.
+
+The bounded catalog intentionally excludes Anthropic/Google-format Zen models.
+Unsupported model IDs and media fail explicitly. GPT supports the existing
+Responses image/document translation; Kimi accepts images; the other initial
+Chat entries are text-only. PDF input is not supported by the Chat routes.
+Local token counts are estimates, not billing measurements. Zen calls have no
+implicit gateway deadline; client cancellation and explicit time limits apply.
+
+Run `npm run test:live:zen -- --help` for the opt-in tool/cache/resume check and
+optional model switching, real manual compaction and cancellation checks. It uses
+synthetic fixtures, enforces an upstream request ceiling, and saves usage evidence
+under `/tmp`. Inspect a failed cache report before spending usage on another run.
+Current live evidence covers a real Big Pickle Read and returned cache usage;
+public free-model quota blocked continuation. Authenticated GPT and the complete
+warm-cache/switching/compaction matrix are not yet verified. Offline regression
+coverage does not establish provider cache-hit guarantees.
 
 ## Experimental Cursor SDK harness
 
@@ -340,7 +533,8 @@ natural Cursor compaction behavior.
 
 Native runs have no gateway execution deadline. The launcher defaults Claude's
 `API_TIMEOUT_MS` to its documented maximum `2147483647`, preserving an explicit
-inherited value. Direct provider requests still have a 180-second gateway deadline.
+inherited value. OpenAI has no default gateway deadline; Anthropic passthrough
+retains 180 seconds.
 Claude's independent stream watchdogs and native tool limits still apply.
 See [Claude environment variables](https://code.claude.com/docs/en/env-vars).
 

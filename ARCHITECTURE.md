@@ -1,6 +1,6 @@
 # Architecture
 
-Authoritative product direction, updated 2026-09-08. Pair this with [AGENTS.md](AGENTS.md)
+Authoritative product direction, updated 2026-09-09. Pair this with [AGENTS.md](AGENTS.md)
 for development rules and [README.md](README.md) for usage and limitations.
 Historical plans and experiments under `.agent/` are evidence, not active instructions.
 
@@ -17,6 +17,8 @@ There are two execution paths:
 
 1. Direct model adapters use Claude Code's tools, permissions and execution loop.
    The OpenAI adapter translates Messages to Responses using Codex authentication.
+   The official Codex app-server renews saved tokens; the gateway retries only one
+   HTTP authentication rejection, never an accepted inference stream.
 2. Harness integrations use the provider's real CLI or supported SDK execution loop
    and authentication. Cursor's official SDK owns its tools, persistent state and
    review. Claude Code provides the outer session and worker coordination.
@@ -42,14 +44,15 @@ model/effort choices against provider capabilities; do not silently substitute m
 | --- | --- | --- |
 | OpenAI | Direct Responses adapter with Codex login | Experimental main-model and named-worker integration; Claude executes tools. |
 | Cursor | Official SDK | Native tools/state/review, Auto/Plan/Bypass mapping, worktree isolation and saved-run recovery. Live Composer recovery/recall and GPT-parent Grok-worker edits pass. |
-| Antigravity | Real `agy` CLI | Planned; no gateway integration. |
-| OpenCode | Real CLI, possible direct Zen endpoints | Retained CLI/ACP references; gateway integration planned. |
+| Antigravity | Real `agy` CLI | Opt-in experimental main model and incoming workers; native pre-tool restrictions, persisted continuation and uncertain-run refusal. See [current limits](docs/antigravity.md). |
+| OpenCode Zen | Direct Responses / Chat Completions APIs | Experimental main models and native workers; Claude executes tools. OpenCode CLI harness remains planned. |
 | llama.cpp | Prefer Anthropic-compatible server endpoint | Planned; model/tool fidelity needs verification. |
 | Grok Build | Real CLI headless/ACP | Planned; no adapter. |
 
-The old slash-command companion, skills and forwarders are removed. Their shape
-is not a compatibility requirement. Reuse retained transport/process helpers when
-they save concrete work; do not resurrect obsolete modules or speculative abstractions.
+The old slash-command companion, skills, forwarders and CLI/ACP transports are
+removed, including their process helpers and vendor bundle. Git retains their
+history; their shape is not a compatibility requirement for future integrations.
+Reuse active gateway/provider helpers when they save concrete work.
 
 ## Cursor native execution
 
@@ -112,10 +115,26 @@ force-compaction or threshold control is exposed.
 
 Progress uses attributed text with bounded sanitized diff/output previews. Arbitrary
 Claude-native tool cards and manual approval widgets are not established public
-Messages extensions. Native requests have no gateway execution deadline; direct
-providers retain 180 seconds. The launcher defaults `API_TIMEOUT_MS` to the documented
+Messages extensions. Native Cursor runs and direct OpenAI requests have no default
+gateway execution deadline; Anthropic passthrough retains 180 seconds. The launcher defaults `API_TIMEOUT_MS` to the documented
 maximum 2147483647 while preserving explicit inherited values. Independent Claude
 stream watchdogs and native tool limits remain. See [environment variables](https://code.claude.com/docs/en/env-vars).
+
+## Antigravity native execution
+
+The official CLI owns subscription authentication, tools and native history.
+`MULTI_ANTIGRAVITY=1` enables experimental selections and incoming workers. A stable,
+namespaced global native hook reads only the originating process's tool policy;
+ordinary CLI sessions skip it. Explicit deny decisions enforce tool restrictions
+without granting native permissions. No token extraction or direct requests.
+
+Auto and acceptEdits use native edit acceptance with native command policy and no
+reviewer. Plan denies shell/edit; Bypass retains explicit hook restrictions. Unknown
+or untranslatable policy fails. Native children and MCP are denied; external events
+are never executable Claude tools. State is scoped by session/worker/workspace,
+completed responses replay, and uncertain interrupted work is never rerun blindly.
+Cache and native-compaction evidence remain distinct from functional continuation.
+See [implementation and setup](docs/antigravity.md).
 
 ## Direct OpenAI permissions and provider boundaries
 
@@ -135,6 +154,28 @@ Future harnesses must preserve their own execution permissions, isolate state,
 propagate cancellation and expose failures. Displaying an external action in Claude
 Code does not transfer enforcement to Claude.
 
+## Direct Zen execution
+
+Zen uses API-key authentication and Claude's execution loop. The initial bounded
+catalog covers GPT Responses and selected Chat Completions models; the OpenCode
+CLI harness and other Zen protocols remain separate future work. Reuse the
+existing Responses translator and tool aliases; no general gateway engine is added.
+
+Cache affinity is stable across restarts by Claude session, worker, model and
+workspace. Preserve deterministic prompt prefixes and report upstream cache-read,
+cache-write and fresh-input usage separately. Compaction can invalidate a prefix;
+cache availability and retention belong to the upstream provider. No automatic
+inference replay is added after accepted streams. Zen/model-owned reasoning is
+kept separate from Codex reasoning, including for identical GPT model names.
+
+Zen has no independent model-based reviewer. OpenCode's CLI auto-approval is an
+unconditional approval of non-denied requests, not a reviewer to port. Preserve
+Claude-backed classification where available; otherwise gate Auto and allow the
+user's explicit ordinary or bypass permission mode. Never borrow Codex review or
+silently convert Auto into bypass. Chat models without adjustable effort use their
+native reasoning defaults; the picker states that inherited Claude effort is not
+applied and workers do not advertise effort variants.
+
 ## Runtime map and verification
 
 Paths are relative to `plugins/multi/src/`:
@@ -146,7 +187,6 @@ Paths are relative to `plugins/multi/src/`:
 - `providers/openai/`: auth, catalog, Responses translation, token estimates and reviewer.
 - `providers/cursor/`: native harness, permissions, request validation, progress and catalog.
   Existing reuse of OpenAI normalization/counting remains explicit.
-- `transports/`: retained process/CLI/ACP references, not alternative gateway backends.
 
 Run `npm run check` before completion, then bounded live checks appropriate to the
 changed integration. Cursor probes explicitly disable Fast. Do not promote old

@@ -1,13 +1,13 @@
 name: Feature request
-description: Add a new CLI, role, or capability to the plugin.
+description: Suggest a provider integration or gateway improvement.
 labels: [enhancement]
 body:
   - type: markdown
     attributes:
       value: |
-        Adding a new CLI is supported out-of-the-box via the `multi-cli-anything` skill — open Claude Code with this plugin installed and ask: *"add `<cli-name>` to cc-multi-cli-plugin."* Claude scaffolds the new plugin, adapter, subagents, and commands. No issue needed for that path.
-
-        Use this template for: a new built-in CLI (shipped by default), a new role for an existing CLI, a behavior/UX improvement, or anything else.
+        Use this template for a provider integration, model/worker choice, permission mapping, or session improvement.
+        OpenAI and Cursor are experimental integrations. Antigravity, OpenCode, llama.cpp and Grok Build are planned.
+        Describe the execution route you need: Claude-executed tools or the provider's native harness.
 
   - type: textarea
     id: what
