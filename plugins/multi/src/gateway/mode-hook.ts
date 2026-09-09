@@ -8,6 +8,7 @@ export interface PermissionContext extends WorkerPermissions {
   permissionMode: PermissionMode;
   cwd?: string;
   submission?: { id: string; promptHash: string };
+  compaction?: string;
 }
 
 function permissionMode(value: unknown): PermissionMode {
@@ -36,6 +37,10 @@ export class PermissionModes {
 
   async record(input: Record<string, unknown>): Promise<void> {
     const session = requiredString(input.session_id, 'session_id');
+    if (input.hook_event_name === 'PreCompact') {
+      this.recordCompaction(session, input);
+      return;
+    }
     if (input.hook_event_name === 'UserPromptSubmit') {
       // Clear first: a malformed new snapshot must not retain earlier permissions.
       this.parents.delete(session);
@@ -70,6 +75,25 @@ export class PermissionModes {
       ...(definition.nativePermissionError
         ? { nativePermissionError: definition.nativePermissionError }
         : {}),
+    });
+  }
+
+  private recordCompaction(session: string, input: Record<string, unknown>): void {
+    const previous = this.parents.get(session);
+    this.parents.delete(session);
+    if (input.trigger !== 'manual' && input.trigger !== 'auto') {
+      throw new Error('Unsupported compaction trigger');
+    }
+    remember(this.parents, session, {
+      // Some Claude builds omit mode on PreCompact. Retain the authenticated
+      // snapshot, or use Plan for this tool-free summary after a gateway restart.
+      permissionMode:
+        input.permission_mode === undefined
+          ? (previous?.permissionMode ?? 'plan')
+          : permissionMode(input.permission_mode),
+      cwd: requiredString(input.cwd, 'cwd'),
+      ...(previous?.submission ? { submission: previous.submission } : {}),
+      compaction: randomUUID(),
     });
   }
 
@@ -119,7 +143,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       signal: AbortSignal.timeout(5000),
     });
     if (!response.ok) {
-      throw new Error('Could not record Claude permission context');
+      throw new Error(
+        `Could not record Claude permission context: ${(await response.text()).slice(0, 1000)}`,
+      );
     }
     console.log('{}');
   } catch (error) {

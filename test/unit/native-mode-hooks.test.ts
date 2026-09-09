@@ -3,6 +3,73 @@ import test from 'node:test';
 import { PermissionModes } from '../../plugins/multi/src/gateway/mode-hook.ts';
 import { createNativeGateway } from '../../plugins/multi/src/gateway/server.ts';
 
+test('authenticated compaction snapshots establish mode without inventing a user submission', async () => {
+  const modes = new PermissionModes(async () => ({ coder: { tools: ['Read'] } }));
+  const compact = (session: string) =>
+    modes.record({
+      hook_event_name: 'PreCompact',
+      session_id: session,
+      permission_mode: 'plan',
+      cwd: '/tmp',
+      trigger: 'manual',
+      custom_instructions: 'Preserve the task',
+    });
+  await compact('resumed');
+  assert.equal(modes.resolve('resumed').permissionMode, 'plan');
+  assert.equal(modes.resolve('resumed').submission, undefined);
+  assert(modes.resolve('resumed').compaction);
+  await modes.record({
+    hook_event_name: 'UserPromptSubmit',
+    session_id: 'active',
+    permission_mode: 'auto',
+    prompt: 'Original authenticated prompt',
+  });
+  const original = modes.resolve('active').submission;
+  await modes.record({
+    hook_event_name: 'SubagentStart',
+    session_id: 'active',
+    agent_id: 'worker',
+    agent_type: 'coder',
+    cwd: '/tmp',
+  });
+  await compact('active');
+  assert.deepEqual(modes.resolve('active').submission, original);
+  assert.equal(modes.resolve('active', 'worker').compaction, undefined);
+  assert.deepEqual(modes.resolve('active', 'worker').tools, ['Read']);
+  await modes.record({
+    hook_event_name: 'UserPromptSubmit',
+    session_id: 'active',
+    permission_mode: 'auto',
+    prompt: 'Continue',
+  });
+  assert.equal(modes.resolve('active').compaction, undefined);
+  assert.notDeepEqual(modes.resolve('active').submission, original);
+});
+
+test('PreCompact without a mode retains the snapshot or confines a restored session to Plan', async () => {
+  const modes = new PermissionModes(async () => ({}));
+  const hook = {
+    hook_event_name: 'PreCompact',
+    session_id: 'session',
+    cwd: '/tmp',
+    trigger: 'manual',
+  };
+  await modes.record(hook);
+  assert.equal(modes.resolve('session').permissionMode, 'plan');
+  await modes.record({
+    hook_event_name: 'UserPromptSubmit',
+    session_id: 'session',
+    permission_mode: 'auto',
+    prompt: 'work',
+  });
+  const previous = modes.resolve('session').submission;
+  await modes.record(hook);
+  assert.equal(modes.resolve('session').permissionMode, 'auto');
+  assert.deepEqual(modes.resolve('session').submission, previous);
+  await assert.rejects(modes.record({ ...hook, permission_mode: 'invalid' }), /unsupported/);
+  assert.throws(() => modes.resolve('session'), /unavailable/);
+});
+
 test('hook snapshots resolve worker overrides, parent precedence, and next-prompt changes', async () => {
   const modes = new PermissionModes(async () => ({
     coder: {},

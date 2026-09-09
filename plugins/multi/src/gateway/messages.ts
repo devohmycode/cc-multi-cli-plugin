@@ -58,6 +58,7 @@ interface OutputFormat {
 
 export interface MessagesRequest {
   model?: string;
+  max_tokens?: number;
   system?: string | ContentBlock[];
   messages?: RequestMessage[];
   tools?: Tool[];

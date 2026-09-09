@@ -1,0 +1,174 @@
+import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import {
+  readZenKey,
+  validateZenKey,
+  ZenAuthError,
+} from '../../plugins/multi/src/providers/zen/auth.ts';
+import {
+  ZEN_MODELS,
+  ZEN_WORKERS,
+  zenModelOptions,
+  zenPickerOptions,
+} from '../../plugins/multi/src/providers/zen/models.ts';
+
+async function withEnvironment(
+  values: Record<string, string | undefined>,
+  run: () => Promise<void>,
+): Promise<void> {
+  const previous = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+  try {
+    await run();
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
+test('Zen auth prefers an explicit API key without exposing its value', async () => {
+  await withEnvironment(
+    { OPENCODE_API_KEY: 'fixture-key', XDG_DATA_HOME: '/missing' },
+    async () => {
+      assert.equal(await readZenKey(), 'fixture-key');
+    },
+  );
+});
+
+test('Zen key validation rejects whitespace, controls, and non-ASCII without echoing input', async () => {
+  for (const value of ['', 'fixture key', 'fixture\nkey', 'fixture\tkey', 'clé']) {
+    assert.throws(
+      () => validateZenKey(value),
+      (error: unknown) => error instanceof ZenAuthError,
+    );
+  }
+  assert.throws(
+    () => validateZenKey('fixture\nSECRET_INVALID_KEY'),
+    (error: unknown) =>
+      error instanceof ZenAuthError && !error.message.includes('SECRET_INVALID_KEY'),
+  );
+  assert.equal(validateZenKey('visible-ASCII_fixture.key'), 'visible-ASCII_fixture.key');
+});
+
+test('an explicit Zen env key prevents reading saved auth', async (t) => {
+  const dataHome = await mkdtemp(path.join(os.tmpdir(), 'zen-auth-test-'));
+  t.after(() => rm(dataHome, { recursive: true, force: true }));
+  const directory = path.join(dataHome, 'opencode');
+  await mkdir(directory);
+  await writeFile(path.join(directory, 'auth.json'), '{malformed');
+  await withEnvironment(
+    { OPENCODE_API_KEY: 'env-fixture-key', XDG_DATA_HOME: dataHome },
+    async () => {
+      assert.equal(await readZenKey(), 'env-fixture-key');
+    },
+  );
+});
+
+test('Zen auth reads only the official OpenCode API entry', async (t) => {
+  const dataHome = await mkdtemp(path.join(os.tmpdir(), 'zen-auth-test-'));
+  t.after(() => rm(dataHome, { recursive: true, force: true }));
+  const directory = path.join(dataHome, 'opencode');
+  await mkdir(directory);
+  await writeFile(
+    path.join(directory, 'auth.json'),
+    JSON.stringify({ opencode: { type: 'api', key: 'saved-fixture-key' } }),
+  );
+  await withEnvironment({ OPENCODE_API_KEY: undefined, XDG_DATA_HOME: dataHome }, async () => {
+    assert.equal(await readZenKey(), 'saved-fixture-key');
+  });
+});
+
+test('Zen auth treats missing credentials as optional and rejects malformed explicit config', async (t) => {
+  const dataHome = await mkdtemp(path.join(os.tmpdir(), 'zen-auth-test-'));
+  t.after(() => rm(dataHome, { recursive: true, force: true }));
+  await withEnvironment({ OPENCODE_API_KEY: undefined, XDG_DATA_HOME: dataHome }, async () => {
+    assert.equal(await readZenKey(), undefined);
+    for (const value of [' ', 'fixture key', 'fixture\nkey']) {
+      process.env.OPENCODE_API_KEY = value;
+      await assert.rejects(readZenKey(), (error: unknown) => {
+        assert(error instanceof ZenAuthError);
+        return true;
+      });
+    }
+  });
+});
+
+test('Zen auth rejects malformed saved credentials without including secrets', async (t) => {
+  const dataHome = await mkdtemp(path.join(os.tmpdir(), 'zen-auth-test-'));
+  t.after(() => rm(dataHome, { recursive: true, force: true }));
+  const directory = path.join(dataHome, 'opencode');
+  await mkdir(directory);
+  await writeFile(path.join(directory, 'auth.json'), '{"opencode":{"type":"api"}}');
+  await withEnvironment({ OPENCODE_API_KEY: undefined, XDG_DATA_HOME: dataHome }, async () => {
+    await assert.rejects(
+      readZenKey(),
+      (error: unknown) => error instanceof ZenAuthError && !error.message.includes('SECRET'),
+    );
+  });
+});
+
+test('Zen catalog exposes bounded protocols and only supported effort workers', () => {
+  assert.deepEqual(
+    ZEN_MODELS.map((model) => [model.id, model.protocol]),
+    [
+      ['gpt-5.6-luna', 'responses'],
+      ['gpt-5.6-terra', 'responses'],
+      ['gpt-5.6-sol', 'responses'],
+      ['kimi-k2.7-code', 'chat'],
+      ['glm-5.2', 'chat'],
+      ['minimax-m2.7', 'chat'],
+      ['big-pickle', 'chat'],
+      ['mimo-v2.5-free', 'chat'],
+      ['ling-3.0-flash-fin-free', 'chat'],
+      ['nemotron-3-ultra-free', 'chat'],
+      ['nemotron-3.5-lightning-free', 'chat'],
+      ['muse-spark-1.3-contributor-free', 'responses'],
+      ['muse-spark-1.2-contributor-free', 'responses'],
+      ['deepseek-v4-pro', 'chat'],
+      ['deepseek-v4-flash', 'chat'],
+      ['kimi-k3', 'chat'],
+      ['glm-5.3', 'chat'],
+      ['glm-5.3-flash', 'chat'],
+      ['muse-spark-1.3', 'responses'],
+    ],
+  );
+  assert.equal(zenModelOptions(['big-pickle'])[0].model, 'multi/zen/big-pickle');
+  assert.equal(ZEN_WORKERS['zen-big-pickle'].effort, undefined);
+  assert.equal(ZEN_WORKERS['zen-gpt-5.6-luna'].effort, 'medium');
+  assert.equal(ZEN_WORKERS['zen-gpt-5.6-luna-high'].effort, 'high');
+  assert.equal(ZEN_WORKERS['zen-gpt-5.6-luna-impossible'], undefined);
+});
+
+test('Zen picker allowlist preserves order and validates model IDs', () => {
+  assert.deepEqual(
+    zenPickerOptions(undefined).map((model) => model.id),
+    [
+      'deepseek-v4-pro',
+      'deepseek-v4-flash',
+      'kimi-k3',
+      'glm-5.3',
+      'glm-5.3-flash',
+      'muse-spark-1.3',
+    ],
+  );
+  assert.deepEqual(zenPickerOptions(''), []);
+  assert.deepEqual(
+    zenPickerOptions(' mimo-v2.5-free, big-pickle,mimo-v2.5-free ').map((model) => model.id),
+    ['mimo-v2.5-free', 'big-pickle'],
+  );
+  assert.throws(() => zenPickerOptions('typo'), /MULTI_ZEN_MODELS: unknown Zen model/);
+});

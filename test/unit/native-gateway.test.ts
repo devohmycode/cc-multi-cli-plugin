@@ -417,7 +417,11 @@ test('fragmented SSE and truncated or failed responses never become successful c
   );
 });
 
-async function gateway(t: TestContext, fetchImpl: GatewayFetch) {
+async function gateway(
+  t: TestContext,
+  fetchImpl: GatewayFetch,
+  options: { timeoutMs?: number } = {},
+) {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'native-gateway-test-'));
   const authFile = path.join(cwd, 'auth.json');
   await writeFile(
@@ -427,7 +431,12 @@ async function gateway(t: TestContext, fetchImpl: GatewayFetch) {
       tokens: { access_token: 'openai-secret', account_id: 'account-test' },
     }),
   );
-  const server = createNativeGateway({ token: 'local-test-secret', authFile, fetchImpl });
+  const server = createNativeGateway({
+    token: 'local-test-secret',
+    authFile,
+    fetchImpl,
+    ...options,
+  });
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', resolve);
@@ -1016,4 +1025,49 @@ test('oversized uploads receive HTTP 413 while the client is still streaming', a
   const response = await fetch(`http://127.0.0.1:${address.port}/v1/messages`, init);
   assert.equal(response.status, 413);
   assert.equal(await response.text(), 'Request too large');
+});
+
+test('OpenAI has no implicit request deadline while explicit limits and Claude passthrough remain bounded', async (t) => {
+  const durations: number[] = [];
+  t.mock.method(AbortSignal, 'timeout', (ms: number) => {
+    durations.push(ms);
+    return new AbortController().signal;
+  });
+  const upstream: GatewayFetch = async (url) =>
+    url.includes('api.anthropic.com')
+      ? new Response('{}', { headers: { 'content-type': 'application/json' } })
+      : new Response(sse(textEvents));
+  const ordinary = await gateway(t, upstream);
+  assert.equal((await ordinary(body)).status, 200);
+  assert.deepEqual(durations, [], 'Astra must not inherit an absolute three-minute timer');
+  assert.equal((await ordinary({ model: 'claude-sonnet-5', messages })).status, 200);
+  assert.deepEqual(durations, [180000]);
+  const bounded = await gateway(t, upstream, { timeoutMs: 25 });
+  assert.equal((await bounded(body)).status, 200);
+  assert.deepEqual(durations, [180000, 25]);
+});
+
+test('an explicit OpenAI timeout aborts upstream inference', async (t) => {
+  let aborted = false;
+  const call = await gateway(
+    t,
+    async (_url, options) => {
+      await new Promise<void>((_resolve, reject) => {
+        const stop = () => {
+          aborted = true;
+          reject(options.signal.reason);
+        };
+        options.signal.addEventListener('abort', stop, { once: true });
+        if (options.signal.aborted) {
+          stop();
+        }
+      });
+      return new Response(sse(textEvents));
+    },
+    { timeoutMs: 15 },
+  );
+  const response = await call(body);
+  assert.equal(response.status, 502);
+  assert.equal(aborted, true);
+  assert.match(await response.text(), /timeout|timed out/i);
 });
