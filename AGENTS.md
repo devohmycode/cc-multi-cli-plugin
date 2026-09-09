@@ -59,7 +59,9 @@ define the product direction.
 - Targets: OpenAI, Cursor, Antigravity through its real CLI, OpenCode, llama.cpp,
   and Grok Build. The direct GPT gateway and Cursor SDK harness are experimental.
   Native Cursor persists and resumes SDK state. Durable run IDs permit terminal-result
-  recovery; once a session has a prior response, only the newest turn (everything
+  recovery; when recovery cannot produce one, the session stays interrupted and the
+  next request resumes with a notice instead of refusing or replaying a cached
+  failure. Once a session has a prior response, only the newest turn (everything
   after the last assistant message) is forwarded, and an outer history that no
   longer contains that response streams a notice and continues on the native
   record. Native state is never rewound. Historical callback compaction

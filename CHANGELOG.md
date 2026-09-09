@@ -55,6 +55,19 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   Bump the saved session schema to version 2; an older or foreign-version
   session file is ignored and the session starts fresh (the native SDK agent
   is never deleted).
+- Resume interrupted runs instead of refusing them. Keep the SDK run recovery
+  (`Agent.getRun`/`wait`): a readable terminal result stays the stronger path
+  and is persisted as a completed turn. When recovery is impossible (no run ID,
+  the run is still running, `wait` is unsupported, or its identity does not
+  match) or the run did not finish, the session stays marked `interrupted`
+  instead of throwing or writing a `.failure.json`; the next request prepends
+  and streams "[Cursor] The previous turn was interrupted. Report its state and
+  do not repeat completed actions." before dispatching fresh work, and the flag
+  clears once a run produces a terminal result. Delete `session.failed`, the
+  "refusing to replay native work/actions" errors, and all `.failure.json`
+  reads and writes; a non-finished run now propagates as an ordinary error and
+  an identical retry simply runs again. The pending run ID is still persisted
+  as soon as the SDK reports it, before a terminal result arrives.
 
 ### Model picker
 

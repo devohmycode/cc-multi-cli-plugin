@@ -217,7 +217,7 @@ async function interruptedManifest(f: Awaited<ReturnType<typeof fixture>>) {
       ...saved,
       response: undefined,
       replay: undefined,
-      pending: true,
+      interrupted: true,
       pendingRun: {
         key: saved.replay.key,
         runId: 'run',
@@ -226,6 +226,16 @@ async function interruptedManifest(f: Awaited<ReturnType<typeof fixture>>) {
       },
     }),
   );
+}
+
+/** No `f.hold()`: the SDK mock auto-finishes, so this dispatches and returns in one step. */
+async function expectInterruptedRetry(f: Awaited<ReturnType<typeof fixture>>) {
+  const harness = f.make();
+  const index = f.sends.length;
+  const response = await harness.handle(body, 'main', signal());
+  assert.match(JSON.stringify(f.sends[index].prompt), /previous turn was interrupted/);
+  assert.match(JSON.stringify(response.content), /previous turn was interrupted/);
+  return { harness, response };
 }
 
 test('native Cursor retains an agent, sends only new history, and renders progress without executable tools', async (t) => {
@@ -372,8 +382,19 @@ test('terminal cancellation is durable and a new observed prompt can continue in
   await Promise.race([f.started, request]);
   abort.abort(new Error('disconnect'));
   await assert.rejects(request);
-  await assert.rejects(first.handle(body, 'main', signal()));
-  assert.equal(JSON.parse(await readFile(f.sessionFile, 'utf8')).pending, false);
+  // The outer request settles as soon as the caller disconnects; the internal
+  // cancellation and its durability write finish independently afterward.
+  while (f.cancellations() < 1) {
+    await tick();
+  }
+  let saved = JSON.parse(await readFile(f.sessionFile, 'utf8'));
+  while (saved.interrupted) {
+    await tick();
+    saved = JSON.parse(await readFile(f.sessionFile, 'utf8'));
+  }
+  // A genuine terminal result (even a cancelled one) resolves the uncertainty;
+  // the session is not left interrupted.
+  assert.equal(saved.interrupted, false);
   const next = first.handle(
     { ...body, messages: [{ role: 'user', content: 'new task' }] },
     'main',
@@ -385,9 +406,7 @@ test('terminal cancellation is durable and a new observed prompt can continue in
   f.results[1].resolve({ id: 'run', status: 'finished', result: 'done' });
   await next;
   assert.doesNotMatch(JSON.stringify(f.sends[1].prompt), /first request/);
-  await first.close();
-  await assert.rejects(f.make().handle(body, 'main', signal()), /cancelled/);
-  assert.equal(f.sends.length, 2);
+  assert.equal(f.cancellations(), 1);
 });
 
 test('a second gateway cannot take a live scope while its session file is locked', async (t) => {
@@ -532,7 +551,7 @@ test('shutdown during delayed send cancels the eventual run and never reports su
   assert.equal(f.cancellations(), 1);
 });
 
-test('failed atomic completion preserves uncertainty and never emits a successful terminal event', async (t) => {
+test('failed atomic completion preserves uncertainty and a later retry resumes with an interrupted notice', async (t) => {
   const f = await fixture(t);
   f.hold();
   const harness = f.make();
@@ -552,8 +571,18 @@ test('failed atomic completion preserves uncertainty and never emits a successfu
   await rm(f.sessionFile, { recursive: true });
   await rename(backup, f.sessionFile);
   await harness.close();
-  await assert.rejects(f.make().handle(body, 'main', signal()), /interrupted run/);
-  assert.equal(f.sends.length, 1);
+  const saved = JSON.parse(await readFile(f.sessionFile, 'utf8'));
+  assert.equal(saved.interrupted, true);
+  const second = f.make();
+  const retry = second.handle(body, 'main', signal());
+  while (f.sends.length < 2) {
+    await tick();
+  }
+  assert.match(JSON.stringify(f.sends[1].prompt), /previous turn was interrupted/);
+  f.results[1].resolve({ id: 'run', status: 'finished', result: 'done' });
+  const response = await retry;
+  assert.match(JSON.stringify(response.content), /previous turn was interrupted/);
+  assert.equal(f.sends.length, 2);
 });
 
 test('synchronous SDK cancellation errors stay inside native run cleanup', async (t) => {
@@ -602,7 +631,7 @@ test('a committed native reply survives transport loss before terminal delivery'
     /transport lost/,
   );
   const saved = JSON.parse(await readFile(f.sessionFile, 'utf8'));
-  assert.equal(saved.pending, false);
+  assert.equal(saved.interrupted, false);
   assert.equal(saved.replay.events.at(-1)[0], 'message_stop');
   assert.deepEqual(await first.handle(body, 'main', signal()), saved.response);
   await first.close();
@@ -629,7 +658,7 @@ test('a failed reply archive blocks the next send and can retry without repeatin
   await mkdir(archive);
   await assert.rejects(first.handle(follow(response), 'main', signal()));
   assert.equal(f.sends.length, 1);
-  assert.equal(JSON.parse(await readFile(f.sessionFile, 'utf8')).pending, false);
+  assert.equal(JSON.parse(await readFile(f.sessionFile, 'utf8')).interrupted, false);
   await rm(archive, { recursive: true });
   await first.handle(follow(response), 'main', signal());
   assert.equal(f.sends.length, 2);
@@ -726,7 +755,7 @@ test('malformed manifests fail before replay or SDK resume', async (t) => {
   await first.close();
   const saved = JSON.parse(await readFile(f.sessionFile, 'utf8'));
   for (const patch of [
-    { pending: 'false' },
+    { interrupted: 'not-boolean' },
     { replay: { key: 'invalid', events: [] } },
     {
       response: {
@@ -776,7 +805,7 @@ test('restart recovers a terminal SDK result without sending or resuming an agen
   const harness = f.make();
   const response = await harness.handle(body, 'main', signal());
   assert.deepEqual(response.content, [{ type: 'text', text: 'Recovered completed edit' }]);
-  assert.equal(JSON.parse(await readFile(f.sessionFile, 'utf8')).pending, false);
+  assert.equal(JSON.parse(await readFile(f.sessionFile, 'utf8')).interrupted, false);
   assert.equal(f.sends.length, 1);
   assert.equal(f.resumed.length, 0);
   assert.deepEqual(f.recoveryReads, ['run']);
@@ -785,33 +814,39 @@ test('restart recovers a terminal SDK result without sending or resuming an agen
   assert.deepEqual(f.resumed, ['agent-1']);
 });
 
-test('restart refuses missing, running, or foreign SDK run evidence', async (t) => {
-  const f = await fixture(t);
-  await interruptedManifest(f);
-  f.recover({ id: 'run', status: 'finished', result: 'unproven' }, 'running');
-  await assert.rejects(f.make().handle(body, 'main', signal()), /no readable terminal result/);
-  f.recover({ id: 'run', status: 'finished', result: 'foreign' }, 'finished', 'other-agent');
-  await assert.rejects(f.make().handle(body, 'main', signal()), /identity/);
-  const saved = JSON.parse(await readFile(f.sessionFile, 'utf8'));
+test('recovery that cannot produce a terminal result proceeds with the interrupted notice instead of refusing', async (t) => {
+  const stillRunning = await fixture(t);
+  await interruptedManifest(stillRunning);
+  stillRunning.recover({ id: 'run', status: 'finished', result: 'unproven' }, 'running');
+  await expectInterruptedRetry(stillRunning);
+  assert.deepEqual(stillRunning.recoveryReads, ['run']);
+
+  const foreign = await fixture(t);
+  await interruptedManifest(foreign);
+  foreign.recover({ id: 'run', status: 'finished', result: 'foreign' }, 'finished', 'other-agent');
+  await expectInterruptedRetry(foreign);
+  assert.deepEqual(foreign.recoveryReads, ['run']);
+
+  const missingId = await fixture(t);
+  await interruptedManifest(missingId);
+  const saved = JSON.parse(await readFile(missingId.sessionFile, 'utf8'));
   delete saved.pendingRun.runId;
-  await writeFile(f.sessionFile, JSON.stringify(saved));
-  await assert.rejects(f.make().handle(body, 'main', signal()), /no durable SDK run identity/);
-  assert.equal(f.sends.length, 1);
-  assert.equal(JSON.parse(await readFile(f.sessionFile, 'utf8')).pending, true);
+  await writeFile(missingId.sessionFile, JSON.stringify(saved));
+  await expectInterruptedRetry(missingId);
+  assert.equal(missingId.recoveryReads.length, 0, 'no run id means no SDK lookup is attempted');
 });
 
-test('recovered SDK failure stays a failed retry while a new observed turn retains native state', async (t) => {
+test('a recovered but unfinished SDK run does not block a later retry and keeps native state', async (t) => {
   const f = await fixture(t);
   await interruptedManifest(f);
   f.recover({ id: 'run', status: 'error', error: { message: 'native action failed' } });
-  const harness = f.make();
-  await assert.rejects(harness.handle(body, 'main', signal()), /native action failed/);
-  const next = { ...body, messages: [{ role: 'user', content: 'Inspect current state' }] };
-  await harness.handle(next, 'main', signal());
+  const { harness, response } = await expectInterruptedRetry(f);
   assert.equal(f.sends.length, 2);
   assert.deepEqual(f.resumed, ['agent-1']);
-  assert.doesNotMatch(JSON.stringify(f.sends[1].prompt), /first request/);
-  await assert.rejects(harness.handle(body, 'main', signal()), /native action failed/);
+  const next = await harness.handle(follow(response), 'main', signal());
+  assert.equal(f.sends.length, 3);
+  assert.doesNotMatch(JSON.stringify(f.sends[2].prompt), /previous turn was interrupted/);
+  assert(next.content.every((block) => block.type === 'text'));
 });
 
 test('idle agent eviction retains disk state and resumes the original native agent', async (t) => {

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import type { AgentOptions, Run, RunResult, SDKAgent } from '@cursor/sdk';
+import type { AgentOptions, Run, SDKAgent } from '@cursor/sdk';
 import type { WorkerPermissions } from '../../multi-core/src/gateway/agent-definitions.ts';
 import type {
   Emit,
@@ -37,7 +37,7 @@ type SavedSession = {
   agentId: string;
   response?: MessagesResponse;
   replay?: { key: string; events: Event[] };
-  pending: boolean;
+  interrupted: boolean;
   pendingRun?: PendingRun;
 };
 type Event = [StreamEventName, StreamEventBody];
@@ -46,9 +46,9 @@ type Session = {
   file: string;
   response?: MessagesResponse;
   replay?: { key: string; events: Event[] };
+  interrupted: boolean;
   busy: boolean;
   run?: Run;
-  failed: boolean;
   unlock?: Promise<void>;
   release: () => Promise<void>;
   pendingRun?: PendingRun;
@@ -68,6 +68,9 @@ const hash = (value: unknown) =>
   createHash('sha256')
     .update(JSON.stringify(value) ?? 'null')
     .digest('hex');
+
+const INTERRUPTED_NOTICE =
+  '[Cursor] The previous turn was interrupted. Report its state and do not repeat completed actions.';
 
 /** Cursor owns state, tools and review. External actions are display-only text. */
 export class CursorHarness {
@@ -222,7 +225,13 @@ export class CursorHarness {
     context: PermissionContext,
   ): Promise<MessagesResponse> {
     const file = path.join(this.stateDirectory, `${key}.response.json`);
-    const current = await readSession(this.sessionFile(scope));
+    let current = await readSession(this.sessionFile(scope));
+    if (current?.interrupted) {
+      // Attempted once per request: a readable terminal result is the stronger
+      // path and is persisted as a completed turn; anything else leaves the
+      // session interrupted and this request proceeds with a fresh dispatch.
+      current = await this.recoverSession(scope);
+    }
     const latest = current?.replay;
     const cached =
       latest?.key === key
@@ -237,14 +246,6 @@ export class CursorHarness {
         emit(...event);
       }
       return saved.response;
-    }
-    const failure = await readJson(path.join(this.stateDirectory, `${key}.failure.json`));
-    if (failure !== undefined) {
-      throw new CursorProviderError(failure);
-    }
-    if (current?.pending) {
-      await this.recoverSession(scope);
-      return this.cachedExecute(body, scope, key, exchange, emit, context);
     }
     const terminal: Event[] = [];
     const replay: { key: string; events: Event[] } = { key, events: [] };
@@ -263,7 +264,7 @@ export class CursorHarness {
     return response;
   }
 
-  private async recoverSession(scope: string): Promise<void> {
+  private async recoverSession(scope: string): Promise<SavedSession | undefined> {
     if (this.sessions.has(scope) || this.creating.has(scope)) {
       throw new Error('Cursor run is still owned by this gateway; wait for it to finish');
     }
@@ -271,51 +272,50 @@ export class CursorHarness {
     const release = await lockCursorSession(`${file}.lock`);
     try {
       const saved = await readSession(file);
-      if (!saved?.pending) {
-        return;
+      const pending = saved?.pendingRun;
+      if (!saved?.interrupted || !pending) {
+        return saved;
       }
-      const pending = saved.pendingRun;
-      if (!pending?.runId) {
-        throw new Error(
-          'Cursor interrupted run has no durable SDK run identity; refusing to replay native actions',
-        );
+      const recovered = await this.recoverRun(pending, saved.agentId);
+      if (!recovered) {
+        return saved;
       }
-      const run = await this.getRun(pending.runId, this.cwd);
-      if (run.id !== pending.runId || run.agentId !== saved.agentId) {
-        throw new Error('Cursor recovery run identity does not match its session');
-      }
-      if (run.status === 'running' || !run.supports('wait')) {
-        throw new Error(
-          'Cursor interrupted run has no readable terminal result; native state is preserved',
-        );
-      }
-      const result = await run.wait();
-      if (result.id !== pending.runId) {
-        throw new Error('Cursor recovery result identity does not match its run');
-      }
-      if (result.status !== 'finished') {
-        await atomicJson(
-          path.join(this.stateDirectory, `${pending.key}.failure.json`),
-          cursorRunError(result).failure,
-        );
-        await atomicJson(file, { ...saved, pending: false, pendingRun: undefined });
-        return;
-      }
-      const events: Event[] = [];
-      const response = new HarnessResponse(pending.model, pending.inputTokens, (name, value) => {
-        events.push([name, structuredClone(value)]);
-      });
-      response.text(result.result ?? '');
-      await atomicJson(file, {
+      const updated: SavedSession = {
         ...saved,
-        pending: false,
+        interrupted: false,
         pendingRun: undefined,
-        response: response.finish(),
-        replay: { key: pending.key, events },
-      });
+        response: recovered.response,
+        replay: { key: pending.key, events: recovered.events },
+      };
+      await atomicJson(file, updated);
+      return updated;
     } finally {
       await release();
     }
+  }
+
+  /** A readable terminal result; every other outcome leaves the run's status unknown. */
+  private async recoverRun(pending: PendingRun, agentId: string) {
+    if (!pending.runId) {
+      return undefined;
+    }
+    const run = await this.getRun(pending.runId, this.cwd);
+    if (run.id !== pending.runId || run.agentId !== agentId) {
+      return undefined;
+    }
+    if (run.status === 'running' || !run.supports('wait')) {
+      return undefined;
+    }
+    const result = await run.wait();
+    if (result.id !== pending.runId || result.status !== 'finished') {
+      return undefined;
+    }
+    const events: Event[] = [];
+    const response = new HarnessResponse(pending.model, pending.inputTokens, (name, value) => {
+      events.push([name, structuredClone(value)]);
+    });
+    response.text(result.result ?? '');
+    return { response: response.finish(), events };
   }
 
   private async session(scope: string, body: MessagesRequest, context: PermissionContext) {
@@ -325,9 +325,6 @@ export class CursorHarness {
     this.creating.add(scope);
     try {
       const session = this.sessions.get(scope) ?? (await this.loadSession(scope, body, context));
-      if (session.failed) {
-        throw new Error('Cursor previous run failed; refusing to replay native work');
-      }
       const messages = session.response ? continuation(body) : (body.messages ?? []);
       const rewound = historyRewound(session, body.messages ?? []);
       session.busy = true;
@@ -361,9 +358,6 @@ export class CursorHarness {
     let agent: Agent | undefined;
     try {
       const saved = await readSession(file);
-      if (saved?.pending) {
-        throw new Error('Cursor session has an interrupted run; refusing to replay native actions');
-      }
       const config = {
         ...(await cursorNativePermissions(this.cwd, context)),
         model: this.selection(body),
@@ -380,8 +374,9 @@ export class CursorHarness {
         file,
         response: saved?.response,
         replay: saved?.replay,
+        interrupted: saved?.interrupted ?? false,
+        pendingRun: saved?.pendingRun,
         busy: false,
-        failed: false,
         release,
         policy: cursorPermissionPolicy(context).identity,
       };
@@ -416,14 +411,14 @@ export class CursorHarness {
     session.policy = policy;
   }
 
-  private saveSession(session: Session, pending = false) {
+  private saveSession(session: Session) {
     return atomicJson(session.file, {
       version: 2,
       agentId: session.agent.agentId,
       response: session.response,
       replay: session.replay,
-      pending,
-      pendingRun: pending ? session.pendingRun : undefined,
+      interrupted: session.interrupted,
+      pendingRun: session.pendingRun,
     });
   }
 
@@ -439,29 +434,12 @@ export class CursorHarness {
 
   private async persistDispatch(session: Session, key: string, model: string, inputTokens: number) {
     session.pendingRun = { key, model, inputTokens };
-    await this.saveSession(session, true);
-    return session.pendingRun;
-  }
-
-  private async clearUnsentRun(session: Session, unsent: boolean) {
-    if (unsent) {
-      session.failed = true;
-      await this.saveSession(session);
-      session.failed = false;
-    }
-  }
-
-  private async recordFailure(session: Session, result: RunResult | undefined) {
-    const pending = session.pendingRun;
-    if (!pending || !result || result.status === 'finished') {
-      return;
-    }
-    await atomicJson(
-      path.join(this.stateDirectory, `${pending.key}.failure.json`),
-      cursorRunError(result).failure,
-    );
+    // Durability write: a gateway crash before a terminal result arrives leaves
+    // the session interrupted, so the next request resumes it with a notice
+    // instead of guessing what the dispatched run did.
+    session.interrupted = true;
     await this.saveSession(session);
-    session.failed = false;
+    return session.pendingRun;
   }
 
   private async execute(
@@ -477,8 +455,7 @@ export class CursorHarness {
     const { session, messages, rewound } = await this.session(scope, body, context);
     let text = '';
     let cancelled = false;
-    let pending = false;
-    let terminalResult: RunResult | undefined;
+    let dispatched = false;
     const cancel = () => {
       if (session.run && !cancelled) {
         cancelled = true;
@@ -491,12 +468,11 @@ export class CursorHarness {
     signal.addEventListener('abort', cancel, { once: true });
     try {
       const prepared = prepareCursorRequest({ ...body, messages });
-      const stream = new HarnessResponse(body.model ?? '', prepared.inputTokens, emit);
-      if (rewound) {
-        stream.text(
-          '[Cursor] Outer history changed; the native conversation continues with its own record.\n',
-        );
+      if (session.interrupted) {
+        prepared.prompt.text = `${INTERRUPTED_NOTICE}\n\n${prepared.prompt.text ?? ''}`;
       }
+      const stream = new HarnessResponse(body.model ?? '', prepared.inputTokens, emit);
+      this.writeNotices(stream, session, rewound);
       signal.throwIfAborted();
       if (this.closed) {
         throw new Error('Cursor harness is closed');
@@ -509,32 +485,28 @@ export class CursorHarness {
         body.model ?? '',
         prepared.inputTokens,
       );
-      pending = true;
+      dispatched = true;
       signal.throwIfAborted();
       exchange.mayHaveRun = true;
-      session.run = await session.agent.send(prepared.prompt, {
-        model: this.selection(body),
-        mode: cursorPermissionPolicy(context).mode,
-        onDelta: ({ update }) => {
-          signal.throwIfAborted();
-          if (update.type === 'text-delta') {
-            text += update.text;
-            stream.text(update.text);
-          } else {
-            const progress = formatCursorProgress(update);
-            if (progress) {
-              stream.text(`\n${progress}\n`);
-            }
-          }
+      session.run = await this.dispatchRun(
+        session,
+        prepared.prompt,
+        { model: this.selection(body), mode: cursorPermissionPolicy(context).mode },
+        signal,
+        stream,
+        (delta) => {
+          text += delta;
         },
-      });
+      );
       dispatch.runId = session.run.id;
-      await this.saveSession(session, true);
+      await this.saveSession(session);
       if (signal.aborted) {
         cancel();
       }
       const result = await session.run.wait();
-      terminalResult = result;
+      // A readable terminal result, success or not, resolves the uncertainty.
+      session.interrupted = false;
+      session.pendingRun = undefined;
       signal.throwIfAborted();
       if (result.status !== 'finished') {
         throw cursorRunError(result);
@@ -548,10 +520,8 @@ export class CursorHarness {
       exchange.committed = true;
       return response;
     } catch (error) {
-      session.failed = exchange.mayHaveRun;
-      await this.clearUnsentRun(session, pending && !exchange.mayHaveRun);
       cancel();
-      await this.recordFailure(session, terminalResult);
+      await this.recordUncertainty(session, dispatched, exchange.mayHaveRun);
       throw error instanceof CursorProviderError ? error : new CursorProviderError(error);
     } finally {
       session.busy = false;
@@ -562,6 +532,60 @@ export class CursorHarness {
         await this.releaseLock(session);
       }
     }
+  }
+
+  private writeNotices(stream: HarnessResponse, session: Session, rewound: boolean) {
+    if (session.interrupted) {
+      stream.text(`${INTERRUPTED_NOTICE}\n`);
+    }
+    if (rewound) {
+      stream.text(
+        '[Cursor] Outer history changed; the native conversation continues with its own record.\n',
+      );
+    }
+  }
+
+  private dispatchRun(
+    session: Session,
+    prompt: ReturnType<typeof prepareCursorRequest>['prompt'],
+    options: {
+      model: ReturnType<CursorHarness['selection']>;
+      mode: ReturnType<typeof cursorPermissionPolicy>['mode'];
+    },
+    signal: AbortSignal,
+    stream: HarnessResponse,
+    appendText: (delta: string) => void,
+  ) {
+    return session.agent.send(prompt, {
+      ...options,
+      onDelta: ({ update }) => {
+        signal.throwIfAborted();
+        if (update.type === 'text-delta') {
+          appendText(update.text);
+          stream.text(update.text);
+        } else {
+          const progress = formatCursorProgress(update);
+          if (progress) {
+            stream.text(`\n${progress}\n`);
+          }
+        }
+      },
+    });
+  }
+
+  /** No dispatch record: nothing to reconcile. A dispatch that never reached the
+   * SDK reverts its durability write; any real attempt keeps its current state. */
+  private async recordUncertainty(session: Session, dispatched: boolean, mayHaveRun: boolean) {
+    if (!dispatched) {
+      return;
+    }
+    if (!mayHaveRun) {
+      session.interrupted = false;
+      session.pendingRun = undefined;
+    }
+    await this.saveSession(session).catch(() => {
+      // The error surfaced to the caller is the more useful failure.
+    });
   }
 
   private closeAgent(agent: Agent) {
@@ -730,7 +754,7 @@ async function readSession(file: string): Promise<SavedSession | undefined> {
   if (
     typeof saved.agentId !== 'string' ||
     !saved.agentId ||
-    typeof saved.pending !== 'boolean' ||
+    typeof saved.interrupted !== 'boolean' ||
     !validSessionReply(saved) ||
     !validPendingRun(saved.pendingRun)
   ) {

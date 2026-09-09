@@ -504,9 +504,17 @@ Completed turns retain the same native SDK agent and disk state. Changed mode/to
 policy resumes that identity with the new configuration. Main sessions and workers
 have separate state, guarded by kernel file locks. Worktree workers use their
 hook-reported workspace for both native execution and policy checks. Identical completed requests
-replay output. An interrupted gateway commit with a saved SDK run ID can recover
-its terminal result through `Agent.getRun` without rerunning actions. Missing run
-identity or an unreadable/nonterminal result fails explicitly and preserves state.
+replay output. A dispatch persists its SDK run ID as soon as it is known, before a
+terminal result arrives, so a gateway crash mid-run still resumes the native agent
+on the next request. When a pending run has a readable terminal result,
+`Agent.getRun` recovers it and persists the response without rerunning actions.
+When recovery is impossible (no run ID, the run is still running, `wait` is
+unsupported, or its identity does not match) or the run did not finish, the
+session stays marked interrupted: the next request prepends and streams
+"[Cursor] The previous turn was interrupted. Report its state and do not repeat
+completed actions." before dispatching fresh work, and the flag clears once a run
+produces a terminal result. A non-finished run is never cached as a failure; an
+identical retry simply runs again.
 
 Once a session has a prior response, the gateway sends only the newest turn:
 everything after the last assistant message, resumed on the same native SDK agent.

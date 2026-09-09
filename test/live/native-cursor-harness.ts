@@ -184,7 +184,7 @@ async function emulateInterruptedCommit(directory: string, runId: string) {
   assert(manifest);
   const file = path.join(directory, manifest);
   const saved = JSON.parse(await readFile(file, 'utf8'));
-  assert.equal(saved.pending, false);
+  assert.equal(saved.interrupted, false);
   assert.equal(typeof saved.replay?.key, 'string');
   assert.equal(typeof saved.response?.usage?.input_tokens, 'number');
   const pendingRun = {
@@ -203,7 +203,7 @@ async function emulateInterruptedCommit(directory: string, runId: string) {
       ...saved,
       response: undefined,
       replay: undefined,
-      pending: true,
+      interrupted: true,
       pendingRun,
     }),
   );
