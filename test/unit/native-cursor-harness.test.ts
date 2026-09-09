@@ -836,7 +836,7 @@ test('external compaction uses only a new hook-confirmed prompt and preserves SD
   assert.equal(f.sends.length, 2);
 });
 
-test('rewritten history uses a unique retained response anchor but rejects changed instructions', async (t) => {
+test('rewritten history uses a unique retained response anchor', async (t) => {
   const f = await fixture(t);
   const harness = f.make();
   const response = await harness.handle(body, 'main', signal());
@@ -850,16 +850,6 @@ test('rewritten history uses a unique retained response anchor but rejects chang
   };
   await harness.handle(next, 'main', signal());
   assert.doesNotMatch(JSON.stringify(f.sends[1].prompt), /Rewritten|first request/);
-  await assert.rejects(
-    harness.handle(
-      { ...next, system: 'changed instructions' },
-      'main',
-      signal(),
-      undefined,
-      submission('changed', 'New anchored task'),
-    ),
-    /instructions changed/,
-  );
 });
 
 test('idle agent eviction retains disk state and resumes the original native agent', async (t) => {

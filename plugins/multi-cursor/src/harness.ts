@@ -42,7 +42,6 @@ type SavedSession = {
   historyHash: string;
   response?: MessagesResponse;
   replay?: { key: string; events: Event[] };
-  instructions: string;
   pending: boolean;
   pendingRun?: PendingRun;
   submissionId?: string;
@@ -56,7 +55,6 @@ type Session = {
   historyHash: string;
   response?: MessagesResponse;
   replay?: { key: string; events: Event[] };
-  instructions: string;
   busy: boolean;
   run?: Run;
   failed: boolean;
@@ -412,7 +410,6 @@ export class CursorHarness {
         historyHash: saved?.historyHash ?? cursorHistoryHash([]),
         response: saved?.response,
         replay: saved?.replay,
-        instructions: saved?.instructions ?? systemHash(body),
         busy: false,
         failed: false,
         release,
@@ -459,7 +456,6 @@ export class CursorHarness {
       historyHash: session.historyHash,
       response: session.response,
       replay: session.replay,
-      instructions: session.instructions,
       pending,
       pendingRun: pending ? session.pendingRun : undefined,
       submissionId: session.submissionId,
@@ -664,10 +660,8 @@ export class CursorHarness {
 
 function continuation(session: Session, body: MessagesRequest, context: PermissionContext) {
   const messages = body.messages ?? [];
-  if (session.failed || session.instructions !== systemHash(body)) {
-    throw new Error(
-      'Cursor session instructions changed or its previous run failed; use a new session',
-    );
+  if (session.failed) {
+    throw new Error('Cursor previous run failed; use a new session');
   }
   const count = session.historyLength;
   if (
@@ -828,7 +822,6 @@ async function readSession(file: string): Promise<SavedSession | undefined> {
     typeof saved.historyLength !== 'number' ||
     saved.historyLength < 0 ||
     !isHash(saved.historyHash) ||
-    !isHash(saved.instructions) ||
     typeof saved.pending !== 'boolean' ||
     !validSessionReply(saved) ||
     !validPendingRun(saved.pendingRun) ||
@@ -901,10 +894,6 @@ async function atomicJson(file: string, value: unknown) {
   const temporary = `${file}.${randomUUID()}.tmp`;
   await writeFile(temporary, JSON.stringify(value), { mode: 0o600 });
   await rename(temporary, file);
-}
-
-function systemHash(body: MessagesRequest) {
-  return cursorHistoryHash([{ role: 'system', content: body.system ?? '' }]);
 }
 
 async function bounded(operation: Promise<unknown>) {

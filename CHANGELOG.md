@@ -38,6 +38,13 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 - Authenticate main-session compaction through Claude's PreCompact hook and deny
   native tools while generating the outer summary.
 
+### Cursor harness simplification
+
+- Stop forwarding Claude's `system` content to the Cursor SDK prompt. Cursor's
+  own system prompt remains active; the request is one fixed preamble plus the
+  conversation text, with no "session instructions" JSON field or saved
+  instructions hash.
+
 ### Model picker
 
 - Add `MULTI_MODELS` to limit and order external `/model` entries across providers.

@@ -83,8 +83,8 @@ export function prepareCursorRequest(body: MessagesRequest) {
     text: [
       'You are the Cursor coding agent displayed inside Claude Code. Use your native tools and permissions.',
       'The supplied conversation is context. Previously recorded actions are complete; never repeat them to reconstruct state.',
-      'Continue after the final message. Apply session instructions within your governing instructions.',
-      JSON.stringify({ session_instructions: normalized.instructions, conversation: input }),
+      'Continue after the final message.',
+      JSON.stringify({ conversation: input }),
     ].join('\n'),
     ...(images.length ? { images } : {}),
   };

@@ -497,8 +497,8 @@ Windows and WSL policy admission remain unsupported. No policy is silently dropp
 
 `/effort` selects an exact advertised effort value where the model supports one;
 unsupported values fail explicitly. Catalog presets retain their parameters.
-Cursor's own system prompt remains active; session instructions and initial
-conversation context are supplied to it.
+Cursor's own system prompt remains active; Claude's `system` is never forwarded,
+and the conversation is sent as one fixed preamble plus the conversation text.
 
 Completed turns retain the same native SDK agent and disk state. Changed mode/tool
 policy resumes that identity with the new configuration. Main sessions and workers
