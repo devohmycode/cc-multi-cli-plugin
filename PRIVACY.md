@@ -43,7 +43,8 @@ See [the execution and permission contract](ARCHITECTURE.md).
 
 - **Marketplace startup:** `~/.local/share/multi-cli/` contains the bootstrap and
   executable/shell paths, without provider credentials. Setup adds a marked PATH
-  block to `~/.bashrc` or `~/.zshrc`. Claude owns its plugin cache and enablement.
+  block to `~/.bashrc` or `~/.zshrc` and writes `bin/claude-multi`; it never
+  replaces or shadows the `claude` command. Claude owns its plugin cache and enablement.
 - **Launcher settings:** an owner-only `multi-native-settings-*` directory under
   the system temporary directory contains the generated model picker and hooks.
   It is removed on normal shutdown; a crash can leave it behind.

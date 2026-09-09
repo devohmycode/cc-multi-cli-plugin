@@ -11,8 +11,11 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 - Add selectable OpenAI, Cursor, Zen and Antigravity plugins with automatic core
   dependency installation, plus setup, login/connect, status and uninstall skills.
 - Package the complete runtime in core so cached installs run without a checkout.
-  Add reversible Bash/Zsh startup wrappers that preserve the real Claude binary,
-  follow installed core updates and honor native plugin enablement.
+  Add a reversible Bash/Zsh startup wrapper providing `claude-multi` to launch
+  Multi and `multi` to manage it; it never replaces or shadows `claude`, follows
+  installed core updates, and always launches the gateway when a core and a
+  provider are enabled, otherwise passing every command through to the real
+  `claude` on PATH.
 - Avoid probing disabled providers and reject their model routes. Preserve native
   provider-owned login; Zen key entry stays outside the Claude transcript.
 - Document human and agent installation paths and verify real isolated-cache

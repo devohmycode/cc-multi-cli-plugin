@@ -11,9 +11,11 @@ Run the installed helper:
 "$HOME/.local/share/multi-cli/bin/multi" uninstall
 ```
 
-It removes only Multi's marked shell block and its known wrapper files. If the
-block was edited, report the conflict rather than deleting user content. Tell the
-user to open a new terminal and uninstall the Multi provider/core plugins through
-/plugin if they also want the packages removed. Provider credentials are retained.
+It removes only Multi's marked shell block and its known wrapper files, including
+`claude-multi`. The plain `claude` command was never replaced or shadowed, so
+nothing needs restoring there. If the block was edited, report the conflict
+rather than deleting user content. Tell the user to open a new terminal and
+uninstall the Multi provider/core plugins through /plugin if they also want the
+packages removed. Provider credentials are retained.
 Antigravity's separately installed, environment-scoped native hook is retained;
 it is inert in ordinary agy runs.

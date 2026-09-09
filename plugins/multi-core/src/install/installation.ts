@@ -5,7 +5,6 @@ import {
   mkdir,
   readdir,
   readFile,
-  realpath,
   rename,
   rm,
   rmdir,
@@ -61,20 +60,17 @@ export async function readInstallation(directory = installationDirectory()): Pro
 }
 
 /** Preserve the public executable path so Claude's own updater can replace its target. */
-async function findClaude(directory: string, explicit?: string) {
+async function findClaude(explicit?: string) {
   const candidates = explicit
     ? [explicit]
     : (process.env.PATH ?? '').split(path.delimiter).map((dir) => path.join(dir, 'claude'));
   for (const candidate of candidates) {
-    if (!path.isAbsolute(candidate) || path.dirname(candidate) === path.join(directory, 'bin')) {
+    if (!path.isAbsolute(candidate)) {
       continue;
     }
     try {
       await access(candidate, constants.X_OK);
-      const resolved = await realpath(candidate);
-      if (!resolved.startsWith(`${directory}${path.sep}`)) {
-        return candidate;
-      }
+      return candidate;
     } catch {
       // Continue searching PATH for an executable.
     }
@@ -130,7 +126,7 @@ export async function setup(shell: string, explicitClaude?: string) {
   if (previous && previous.shellFile !== shellFile) {
     throw new Error('Uninstall the existing shell integration before changing shells.');
   }
-  const claude = await findClaude(directory, explicitClaude ?? previous?.claude);
+  const claude = await findClaude(explicitClaude ?? previous?.claude);
   const source = await optionalText(shellFile);
   const original = previous ? removeBlock(source, previous.block) : source;
   if (original.includes(begin) || original.includes(end)) {
@@ -147,7 +143,7 @@ export async function setup(shell: string, explicitClaude?: string) {
       await copyFile(origin, destination);
     }
   }
-  for (const name of ['claude', 'multi']) {
+  for (const name of ['claude-multi', 'multi']) {
     const script = `#!/bin/sh\nexec ${quote(node)} ${quote(path.join(directory, 'bootstrap.ts'))}${name === 'multi' ? ' --multi' : ''} "$@"\n`;
     await writeFile(path.join(bin, name), script, { mode: 0o700 });
   }
@@ -163,7 +159,7 @@ export async function uninstall(directory = installationDirectory()) {
   const source = await readFile(state.shellFile, 'utf8');
   await writeFile(state.shellFile, removeBlock(source, state.block));
   // Delete only known installation files, leaving unrelated files untouched.
-  for (const file of [...files, 'state.json', 'bin/claude', 'bin/multi']) {
+  for (const file of [...files, 'state.json', 'bin/claude-multi', 'bin/multi']) {
     await rm(path.join(directory, file), { force: true });
   }
   for (const empty of [path.join(directory, 'bin'), directory]) {

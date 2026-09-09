@@ -1,7 +1,16 @@
 /** Real plugin-manager smoke in a temporary home. Downloads npm packages, no inference. */
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readFile, rename, writeFile } from 'node:fs/promises';
+import {
+  access,
+  cp,
+  constants as fsConstants,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -93,7 +102,11 @@ await execute(process.execPath, [path.join(core.installPath, 'plugins/multi-core
   env,
   cwd: directory,
 });
-const multi = path.join(home, '.local/share/multi-cli/bin/multi');
+const bin = path.join(home, '.local/share/multi-cli/bin');
+await access(path.join(bin, 'claude-multi'), fsConstants.X_OK);
+// Setup must never write a bin/claude that would shadow the real claude command.
+await assert.rejects(access(path.join(bin, 'claude'), fsConstants.X_OK));
+const multi = path.join(bin, 'multi');
 const status = await execute(multi, ['status'], { env, cwd: directory });
 assert.deepEqual(JSON.parse(status.stdout).providers, ['zen']);
 const disabled = await execute(
@@ -109,5 +122,5 @@ assert.deepEqual(JSON.parse(disabled.stdout).providers, []);
 await execute(multi, ['uninstall'], { env, cwd: directory });
 assert.equal(await readFile(path.join(home, '.bashrc'), 'utf8'), '');
 console.log(
-  'PASS: core dependency, isolated cache, gateway picker, native enablement, setup and uninstall. No inference requests.',
+  'PASS: core dependency, isolated cache, gateway picker, native enablement, claude-multi without shadowing claude, setup and uninstall. No inference requests.',
 );

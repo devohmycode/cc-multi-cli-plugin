@@ -5,21 +5,6 @@ import { type Installation, readInstallation, uninstall } from './installation.t
 import { installedPlugins, settingsArguments } from './plugins.ts';
 import { run } from './process.ts';
 
-const nativeCommands = new Set([
-  'auth',
-  'login',
-  'logout',
-  'plugin',
-  'update',
-  'install',
-  'uninstall',
-  'doctor',
-  '--version',
-  '-v',
-  '--help',
-  '-h',
-]);
-
 async function dispatch(state: Installation, args: string[], management: boolean) {
   const { root, providers } = await installedPlugins(state.claude, settingsArguments(args));
   if (management && args[0] === 'status') {
@@ -41,7 +26,6 @@ async function dispatch(state: Installation, args: string[], management: boolean
   const env = {
     ...process.env,
     MULTI_REAL_CLAUDE: state.claude,
-    MULTI_WRAPPED: '1',
     MULTI_ENABLED_PROVIDERS: providers.join(','),
     MULTI_ANTIGRAVITY: providers.includes('antigravity') ? '1' : '0',
   };
@@ -60,9 +44,6 @@ async function main() {
     await uninstall(directory);
     console.log('Multi startup removed. Open a new terminal. Provider logins are preserved.');
     return 0;
-  }
-  if (process.env.MULTI_WRAPPED === '1' || nativeCommands.has(args[0])) {
-    return run(state.claude, args);
   }
   return dispatch(state, args, false);
 }

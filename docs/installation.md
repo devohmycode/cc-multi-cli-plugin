@@ -25,12 +25,13 @@ supports Bash/Zsh on Linux/macOS. Cursor and Antigravity currently require Linux
 this installer does not add Windows/WSL harness support.
 
 Setup adds one marked PATH block to `~/.bashrc` or `~/.zshrc` and writes its small
-bootstrap under `~/.local/share/multi-cli/`. It does not replace the Claude binary,
-change global Claude model settings, log in to providers, or spend inference usage.
-Existing shell aliases/functions named `claude` can shadow the wrapper; reconcile
-those explicitly. Open a new terminal after setup. `multi status` should list the
-installed core and your selected providers; this is an enablement check, not an
-authentication or inference test. Then run `claude` normally.
+bootstrap under `~/.local/share/multi-cli/`. It does not change global Claude model
+settings, log in to providers, or spend inference usage. It never replaces or
+shadows the `claude` command; the launch command is the new `claude-multi`. Open
+a new terminal after setup. `multi status` should list the installed core and
+your selected providers; this is an enablement check, not an authentication or
+inference test. Then run `claude-multi` to launch Multi, or `claude` normally for
+ordinary Claude Code.
 
 ## Connect accounts
 
@@ -76,10 +77,12 @@ rather than overwriting it. Open a new terminal after removal, then remove the
 provider/core plugins with `/plugin` if desired. Antigravity's separately installed
 native hook remains; it is environment-scoped and inert in ordinary `agy` runs.
 
-Disabling all providers or disabling/removing core causes ordinary `claude`
-passthrough. Disabled provider routes also reject typed model IDs and workers,
-even when credentials still exist. Auth, plugin management, version/help and
-updater commands pass directly to the real Claude executable.
+Disabling all providers or disabling/removing core makes `claude-multi` pass
+every command through to the real `claude` executable unchanged. When a core and
+at least one provider stay enabled, `claude-multi` always launches the gateway,
+including for commands such as `plugin`, `auth`, or `--version`; use plain
+`claude` directly for those instead. Disabled provider routes also reject typed
+model IDs and workers, even when credentials still exist.
 
 ## For agents
 
@@ -97,8 +100,9 @@ updater commands pass directly to the real Claude executable.
    requested browser-login flows and let the user complete them. Zen key entry
    belongs in their own terminal, never an agent tool session or transcript.
 5. Run `multi status` using that absolute path, and tell the user to open a new
-   terminal and verify `/model`. Keep interactive Claude in the user's terminal;
-   do not nest it inside an agent tool session. Report exactly what was tested.
+   terminal, run `claude-multi`, and verify `/model`. Keep interactive Claude in
+   the user's terminal; do not nest it inside an agent tool session. Report
+   exactly what was tested.
 
 ## Local development and package layout
 

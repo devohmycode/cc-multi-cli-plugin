@@ -13,4 +13,5 @@ Run the installed helper below. It reports no credentials and performs no infere
 
 If missing, direct the user to /multi-core:setup. New logins and plugin changes
 apply when Claude is relaunched. Do not describe a listed provider as authenticated;
-this command reports enablement, not an inference test.
+this command reports enablement, not an inference test. `claude-multi` launches
+Multi; setup never replaces or shadows the plain `claude` command.

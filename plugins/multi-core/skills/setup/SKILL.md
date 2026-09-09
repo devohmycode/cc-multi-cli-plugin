@@ -20,7 +20,7 @@ If the user's shell cannot be identified, ask whether they use Bash or Zsh, then
 pass `--shell bash` or `--shell zsh`. Never pass an API key as an argument. Keep
 provider login separate from setup. Report failures without claiming completion.
 On success, tell the user to open a new terminal, run `multi status`, and start
-`claude`. Existing sessions do not acquire a new gateway. Install provider plugins
-at user scope with the normal plugin installer; do not manually edit Claude caches.
-If an existing shell alias/function shadows claude, explain that it takes precedence
-and have the user decide whether to replace it; do not silently delete it.
+`claude-multi` to launch Multi. Setup never replaces or shadows the `claude`
+command; plain `claude` keeps starting ordinary Claude Code unchanged. Existing
+sessions do not acquire a new gateway. Install provider plugins at user scope
+with the normal plugin installer; do not manually edit Claude caches.

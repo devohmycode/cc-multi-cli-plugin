@@ -63,11 +63,12 @@ In Claude Code, add the marketplace and install the providers you want:
 Choose any subset; each provider installs the shared core automatically. Use the
 (default) user installation scope for core. Setup supports Bash and Zsh on Linux
 and macOS, and requires Node >= 24.12. It adds a marked PATH block to your shell
-configuration and a wrapper under `~/.local/share/multi-cli/bin/`; it does not
-replace the Claude executable. Existing aliases/functions named `claude` take
-precedence and need to be reconciled if you use them.
+configuration and a wrapper under `~/.local/share/multi-cli/bin/`. It never
+replaces or shadows the `claude` command; the launch command is the new
+`claude-multi`.
 
-Open a new terminal, run `multi status`, then type `claude` normally. Connect
+Open a new terminal, run `multi status`, then run `claude-multi` to launch Multi
+(plain `claude` still starts ordinary Claude Code unchanged). Connect
 accounts with `/multi-openai:login`, `/multi-cursor:login`, or `/multi-zen:connect`.
 Zen key entry happens privately in a separate terminal. Relaunch Claude after
 connecting a provider so its models and workers appear in `/model`.
@@ -78,7 +79,7 @@ its scoped permission hook. Its native integration currently requires Linux.
 
 To remove the shell integration, run `multi uninstall` (or `/multi-core:uninstall`)
 before uninstalling the plugins, then open a new terminal. Disabling all Multi
-providers makes the wrapper launch ordinary Claude. Provider logins are retained.
+providers makes `claude-multi` launch ordinary Claude. Provider logins are retained.
 See [installation details](docs/installation.md) for updates, removal and local testing.
 
 ### For agents

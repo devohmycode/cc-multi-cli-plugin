@@ -58,7 +58,7 @@ async function core(directory: string, name: string) {
   await mkdir(src, { recursive: true });
   await writeFile(
     path.join(src, 'launcher.ts'),
-    `console.log(JSON.stringify({root:import.meta.url,args:process.argv.slice(2),providers:process.env.MULTI_ENABLED_PROVIDERS,claude:process.env.MULTI_REAL_CLAUDE,wrapped:process.env.MULTI_WRAPPED}));`,
+    `console.log(JSON.stringify({root:import.meta.url,args:process.argv.slice(2),providers:process.env.MULTI_ENABLED_PROVIDERS,claude:process.env.MULTI_REAL_CLAUDE}));`,
   );
   return root;
 }
@@ -88,16 +88,16 @@ test('setup preserves shell content, is repeatable, and uninstall survives plugi
   await f.install();
   assert.equal(await readFile(f.shell, 'utf8'), once);
   await writeFile(f.shell, `${once}# later user edit\n`);
-  const reply = JSON.parse((await f.invoke('claude', ['hello world'])).stdout);
+  const reply = JSON.parse((await f.invoke('claude-multi', ['hello world'])).stdout);
   assert.deepEqual(reply, { native: true, args: ['hello world'] });
   await f.invoke('multi', ['uninstall']);
   assert.equal(
     await readFile(f.shell, 'utf8'),
     '# user settings\nexport EXISTING=retained\n# later user edit\n',
   );
-  await assert.rejects(f.invoke('claude', []), /ENOENT/);
+  await assert.rejects(f.invoke('claude-multi', []), /ENOENT/);
   await f.install();
-  assert.equal(JSON.parse((await f.invoke('claude', [])).stdout).native, true);
+  assert.equal(JSON.parse((await f.invoke('claude-multi', [])).stdout).native, true);
 });
 
 test('wrapper follows installed core updates and enables only selected providers', async (t) => {
@@ -106,34 +106,17 @@ test('wrapper follows installed core updates and enables only selected providers
   const old = await core(f.directory, 'core-v1');
   await writeFile(f.listing, JSON.stringify(plugins(old)));
   const args = ['--settings', '{"model":"sonnet"}', '--', 'literal $() and spaces'];
-  const first = JSON.parse((await f.invoke('claude', args)).stdout);
+  const first = JSON.parse((await f.invoke('claude-multi', args)).stdout);
   assert.deepEqual(first.args, args);
   assert.equal(first.providers, 'zen');
   assert.equal(first.claude, f.real);
-  assert.equal(first.wrapped, '1');
   const next = path.join(f.directory, 'core-v2');
   await cp(old, next, { recursive: true });
   await rm(old, { recursive: true });
   await writeFile(f.listing, JSON.stringify(plugins(next)));
-  assert.match(JSON.parse((await f.invoke('claude', [])).stdout).root, /core-v2/);
+  assert.match(JSON.parse((await f.invoke('claude-multi', [])).stdout).root, /core-v2/);
   await writeFile(f.listing, JSON.stringify(plugins(next, false)));
-  assert.equal(JSON.parse((await f.invoke('claude', [])).stdout).native, true);
-});
-
-test('native management and nested Claude bypass the wrapper and preserve exit codes', async (t) => {
-  const f = await fixture(t);
-  await f.install();
-  await writeFile(f.listing, 'invalid');
-  assert.equal((await f.invoke('claude', ['plugin', 'list'])).stdout.trim(), 'invalid');
-  assert.equal(JSON.parse((await f.invoke('claude', ['--version'])).stdout).native, true);
-  assert.equal(
-    JSON.parse((await f.invoke('claude', ['nested'], { MULTI_WRAPPED: '1' })).stdout).native,
-    true,
-  );
-  await assert.rejects(
-    f.invoke('claude', ['--version'], { TEST_EXIT: '17' }),
-    (error: unknown) => error instanceof Error && 'code' in error && error.code === 17,
-  );
+  assert.equal(JSON.parse((await f.invoke('claude-multi', [])).stdout).native, true);
 });
 
 test('edited shell blocks and project-only executable cores fail explicitly', async (t) => {
@@ -146,7 +129,7 @@ test('edited shell blocks and project-only executable cores fail explicitly', as
   const entries = plugins(await core(f.directory, 'project-core'));
   entries[0].scope = 'project';
   await writeFile(f.listing, JSON.stringify(entries));
-  await assert.rejects(f.invoke('claude', []), /user scope/);
+  await assert.rejects(f.invoke('claude-multi', []), /user scope/);
 });
 
 test('provider selection and native settings arguments preserve explicit disablement', () => {
