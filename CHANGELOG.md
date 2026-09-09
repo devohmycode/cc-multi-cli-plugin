@@ -20,8 +20,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   streamed progress, persisted conversation resume and completed-request replay.
 - Add a scoped native pre-tool hook: Auto falls back to native edit acceptance
   without a reviewer; Plan and Bypass preserve explicit capability restrictions.
-- Keep native actions display-only, reject unsupported policy/content, and refuse
-  uncertain retries. Cache reuse and native compaction retain experimental status.
+- Keep native actions display-only and reject unsupported policy/content. Resume the
+  newest turn on the native conversation with a notice instead of refusing an
+  interrupted or history-changed session. Cache reuse and native compaction
+  retain experimental status.
 - Authenticate main-session compaction through Claude's PreCompact hook and deny
   native tools while generating the outer summary.
 

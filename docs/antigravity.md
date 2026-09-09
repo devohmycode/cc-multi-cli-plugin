@@ -70,10 +70,16 @@ the gateway streams a notice and continues anyway on the native conversation's
 own record; native state is never rewound.
 
 Completed identical requests replay persisted output without another native run.
-Interrupted requests with uncertain completion preserve state and fail instead of
-repeating actions. Linux kernel locks serialize native ownership. Cancellation
-signals the owned CLI process group; a killed process alone does not prove that
-unrelated or externally managed provider work has stopped.
+A non-`SUCCESS` terminal result is reported as an error and is not persisted; an
+identical retry runs again, since `agy` already recorded the failure in its own
+conversation history. An abort, kill, or CLI failure that never reaches a
+terminal result marks the session interrupted if `agy` reported a conversation
+id for that attempt; the next request on that session prepends and streams
+"The previous turn was interrupted. Report its state and do not repeat completed
+actions." and clears the flag once a terminal result arrives. Linux kernel locks
+serialize native ownership. Cancellation signals the owned CLI process group; a
+killed process alone does not prove that unrelated or externally managed
+provider work has stopped.
 
 Gateway records live under `~/.gemini/antigravity-cli/multi-harness/`; the CLI also
 retains its own conversations and logs. These can contain task text and results.

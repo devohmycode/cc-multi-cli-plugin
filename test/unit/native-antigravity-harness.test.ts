@@ -3,7 +3,10 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import type { AntigravityRunOptions } from '../../plugins/multi-antigravity/src/cli.ts';
+import type {
+  AntigravityRunOptions,
+  AntigravityRunResult,
+} from '../../plugins/multi-antigravity/src/cli.ts';
 import { AntigravityHarness } from '../../plugins/multi-antigravity/src/harness.ts';
 import {
   checkAntigravityHooks,
@@ -116,32 +119,159 @@ test('Antigravity replays completed requests and resumes native conversation', a
   assert.equal(setupResult.calls[1].conversation, 'conversation-1');
 });
 
-test('an interrupted pending request refuses an uncertain rerun', async (t) => {
-  const setupResult = await setup();
-  const harness = new AntigravityHarness([model], {
-    ...setupResult,
-    checkPermissions: policy,
-    run: async (options) =>
-      new Promise((_, reject) => {
+test('an interrupted run keeps its native conversation and resumes with a notice', async (t) => {
+  const stateDirectory = await mkdtemp(path.join(os.tmpdir(), 'agy-interrupted-'));
+  const calls: AntigravityRunOptions[] = [];
+  const run = async (options: AntigravityRunOptions) => {
+    calls.push(options);
+    if (calls.length === 1) {
+      options.onEvent?.({ event: 'init', conversation_id: 'interrupted-conversation', init: {} });
+      return new Promise<AntigravityRunResult>((_, reject) => {
         options.signal.addEventListener('abort', () => reject(options.signal.reason), {
           once: true,
         });
-      }),
+      });
+    }
+    return {
+      result: {
+        conversation_id: 'interrupted-conversation',
+        status: 'SUCCESS' as const,
+        response: 'resumed',
+      },
+      exitCode: 0,
+      signal: null,
+      stderr: '',
+    };
+  };
+  const harness = new AntigravityHarness([model], {
+    stateDirectory,
+    checkPermissions: policy,
+    run,
   });
   const controller = new AbortController();
   const request = { model: model.model, messages: [{ role: 'user', content: 'uncertain' }] };
-  const pending = harness.handle(request, 'session/worker', controller.signal, undefined, context);
+  const first = harness.handle(request, 'session/worker', controller.signal, undefined, context);
   await new Promise((resolve) => setTimeout(resolve, 20));
   controller.abort();
-  await assert.rejects(pending);
+  await assert.rejects(first);
   await harness.close();
-  const resumed = new AntigravityHarness([model], { ...setupResult, checkPermissions: policy });
+
+  const resumed = new AntigravityHarness([model], {
+    stateDirectory,
+    checkPermissions: policy,
+    run,
+  });
   t.after(() => resumed.close());
-  await assert.rejects(
-    resumed.handle(request, 'session/worker', new AbortController().signal, undefined, context),
-    /unknown completion|refusing/,
+  const second = await resumed.handle(
+    { model: model.model, messages: [{ role: 'user', content: 'continue' }] },
+    'session/worker',
+    new AbortController().signal,
+    undefined,
+    context,
   );
-  assert.equal(setupResult.calls.length, 0);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].conversation, 'interrupted-conversation');
+  assert.match(calls[1].prompt, /previous turn was interrupted/);
+  assert.equal(second.content[0].type, 'text');
+  assert.match(second.content[0].text, /previous turn was interrupted/);
+
+  const third = await resumed.handle(
+    {
+      model: model.model,
+      messages: [
+        { role: 'user', content: 'continue' },
+        { role: 'assistant', content: second.content },
+        { role: 'user', content: 'again' },
+      ],
+    },
+    'session/worker',
+    new AbortController().signal,
+    undefined,
+    context,
+  );
+  assert.equal(calls.length, 3);
+  assert(!calls[2].prompt.includes('previous turn was interrupted'));
+  assert(third.content[0].type === 'text');
+  assert(!third.content[0].text.includes('previous turn was interrupted'));
+});
+
+test('an aborted run without a native conversation id starts fresh next time', async (t) => {
+  const stateDirectory = await mkdtemp(path.join(os.tmpdir(), 'agy-no-init-'));
+  const calls: AntigravityRunOptions[] = [];
+  const run = async (options: AntigravityRunOptions) => {
+    calls.push(options);
+    if (calls.length === 1) {
+      return new Promise<AntigravityRunResult>((_, reject) => {
+        options.signal.addEventListener('abort', () => reject(options.signal.reason), {
+          once: true,
+        });
+      });
+    }
+    return {
+      result: { conversation_id: 'fresh-conversation', status: 'SUCCESS' as const, response: 'ok' },
+      exitCode: 0,
+      signal: null,
+      stderr: '',
+    };
+  };
+  const harness = new AntigravityHarness([model], {
+    stateDirectory,
+    checkPermissions: policy,
+    run,
+  });
+  const controller = new AbortController();
+  const request = { model: model.model, messages: [{ role: 'user', content: 'never started' }] };
+  const first = harness.handle(request, 'session/worker', controller.signal, undefined, context);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  controller.abort();
+  await assert.rejects(first);
+  await harness.close();
+
+  const resumed = new AntigravityHarness([model], {
+    stateDirectory,
+    checkPermissions: policy,
+    run,
+  });
+  t.after(() => resumed.close());
+  await resumed.handle(request, 'session/worker', new AbortController().signal, undefined, context);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].conversation, undefined);
+  assert(!calls[1].prompt.includes('previous turn was interrupted'));
+});
+
+test('a non-SUCCESS terminal result is not persisted; an identical retry runs again', async (t) => {
+  const stateDirectory = await mkdtemp(path.join(os.tmpdir(), 'agy-failure-'));
+  let calls = 0;
+  const run = async (_options: AntigravityRunOptions) => {
+    calls++;
+    return {
+      result: {
+        conversation_id: 'failed-conversation',
+        status: 'ERROR' as const,
+        response: '',
+        error: 'native denial',
+      },
+      exitCode: 1,
+      signal: null,
+      stderr: '',
+    };
+  };
+  const harness = new AntigravityHarness([model], {
+    stateDirectory,
+    checkPermissions: policy,
+    run,
+  });
+  t.after(() => harness.close());
+  const request = { model: model.model, messages: [{ role: 'user', content: 'will fail' }] };
+  await assert.rejects(
+    harness.handle(request, 'session/worker', new AbortController().signal, undefined, context),
+    /native denial/,
+  );
+  await assert.rejects(
+    harness.handle(request, 'session/worker', new AbortController().signal, undefined, context),
+    /native denial/,
+  );
+  assert.equal(calls, 2);
 });
 
 test('continuation requires a new message and a new user turn after the last assistant reply', async (t) => {

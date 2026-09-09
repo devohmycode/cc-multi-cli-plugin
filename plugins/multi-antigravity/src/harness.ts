@@ -36,22 +36,13 @@ export type CheckAntigravityPermissions = (
 ) => Promise<AntigravityPolicy>;
 
 type Event = [StreamEventName, StreamEventBody];
-type Pending = {
-  key: string;
-  conversationId?: string;
-  historyLength: number;
-  historyHash: string;
-  model: string;
-  inputTokens: number;
-};
 type Saved = {
   version: 2;
   provider: 'antigravity';
   identity: string;
   response?: MessagesResponse;
   replay?: { key: string; events: Event[] };
-  pending: boolean;
-  pendingRun?: Pending;
+  interrupted: boolean;
   conversationId?: string;
   usage?: AntigravityUsage;
   policyIdentity?: string;
@@ -69,8 +60,6 @@ type Exchange = {
   listeners: Set<Emit>;
   observers: number;
   settled: boolean;
-  mayHaveRun: boolean;
-  committed: boolean;
 };
 
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -204,8 +193,6 @@ export class AntigravityHarness {
       listeners,
       observers: 0,
       settled: false,
-      mayHaveRun: false,
-      committed: false,
       result: Promise.resolve().then(() =>
         this.cachedExecute(body, context, model, cwd, identity, key, exchange, forward),
       ),
@@ -249,11 +236,6 @@ export class AntigravityHarness {
         this.loading.delete(identity);
       }
     }
-    if (saved.pending) {
-      throw new Error(
-        'Antigravity interrupted run has unknown completion; refusing to rerun native actions',
-      );
-    }
     const persisted =
       saved?.replay?.key === key
         ? { response: saved.response, events: saved.replay.events }
@@ -267,10 +249,6 @@ export class AntigravityHarness {
         emit(...event);
       }
       return replay.response;
-    }
-    const failure = await readJson(path.join(this.stateDirectory, `${key}.failure.json`));
-    if (failure !== undefined) {
-      throw new AntigravityProviderError(failure);
     }
     return this.execute(body, context, model, cwd, identity, key, exchange, emit);
   }
@@ -287,9 +265,12 @@ export class AntigravityHarness {
   ): Promise<MessagesResponse> {
     const { session, messages, rewound } = await this.session(body, identity);
     const signal = exchange.controller.signal;
-    const initSaves: Promise<void>[] = [];
+    let initConversationId: string | undefined;
     try {
       const prepared = prepareAntigravityRequest({ ...body, messages }, model.id);
+      if (session.interrupted) {
+        prepared.prompt = `${INTERRUPTED_NOTICE}\n\n${prepared.prompt}`;
+      }
       const policy = await this.checkPermissions(cwd, context);
       const nativeTools = toolsForRun(policy, context);
       const notice = noticeForRun(policy, context);
@@ -302,19 +283,7 @@ export class AntigravityHarness {
       });
       writeNotices(response, session, rewound, notice, policyIdentity);
       session.policyIdentity = policyIdentity;
-      session.pending = true;
-      const pending: Pending = {
-        key,
-        conversationId: session.conversationId,
-        historyLength: body.messages?.length ?? 0,
-        historyHash: antigravityHistoryHash(body.messages ?? []),
-        model: model.id,
-        inputTokens: prepared.inputTokens,
-      };
-      session.pendingRun = pending;
-      await this.saveSession(session);
       signal.throwIfAborted();
-      exchange.mayHaveRun = true;
       let streamed = '';
       const startedAt = performance.now();
       const outcome = await this.run({
@@ -336,29 +305,21 @@ export class AntigravityHarness {
             },
             (conversationId) => {
               session.conversationId = conversationId;
-              pending.conversationId = conversationId;
-              const save = this.saveSession(session);
-              initSaves.push(save);
-              void save.catch((error: unknown) => {
-                exchange.controller.abort(error);
-              });
+              initConversationId = conversationId;
             },
           ),
       });
-      await awaitSaves(initSaves);
       const result = outcome.result;
       session.conversationId = result.conversation_id;
+      session.interrupted = false;
       appendDiagnostics(response, result, outcome.stderr, performance.now() - startedAt);
       if (result.status !== 'SUCCESS') {
-        await this.recordFailure(session, result);
+        await this.saveSession(session);
         throw new AntigravityProviderError(result.error ?? `Antigravity run ${result.status}`);
       }
       response.text(antigravityTerminalSuffix(streamed, result.response));
       const finished = response.finish(usageDelta(result.usage, session.usage));
       const terminalEvents = response.takeTerminalEvents();
-      session.pending = false;
-      session.pendingRun = undefined;
-      session.conversationId = result.conversation_id;
       session.usage = result.usage;
       session.response = finished;
       session.replay = {
@@ -373,7 +334,6 @@ export class AntigravityHarness {
         response: finished,
         events: session.replay.events,
       });
-      exchange.committed = true;
       for (const event of terminalEvents) {
         emit(...event);
       }
@@ -382,9 +342,18 @@ export class AntigravityHarness {
       if (error instanceof AntigravityProviderError) {
         throw error;
       }
+      // The run ended without a terminal result (abort, kill, or a CLI/parse
+      // failure). If agy ever reported a conversation id for this attempt, the
+      // native turn's completion is unknown; flag it so the next request can
+      // ask agy to report its own state instead of guessing.
+      if (initConversationId !== undefined) {
+        session.interrupted = true;
+        await this.saveSession(session).catch(() => {
+          // The run failure below is the more useful error to surface.
+        });
+      }
       throw new AntigravityProviderError(error);
     } finally {
-      await Promise.allSettled(initSaves);
       session.busy = false;
       if (this.closed) {
         await this.releaseLock(session);
@@ -448,17 +417,12 @@ export class AntigravityHarness {
     const release = await lockCursorSession(`${file}.lock`);
     try {
       const saved = await readSession(file);
-      if (saved?.pending) {
-        throw new Error(
-          'Antigravity interrupted run has unknown completion; refusing native replay',
-        );
-      }
       const session: Session = {
         ...(saved ?? {
           version: 2,
           provider: 'antigravity',
           identity,
-          pending: false,
+          interrupted: false,
         }),
         file,
         busy: false,
@@ -475,20 +439,6 @@ export class AntigravityHarness {
   private saveSession(session: Session) {
     const { file: _file, busy: _busy, release: _release, unlock: _unlock, ...saved } = session;
     return atomicJson(session.file, { ...saved, provider: 'antigravity' });
-  }
-
-  private async recordFailure(session: Session, result: AntigravityResult) {
-    const pending = session.pendingRun;
-    if (!pending) {
-      return;
-    }
-    await atomicJson(path.join(this.stateDirectory, `${pending.key}.failure.json`), {
-      status: 502,
-      message: result.error ?? `Antigravity run ${result.status}`,
-    });
-    session.pending = false;
-    session.pendingRun = undefined;
-    await this.saveSession(session);
   }
 
   private releaseLock(session: Session) {
@@ -632,13 +582,8 @@ function usageDelta(current: AntigravityUsage | undefined, previous: Antigravity
   return delta;
 }
 
-async function awaitSaves(saves: readonly Promise<void>[]) {
-  const results = await Promise.allSettled(saves);
-  const failure = results.find((result) => result.status === 'rejected');
-  if (failure?.status === 'rejected') {
-    throw failure.reason;
-  }
-}
+const INTERRUPTED_NOTICE =
+  '[Antigravity] The previous turn was interrupted. Report its state and do not repeat completed actions.';
 
 function writeNotices(
   response: HarnessResponse,
@@ -649,6 +594,9 @@ function writeNotices(
 ) {
   if (!session.response || session.policyIdentity !== policyIdentity) {
     response.text(`[Antigravity] ${notice}\n`);
+  }
+  if (session.interrupted) {
+    response.text(`${INTERRUPTED_NOTICE}\n`);
   }
   if (rewound) {
     response.text(
@@ -745,10 +693,9 @@ async function readSession(file: string): Promise<Saved | undefined> {
     saved.provider !== 'antigravity' ||
     typeof saved.identity !== 'string' ||
     (saved.policyIdentity !== undefined && !isHash(saved.policyIdentity)) ||
-    typeof saved.pending !== 'boolean' ||
+    typeof saved.interrupted !== 'boolean' ||
     !validUsage(saved.usage) ||
-    !validSavedResponse(saved) ||
-    !validPending(saved.pendingRun)
+    !validSavedResponse(saved)
   ) {
     throw new Error('Antigravity session has invalid state; refusing native replay');
   }
@@ -863,18 +810,6 @@ function validEvent(value: unknown): value is Event {
   );
 }
 
-function validPending(pending: Pending | undefined) {
-  return (
-    pending === undefined ||
-    (isHash(pending.key) &&
-      isHash(pending.historyHash) &&
-      Number.isSafeInteger(pending.historyLength) &&
-      pending.historyLength > 0 &&
-      typeof pending.model === 'string' &&
-      Number.isSafeInteger(pending.inputTokens) &&
-      pending.inputTokens >= 0)
-  );
-}
 function isHash(value: unknown): value is string {
   return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 }
