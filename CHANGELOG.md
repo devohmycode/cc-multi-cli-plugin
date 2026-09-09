@@ -6,6 +6,18 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+### Marketplace installation
+
+- Add selectable OpenAI, Cursor, Zen and Antigravity plugins with automatic core
+  dependency installation, plus setup, login/connect, status and uninstall skills.
+- Package the complete runtime in core so cached installs run without a checkout.
+  Add reversible Bash/Zsh startup wrappers that preserve the real Claude binary,
+  follow installed core updates and honor native plugin enablement.
+- Avoid probing disabled providers and reject their model routes. Preserve native
+  provider-owned login; Zen key entry stays outside the Claude transcript.
+- Document human and agent installation paths and verify real isolated-cache
+  installation alongside offline wrapper, routing and credential-storage tests.
+
 - Move shared runtime into `plugins/multi-core/src/` and each provider into
   `plugins/multi-<provider>/src/`. Launch with `node plugins/multi-core/src/launcher.ts`.
   Update imports, checks and documentation without changing provider behavior;

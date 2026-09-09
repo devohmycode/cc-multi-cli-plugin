@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { readZenKey, validateZenKey, ZenAuthError } from '../../plugins/multi-zen/src/auth.ts';
+import {
+  readZenKey,
+  saveZenKey,
+  validateZenKey,
+  ZenAuthError,
+} from '../../plugins/multi-zen/src/auth.ts';
 import {
   ZEN_MODELS,
   ZEN_WORKERS,
@@ -167,4 +172,22 @@ test('Zen picker allowlist preserves order and validates model IDs', () => {
     ['mimo-v2.5-free', 'big-pickle'],
   );
   assert.throws(() => zenPickerOptions('typo'), /MULTI_ZEN_MODELS: unknown Zen model/);
+});
+
+test('Zen local key entry preserves other accounts and writes a private auth file', async (t) => {
+  const dataHome = await mkdtemp(path.join(os.tmpdir(), 'zen-connect-test-'));
+  t.after(() => rm(dataHome, { recursive: true, force: true }));
+  const directory = path.join(dataHome, 'opencode');
+  await mkdir(directory);
+  const file = path.join(directory, 'auth.json');
+  await writeFile(file, JSON.stringify({ other: { type: 'api', key: 'other-fixture' } }));
+  await withEnvironment({ OPENCODE_API_KEY: undefined, XDG_DATA_HOME: dataHome }, async () => {
+    await saveZenKey('new-fixture');
+    assert.equal(await readZenKey(), 'new-fixture');
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).other.key, 'other-fixture');
+    assert.equal((await stat(file)).mode & 0o777, 0o600);
+    await writeFile(file, 'invalid-json');
+    await assert.rejects(saveZenKey('next-fixture'), /preserved/);
+    assert.equal(await readFile(file, 'utf8'), 'invalid-json');
+  });
 });

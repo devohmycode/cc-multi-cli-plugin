@@ -198,3 +198,22 @@ Upstream interfaces: [Cursor SDK](https://cursor.com/docs/sdk/typescript),
 [Grok Build](https://docs.x.ai/build/cli/headless-scripting),
 [Zen endpoints](https://opencode.ai/docs/zen/#endpoints),
 [llama.cpp server](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md).
+
+## Marketplace activation
+
+The core marketplace source is the repository root: it includes the complete
+reviewed runtime and npm lockfile. Provider plugins are enablement and connection
+surfaces depending on core. Runtime source stays separated by provider, but cache
+installs do not require cross-plugin filesystem imports or runtime code registration.
+The stable Bash/Zsh bootstrap asks the real Claude executable for the installed,
+enabled plugins on each launch and then invokes that core's launcher with an
+explicit provider allowlist. Only a user-scope core may execute before workspace
+trust. Native CLI settings arguments are forwarded to plugin discovery. With no
+active providers/core, startup passes directly to Claude. Authentication and plugin
+management commands bypass the gateway. Existing sessions retain their original
+runtime; new logins and plugin changes take effect on relaunch.
+
+Setup/uninstall changes are limited to owned bootstrap files and one marked shell
+PATH block. No Claude executable replacement, global model rewrite or credentials
+in the shell block. Provider commands use Codex/SDK login and OpenCode's Zen auth
+store. Antigravity's owned hook is refreshed for the current installed runtime.

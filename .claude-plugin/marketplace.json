@@ -1,22 +1,42 @@
 {
   "name": "cc-multi-cli-plugin",
   "owner": {
-    "name": "greenpolo",
-    "url": "https://github.com/greenpolo"
+    "name": "greenpolo"
   },
   "metadata": {
-    "description": "Marketplace for cc-multi-cli-plugin — a native model gateway that runs external models inside one Claude Code session.",
-    "version": "0.1.2"
+    "description": "Choose the model providers to use inside Claude Code.",
+    "version": "0.2.0"
   },
   "plugins": [
     {
-      "name": "multi",
-      "description": "Native model gateway: runs external models as Claude Code models and workers in the native tool loop.",
-      "version": "0.1.2",
-      "author": {
-        "name": "greenpolo"
-      },
-      "source": "./plugins/multi-core"
+      "name": "multi-core",
+      "source": "./",
+      "version": "0.2.0",
+      "description": "Shared Multi gateway, setup, status and reversible Claude startup integration."
+    },
+    {
+      "name": "multi-openai",
+      "source": "./plugins/multi-openai",
+      "version": "0.2.0",
+      "description": "ChatGPT models through Codex login"
+    },
+    {
+      "name": "multi-cursor",
+      "source": "./plugins/multi-cursor",
+      "version": "0.2.0",
+      "description": "Official Cursor SDK coding harness"
+    },
+    {
+      "name": "multi-zen",
+      "source": "./plugins/multi-zen",
+      "version": "0.2.0",
+      "description": "OpenCode Zen direct API models"
+    },
+    {
+      "name": "multi-antigravity",
+      "source": "./plugins/multi-antigravity",
+      "version": "0.2.0",
+      "description": "Experimental native Antigravity CLI harness"
     }
   ]
 }

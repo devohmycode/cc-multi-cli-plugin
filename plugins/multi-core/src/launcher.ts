@@ -33,6 +33,13 @@ import { hookCommand } from './gateway/permission-hook.ts';
 import type { GatewayEvent } from './gateway/server.ts';
 import { createNativeGateway } from './gateway/server.ts';
 
+import { providerSelection } from './install/plugins.ts';
+
+const enabledProviders = providerSelection(process.env.MULTI_ENABLED_PROVIDERS);
+const providerEnabled = (provider: string) =>
+  enabledProviders?.some((name) => name === provider) ?? true;
+const claudeExecutable = process.env.MULTI_REAL_CLAUDE || 'claude';
+
 /** One `--agents` entry: an external worker using Claude Code's native tools. */
 interface AgentDefinition {
   description: string;
@@ -84,9 +91,8 @@ async function main() {
     'auth.json',
   );
   const { codexSignedIn, openaiReview } = await discoverOpenAI(authFile, anthropic);
-  const zenKey = await readZenKey();
-  const antigravityModels =
-    process.env.MULTI_ANTIGRAVITY === '1' ? await discoverAntigravityModels() : [];
+  const zenKey = providerEnabled('zen') ? await readZenKey() : undefined;
+  const antigravityModels = await discoverAntigravity();
   const token = randomBytes(32).toString('hex');
   const settings = pickerSettings(codexSignedIn, cursorPicker, Boolean(zenKey), antigravityModels);
   await mergeSettings(args, settings);
@@ -111,6 +117,7 @@ async function main() {
   );
   const server = createNativeGateway({
     token,
+    enabledProviders,
     authFile,
     cursor,
     antigravity,
@@ -151,10 +158,14 @@ async function main() {
       'Cursor worker catalog exceeds the launcher argument limit. Worker registration needs a file-based Claude plugin.',
     );
   }
-  const child = spawn('claude', ['--settings', settingsFile, '--agents', definitions, ...args], {
-    stdio: 'inherit',
-    env: gatewayEnvironment(address.port, token, anthropic),
-  });
+  const child = spawn(
+    claudeExecutable,
+    ['--settings', settingsFile, '--agents', definitions, ...args],
+    {
+      stdio: 'inherit',
+      env: gatewayEnvironment(address.port, token, anthropic),
+    },
+  );
   const shutdown = async () => {
     server.closeAllConnections();
     server.close();
@@ -208,6 +219,9 @@ function nativeHarnesses(
 }
 
 async function discoverCursor(required: boolean) {
+  if (!providerEnabled('cursor')) {
+    return { cursorModels: [] as CursorModelOption[], cursorSignedIn: false };
+  }
   const { Cursor } = await import('@cursor/sdk');
   const cursorSignedIn =
     Boolean(process.env.CURSOR_API_KEY) || (await Cursor.auth.status()).status === 'logged-in';
@@ -270,7 +284,7 @@ async function anthropicSignedIn(): Promise<boolean> {
   }
   let stdout: string;
   try {
-    ({ stdout } = await promisify(execFile)('claude', ['auth', 'status', '--json'], {
+    ({ stdout } = await promisify(execFile)(claudeExecutable, ['auth', 'status', '--json'], {
       timeout: 10000,
       maxBuffer: 65536,
     }));
@@ -281,6 +295,9 @@ async function anthropicSignedIn(): Promise<boolean> {
 }
 
 async function discoverOpenAI(authFile: string, anthropic: boolean) {
+  if (!providerEnabled('openai')) {
+    return { codexSignedIn: false, openaiReview: false };
+  }
   let codexSignedIn = false;
   try {
     await readCodexAuth(authFile);
@@ -642,4 +659,15 @@ function traceEvent(event: GatewayEvent) {
   if (process.env.MULTI_NATIVE_TRACE === '1') {
     process.stderr.write(`[native] ${JSON.stringify(event)}\n`);
   }
+}
+
+async function discoverAntigravity() {
+  const antigravityModels =
+    providerEnabled('antigravity') && process.env.MULTI_ANTIGRAVITY === '1'
+      ? await discoverAntigravityModels()
+      : [];
+  if (enabledProviders?.includes('antigravity') && antigravityModels.length) {
+    await installAntigravityHook();
+  }
+  return antigravityModels;
 }

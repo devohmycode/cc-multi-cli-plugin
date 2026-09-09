@@ -1,0 +1,11 @@
+{
+  "version": "0.2.0",
+  "author": {
+    "name": "greenpolo",
+    "url": "https://github.com/greenpolo"
+  },
+  "license": "Apache-2.0",
+  "name": "multi-core",
+  "description": "Shared Multi gateway, setup, status and reversible Claude startup integration.",
+  "skills": "./plugins/multi-core/skills"
+}

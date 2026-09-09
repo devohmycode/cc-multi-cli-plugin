@@ -19,6 +19,30 @@ const headers = {
   'x-api-key': 'anthropic-secret-fixture',
 };
 
+test('disabled providers reject typed models and token counts without upstream requests', async (t) => {
+  let requests = 0;
+  const url = await gateway(
+    t,
+    async () => {
+      requests++;
+      return completion();
+    },
+    { enabledProviders: [] },
+  );
+  for (const provider of ['zen', 'openai', 'cursor', 'antigravity']) {
+    for (const endpoint of ['/v1/messages', '/v1/messages/count_tokens']) {
+      const response = await fetch(`${url}${endpoint}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...request, model: `multi/${provider}/test` }),
+      });
+      assert.equal(response.status, 400);
+      assert.match(await response.text(), /not enabled/);
+    }
+  }
+  assert.equal(requests, 0);
+});
+
 function completion(tool = false) {
   const output = tool
     ? [

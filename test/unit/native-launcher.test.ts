@@ -160,6 +160,23 @@ console.log(JSON.stringify({settings,agents:Object.keys(agents),models:args.filt
   assert.equal(result.settings.permissions.disableAutoMode, 'disable');
   assert(result.args.includes('--dangerously-skip-permissions'));
   assert.deepEqual(result.models, ['multi/zen/gpt-5.6-luna']);
+  const disabled = await promisify(execFile)(process.execPath, [launcher], {
+    cwd,
+    timeout: 20000,
+    env: {
+      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+      HOME: cwd,
+      XDG_DATA_HOME: path.join(cwd, 'data'),
+      CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
+      CODEX_HOME: cwd,
+      OPENCODE_API_KEY: 'invalid key must not be read',
+      MULTI_ENABLED_PROVIDERS: '',
+    },
+  });
+  const withoutProviders = JSON.parse(disabled.stdout);
+  assert.deepEqual(withoutProviders.settings.modelPicker.options, []);
+  assert.deepEqual(withoutProviders.agents, []);
+
   const launchFiltered = (selection: string, args: string[] = []) =>
     promisify(execFile)(process.execPath, [launcher, ...args], {
       cwd,

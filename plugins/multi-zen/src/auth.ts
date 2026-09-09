@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -56,4 +56,32 @@ export async function readZenKey(): Promise<string | undefined> {
     throw new ZenAuthError('OpenCode auth.json has invalid Zen API credentials.');
   }
   return validateZenKey(entry.key);
+}
+
+/** Persist local key entry in OpenCode's existing auth store, preserving other providers. */
+export async function saveZenKey(key: string): Promise<void> {
+  const validated = validateZenKey(key);
+  const file = authFile();
+  let entries: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(await readFile(file, 'utf8'));
+    if (!isRecord(parsed)) {
+      throw new ZenAuthError('OpenCode auth.json is invalid.');
+    }
+    entries = parsed;
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+      throw new ZenAuthError(
+        'Cannot update OpenCode auth.json. Existing credentials were preserved.',
+      );
+    }
+  }
+  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  const temporary = `${file}.multi-${process.pid}.tmp`;
+  await writeFile(
+    temporary,
+    `${JSON.stringify({ ...entries, opencode: { type: 'api', key: validated } }, null, 2)}\n`,
+    { mode: 0o600, flag: 'wx' },
+  );
+  await rename(temporary, file);
 }

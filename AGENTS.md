@@ -88,6 +88,11 @@ instructions. Keep new scratch research in gitignored `.agent/`.
 Paths below are relative to `plugins/multi-core/src/` unless noted.
 
 - `launcher.ts`: launcher, session-local model picker, worker registration.
+- `setup.ts`, `account.ts`, `install/`: reversible Bash/Zsh wrapper, native plugin
+  discovery and provider connection commands. Root `.claude-plugin/plugin.json`
+  declares core; the marketplace copies the repository root as its self-contained
+  runtime. Provider manifests/skills supply opt-in enablement and login commands.
+  Do not assume provider source folders are standalone runtime packages.
 - `gateway/server.ts`: HTTP routing, Claude passthrough, and request/session lifecycle.
   `gateway/fetch.ts`: the `GatewayFetch` outbound-request type, kept separate so
   providers never import the HTTP server for it.
@@ -159,6 +164,9 @@ make the folders look independent.
   recorded cache/429 failures before retrying; do not manufacture cache-hit counts.
 - `npm run test:live:cursor` exercises bounded native SDK tools, continuation and
   disk resume with Fast disabled. Requires the official SDK login (`--cursor-login` on the launcher).
+- `npm run test:live:install` installs core/Zen with the real Claude plugin manager
+  in a temporary home and checks cached startup, enablement and uninstall. It may
+  download npm dependencies but performs no inference and touches no user logins.
 - Definition of done: relevant checks pass, no `DEP0190` warnings, and
   `CHANGELOG.md` reflects user-facing changes.
 - Future bridges need session/worker/provider/workspace isolation as specified in

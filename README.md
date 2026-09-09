@@ -49,32 +49,37 @@ runs type checking and offline tests. Node runs the gateway's TypeScript directl
 
 ### For humans
 
-The current experimental runtime runs from a checkout. Installing the marketplace
-manifest alone does not yet activate the gateway.
+In Claude Code, add the marketplace and install the providers you want:
 
-```sh
-git clone https://github.com/greenpolo/cc-multi-cli-plugin.git
-cd cc-multi-cli-plugin
-npm ci
+```text
+/plugin marketplace add greenpolo/cc-multi-cli-plugin
+/plugin install multi-openai@cc-multi-cli-plugin
+/plugin install multi-cursor@cc-multi-cli-plugin
+/plugin install multi-zen@cc-multi-cli-plugin
+/reload-plugins
+/multi-core:setup
 ```
 
-Connect the providers you want:
+Choose any subset; each provider installs the shared core automatically. Use the
+(default) user installation scope for core. Setup supports Bash and Zsh on Linux
+and macOS, and requires Node >= 24.12. It adds a marked PATH block to your shell
+configuration and a wrapper under `~/.local/share/multi-cli/bin/`; it does not
+replace the Claude executable. Existing aliases/functions named `claude` take
+precedence and need to be reconciled if you use them.
 
-| Provider | Connect |
-| --- | --- |
-| OpenAI | `codex -c cli_auth_credentials_store='"file"' login` — sign in with ChatGPT |
-| Cursor | `node plugins/multi-core/src/launcher.ts --cursor-login` — official SDK browser login |
-| OpenCode Zen | OpenCode `/connect` → OpenCode Zen, or set `OPENCODE_API_KEY` locally |
+Open a new terminal, run `multi status`, then type `claude` normally. Connect
+accounts with `/multi-openai:login`, `/multi-cursor:login`, or `/multi-zen:connect`.
+Zen key entry happens privately in a separate terminal. Relaunch Claude after
+connecting a provider so its models and workers appear in `/model`.
 
-Then launch Claude with Multi and open `/model`:
+For experimental Antigravity, install `multi-antigravity@cc-multi-cli-plugin`,
+complete the official `agy` login, then use `/multi-antigravity:connect` to install
+its scoped permission hook. Its native integration currently requires Linux.
 
-```sh
-node plugins/multi-core/src/launcher.ts
-```
-
-Run the launcher by its absolute path from another project to work in that project.
-Restart through the launcher after connecting a new provider. See the
-[installation guide](docs/installation.md) for verification and planned marketplace setup.
+To remove the shell integration, run `multi uninstall` (or `/multi-core:uninstall`)
+before uninstalling the plugins, then open a new terminal. Disabling all Multi
+providers makes the wrapper launch ordinary Claude. Provider logins are retained.
+See [installation details](docs/installation.md) for updates, removal and local testing.
 
 ### For agents
 
@@ -86,7 +91,7 @@ Give your coding agent this prompt alongside the repository URL or checkout:
 > any API key locally; do not ask me to paste credentials into chat.
 
 The [agent installation instructions](docs/installation.md#for-agents) use the
-same runtime and authentication paths as manual installation.
+same plugin installation and setup helper as manual installation.
 
 ## Experimental Antigravity CLI
 
@@ -140,10 +145,12 @@ The launcher imports concrete gateway/provider modules. Shared Claude protocol t
 live in `gateway/messages.ts`; provider credentials and catalogs stay with their
 provider. Cursor currently reuses OpenAI normalization/counting helpers. Development
 utilities live in root `scripts/`, with tests under `test/unit/` and `test/live/`.
-This is a source-layout split. Runtime dependencies remain in the root package,
-and imports between core and providers still resolve within the checkout.
-Independent provider packaging, enabled-plugin discovery and the setup command
-are subsequent work; this move does not activate marketplace installation.
+The core marketplace package uses the repository root as its source and includes
+this entire tested runtime plus its npm manifest/lockfile. Provider plugins expose
+connection commands and opt-in enablement. This keeps existing cross-provider
+helpers together without relying on sibling plugin-cache paths or introducing a
+second build. The launcher probes and routes only enabled providers when wrapped;
+direct checkout launches retain credential-based discovery.
 
 ## Experimental native OpenAI models
 

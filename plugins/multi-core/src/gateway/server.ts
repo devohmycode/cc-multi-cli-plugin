@@ -79,6 +79,7 @@ export interface GatewayEvent {
 
 export interface GatewayOptions {
   token: string;
+  enabledProviders?: readonly string[];
   authFile: string;
   fetchImpl?: GatewayFetch;
   onEvent?: (event: GatewayEvent) => void;
@@ -143,6 +144,7 @@ interface ProviderRequest {
 
 export function createNativeGateway({
   token,
+  enabledProviders,
   authFile,
   fetchImpl = fetch,
   onEvent = () => {},
@@ -606,6 +608,7 @@ export function createNativeGateway({
       const body: MessagesRequest = parsed;
       const external =
         typeof body.model === 'string' && body.model.startsWith('multi/') ? body.model : null;
+      assertProviderEnabled(external, enabledProviders);
       const signal = providerSignal(abort.signal, external, timeoutMs);
       const agentId = header(req.headers['x-claude-code-agent-id']);
       const metadata = requestIdentity(
@@ -930,5 +933,11 @@ function observeTool(
   if (type === 'content_block_stop') {
     remember({ ...tool, input: JSON.parse(tool.json || '{}') });
     toolBlocks.delete(value.index);
+  }
+}
+
+function assertProviderEnabled(model: string | null, enabled: readonly string[] | undefined) {
+  if (model && enabled && !enabled.includes(model.split('/')[1])) {
+    throw new BadRequest('This provider plugin is not enabled for this session.');
   }
 }

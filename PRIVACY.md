@@ -41,6 +41,9 @@ See [the execution and permission contract](ARCHITECTURE.md).
 
 ## Local storage
 
+- **Marketplace startup:** `~/.local/share/multi-cli/` contains the bootstrap and
+  executable/shell paths, without provider credentials. Setup adds a marked PATH
+  block to `~/.bashrc` or `~/.zshrc`. Claude owns its plugin cache and enablement.
 - **Launcher settings:** an owner-only `multi-native-settings-*` directory under
   the system temporary directory contains the generated model picker and hooks.
   It is removed on normal shutdown; a crash can leave it behind.
@@ -65,6 +68,8 @@ Claude's stored transcript. The author cannot access your local session records.
 Zen requests send the selected conversation, instructions, tools and attachments
 to `https://opencode.ai/zen/v1/`. The gateway reads `OPENCODE_API_KEY` or the
 OpenCode-managed saved Zen API entry; it does not create another token store.
+The optional `multi connect zen` command accepts hidden terminal input and writes
+that entry into OpenCode's existing auth file, preserving other accounts.
 It does not forward Claude/Codex credentials to Zen or pass the environment key
 to the launched Claude process. Provider retention and billing follow
 [OpenCode Zen's policies](https://opencode.ai/docs/zen/#privacy).
@@ -105,9 +110,12 @@ and broker directories listed above. Review wizard-created MCP entries and backu
 in each CLI's configuration separately, preserving unrelated entries. Removing
 only `~/.claude/plugins/cc-multi-cli-plugin` does not remove data stored elsewhere.
 
-If installed through the marketplace, uninstall with
-`/plugin uninstall multi@cc-multi-cli-plugin` in Claude Code; uninstall any old
-per-CLI plugins separately. A checkout launcher is independent of that registration.
+For the current marketplace installation, run `multi uninstall` to remove startup
+files and the marked shell block, then remove `multi-core@cc-multi-cli-plugin` and
+the installed provider plugins using Claude's `/plugin` interface. This preserves
+provider credentials, transcripts and Antigravity's scoped native hook.
+Earlier releases used `multi@cc-multi-cli-plugin`; uninstall that separately if
+present. A checkout launcher is independent of plugin registration.
 For provider-side deletion, follow the provider's own process; the plugin author
 has no access to those systems.
 
