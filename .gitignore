@@ -16,3 +16,7 @@ node_modules/
 
 # Agent scratch area: plans, specs, reverse-engineering notes. Local-only.
 /.agent/
+
+# Local promo tooling, not part of the repository
+/docs/assets/promo/
+/scripts/render-promo.mjs

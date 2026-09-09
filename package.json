@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && node --test \"test/unit/**/*.test.ts\"",
     "test:live:compaction": "node test/live/native-compaction.ts",
+    "test:live:zen": "node test/live/native-zen.ts",
     "test:live:cursor": "node test/live/native-cursor-harness.ts",
     "test:live:cursor-harness": "node test/live/native-cursor-harness.ts",
     "test:live:auto-mode": "node test/live/native-auto-mode.ts",
@@ -18,14 +19,15 @@
     "test:live:reviewer": "node test/live/native-reviewer.ts",
     "test:live:approval-worker": "node test/live/native-approval-worker.ts",
     "test:live:permissions": "node test/live/native-permissions.ts",
+    "test:live:antigravity": "node test/live/native-antigravity.ts",
     "format": "biome format --write .",
     "lint": "biome check --error-on-warnings .",
     "lint:fix": "biome check --write .",
     "check:unused": "knip",
-    "check": "npm run lint && npm run check:unused && npm test",
+    "check": "npm run banner:check && npm run lint && npm run check:unused && npm test",
     "test:live:mode-hooks": "node test/live/native-mode-hooks.ts",
-    "test:live:zen": "node test/live/native-zen.ts",
-    "test:live:antigravity": "node test/live/native-antigravity.ts"
+    "banner:generate": "node scripts/banner.mjs",
+    "banner:check": "node scripts/banner.mjs --check"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.12",

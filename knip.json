@@ -5,8 +5,8 @@
     "plugins/multi/src/gateway/permission-hook.ts",
     "test/unit/**/*.test.ts",
     "test/live/*.ts",
-    "scripts/*.mjs"
+    "scripts/banner.mjs"
   ],
-  "project": ["plugins/multi/src/**/*.ts", "test/**/*.ts", "scripts/*.mjs"],
+  "project": ["plugins/multi/src/**/*.ts", "test/**/*.ts", "scripts/banner.mjs"],
   "ignoreBinaries": ["flock", "codex"]
 }
