@@ -6,6 +6,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Add Antigravity and OpenCode Zen to the SVG banner alongside Cursor and OpenAI
+  Codex, preserving the black background and Anthropic orange styling. Remove
+  status labels and space connector dots clear of provider marks and names.
+
 ### Marketplace installation
 
 - Add selectable OpenAI, Cursor, Zen and Antigravity plugins with automatic core
