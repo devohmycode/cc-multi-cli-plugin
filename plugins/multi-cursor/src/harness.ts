@@ -12,7 +12,8 @@ import type {
   StreamEventName,
 } from '../../multi-core/src/gateway/messages.ts';
 import type { PermissionContext } from '../../multi-core/src/gateway/mode-hook.ts';
-import { estimateTextTokens } from '../../multi-openai/src/tokens.ts';
+import { lockStateFile } from '../../multi-core/src/gateway/state-lock.ts';
+import { estimateTextTokens } from '../../multi-core/src/gateway/tokens.ts';
 import { CursorProviderError, cursorRunError } from './errors.ts';
 import { type CursorModelOption, cursorSelection } from './models.ts';
 import {
@@ -22,7 +23,6 @@ import {
 } from './permissions.ts';
 import { formatCursorProgress } from './progress.ts';
 import { cursorHistoryHash, cursorTerminalSuffix, prepareCursorRequest } from './request.ts';
-import { lockCursorSession } from './state-lock.ts';
 
 type Agent = Pick<SDKAgent, 'agentId' | 'send' | 'close'>;
 export type CreateCursorHarnessAgent = (options: AgentOptions) => Promise<Agent>;
@@ -269,7 +269,7 @@ export class CursorHarness {
       throw new Error('Cursor run is still owned by this gateway; wait for it to finish');
     }
     const file = this.sessionFile(scope);
-    const release = await lockCursorSession(`${file}.lock`);
+    const release = await lockStateFile(`${file}.lock`);
     try {
       const saved = await readSession(file);
       const pending = saved?.pendingRun;
@@ -354,7 +354,7 @@ export class CursorHarness {
     }
     await mkdir(this.stateDirectory, { recursive: true, mode: 0o700 });
     const file = this.sessionFile(scope);
-    const release = await lockCursorSession(`${file}.lock`);
+    const release = await lockStateFile(`${file}.lock`);
     let agent: Agent | undefined;
     try {
       const saved = await readSession(file);

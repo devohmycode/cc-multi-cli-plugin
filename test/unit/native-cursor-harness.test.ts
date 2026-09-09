@@ -10,12 +10,12 @@ import type {
   MessagesResponse,
 } from '../../plugins/multi-core/src/gateway/messages.ts';
 import type { PermissionContext } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
+import { lockStateFile } from '../../plugins/multi-core/src/gateway/state-lock.ts';
 import {
   type CreateCursorHarnessAgent,
   CursorHarness,
 } from '../../plugins/multi-cursor/src/harness.ts';
 import { cursorModelOptions } from '../../plugins/multi-cursor/src/models.ts';
-import { lockCursorSession } from '../../plugins/multi-cursor/src/state-lock.ts';
 
 const models = cursorModelOptions([
   { id: 'test-model', displayName: 'Test Model' },
@@ -505,7 +505,7 @@ test('repeated session cleanup cannot remove a replacement gateway lock', async 
   const session = harness['sessions'].get('main');
   assert(session);
   await harness['releaseLock'](session);
-  const release = await lockCursorSession(`${f.sessionFile}.lock`);
+  const release = await lockStateFile(`${f.sessionFile}.lock`);
   t.after(release);
   await harness.close();
   await assert.rejects(f.make().handle(follow(response), 'main', signal()), /locked/);

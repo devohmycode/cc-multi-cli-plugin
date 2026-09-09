@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { hookCommand } from '../../multi-core/src/gateway/permission-hook.ts';
-import { lockCursorSession } from '../../multi-cursor/src/state-lock.ts';
+import { lockStateFile } from '../../multi-core/src/gateway/state-lock.ts';
 
 const namespace = 'multi-cli-antigravity';
 
@@ -45,7 +45,7 @@ async function readHooks(file: string): Promise<Record<string, unknown>> {
 /** Install one stable hook; each originating CLI process carries its own policy. */
 export async function installAntigravityHook(file = hookFile()): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true });
-  const unlock = await lockCursorSession(`${file}.multi-lock`);
+  const unlock = await lockStateFile(`${file}.multi-lock`);
   try {
     const hooks = await readHooks(file);
     hooks[namespace] = definition();

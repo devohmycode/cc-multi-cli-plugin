@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
 import test from 'node:test';
+import type { GatewayFetch } from '../../plugins/multi-core/src/gateway/fetch.ts';
 import type {
   MessagesRequest,
   MessagesResponse,
@@ -11,8 +12,8 @@ import type {
   StreamEventBody,
   StreamEventName,
 } from '../../plugins/multi-core/src/gateway/messages.ts';
-import type { GatewayFetch } from '../../plugins/multi-core/src/gateway/server.ts';
 import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
+import { estimateInputTokens } from '../../plugins/multi-core/src/gateway/tokens.ts';
 import {
   originalToolNames,
   toolName,
@@ -31,7 +32,6 @@ import {
   readSse,
   toResponses,
 } from '../../plugins/multi-openai/src/responses.ts';
-import { estimateInputTokens } from '../../plugins/multi-openai/src/tokens.ts';
 
 /** A test double for one OpenAI Responses SSE event; sent as JSON, never typed upstream. */
 interface SseEvent {

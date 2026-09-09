@@ -6,10 +6,10 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import type { GatewayFetch } from '../../plugins/multi-core/src/gateway/fetch.ts';
 import type { MessagesResponse } from '../../plugins/multi-core/src/gateway/messages.ts';
 import {
   createNativeGateway,
-  type GatewayFetch,
   type GatewayOptions,
 } from '../../plugins/multi-core/src/gateway/server.ts';
 import { readSse } from '../../plugins/multi-openai/src/responses.ts';

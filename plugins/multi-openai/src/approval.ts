@@ -8,7 +8,7 @@ import type {
   ApprovalVerdict,
 } from '../../multi-core/src/gateway/approval.ts';
 import { NativeApprovalBridge } from '../../multi-core/src/gateway/approval.ts';
-import type { GatewayFetch } from '../../multi-core/src/gateway/server.ts';
+import type { GatewayFetch } from '../../multi-core/src/gateway/fetch.ts';
 import { codexRequest } from './auth.ts';
 import { readSse } from './responses.ts';
 

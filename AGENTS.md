@@ -89,19 +89,24 @@ Paths below are relative to `plugins/multi-core/src/` unless noted.
 
 - `launcher.ts`: launcher, session-local model picker, worker registration.
 - `gateway/server.ts`: HTTP routing, Claude passthrough, and request/session lifecycle.
+  `gateway/fetch.ts`: the `GatewayFetch` outbound-request type, kept separate so
+  providers never import the HTTP server for it.
 - `gateway/messages.ts`: shared Claude Messages request/response and stream types.
   `gateway/tools.ts`: stable tool aliases. `gateway/approval.ts` and
   `gateway/permission-hook.ts`: native approval protocol and capability checks.
-- `../../multi-openai/src/`: Codex authentication and CLI-owned renewal (`auth.ts`), models/workers (`models.ts`),
-  Responses translation (`responses.ts`), local estimates (`tokens.ts`), and reviewer
+- `gateway/tokens.ts`: shared local token estimates (OpenAI, Zen, Cursor and
+  Antigravity all use it; `js-tiktoken` stays a dependency). `gateway/state-lock.ts`:
+  `lockStateFile` holds kernel file locks across native runs, shared by Cursor and
+  Antigravity.
+- `../../multi-openai/src/`: Codex authentication and CLI-owned renewal (`auth.ts`),
+  models/workers (`models.ts`), Responses translation (`responses.ts`), and reviewer
   (`approval.ts`, with vendored policy/license files in `guardian/`).
 - `../../multi-zen/src/`: direct API-key auth, bounded model catalog, Chat Completions translation
   and Responses reuse. Claude executes tools; Zen has no independent reviewer.
   Cache affinity and model-owned reasoning survive gateway restarts.
 - `../../multi-cursor/src/`: native runtime (`harness.ts`), request validation,
   permissions, progress and account model/worker choices (`models.ts`).
-  `workspaces.ts` routes hook-reported worktrees to separate SDK instances;
-  `state-lock.ts` holds kernel file locks across native runs.
+  `workspaces.ts` routes hook-reported worktrees to separate SDK instances.
 - `gateway/mode-hook.ts` and `agent-definitions.ts`: prompt/worker permissions.
   `gateway/cursor-settings.ts`: per-dispatch Claude settings admission.
   `docs/cursor-refactor.md` records current native behavior and deferred limits.
@@ -109,11 +114,12 @@ Paths below are relative to `plugins/multi-core/src/` unless noted.
 - Root `test/unit/`: offline tests. `test/live/`: opt-in live checks.
 
 Keep provider authentication and model catalogs with the provider. Shared Claude
-protocol types belong in `gateway/`; avoid importing the HTTP server for provider
-runtime helpers. Import concrete modules directly; no re-export barrels or old-path
-wrappers. The Cursor bridge currently reuses OpenAI request normalization and token
-estimation; do not mistake that explicit reuse for an independent generic protocol
-layer or duplicate it merely to make the folders look independent.
+protocol types and cross-provider helpers (token estimation, kernel file locking)
+belong in `gateway/`; no provider imports the HTTP server for them. Import concrete
+modules directly; no re-export barrels or old-path wrappers. The Cursor bridge
+currently reuses OpenAI request normalization (`responses.ts`); do not mistake that
+explicit reuse for an independent generic protocol layer or duplicate it merely to
+make the folders look independent.
 
 ## Development and verification
 

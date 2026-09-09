@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { SDKUserMessage } from '@cursor/sdk';
 import type { ContentBlock, MessagesRequest } from '../../multi-core/src/gateway/messages.ts';
+import { estimateTextTokens } from '../../multi-core/src/gateway/tokens.ts';
 import { toResponses } from '../../multi-openai/src/responses.ts';
-import { estimateTextTokens } from '../../multi-openai/src/tokens.ts';
 
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export function cursorHistoryHash(messages: MessagesRequest['messages']): string {

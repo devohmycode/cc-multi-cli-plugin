@@ -10,7 +10,7 @@ import type {
   StreamEventName,
 } from '../../multi-core/src/gateway/messages.ts';
 import type { PermissionContext } from '../../multi-core/src/gateway/mode-hook.ts';
-import { lockCursorSession } from '../../multi-cursor/src/state-lock.ts';
+import { lockStateFile } from '../../multi-core/src/gateway/state-lock.ts';
 import type {
   AntigravityResult,
   AntigravityRunOptions,
@@ -423,7 +423,7 @@ export class AntigravityHarness {
   private async loadSession(identity: string): Promise<Session> {
     await mkdir(this.stateDirectory, { recursive: true, mode: 0o700 });
     const file = this.sessionFile(identity);
-    const release = await lockCursorSession(`${file}.lock`);
+    const release = await lockStateFile(`${file}.lock`);
     try {
       const saved = await readSession(file);
       const session: Session = {

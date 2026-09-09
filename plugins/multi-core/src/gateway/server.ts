@@ -14,12 +14,12 @@ import { CodexAuthError, codexRequest } from '../../../multi-openai/src/auth.ts'
 import { MODELS } from '../../../multi-openai/src/models.ts';
 import type { Effort, ResponsesRequest } from '../../../multi-openai/src/responses.ts';
 import { forAnthropic, fromResponses, toResponses } from '../../../multi-openai/src/responses.ts';
-import { estimateInputTokens } from '../../../multi-openai/src/tokens.ts';
 import { validateZenKey } from '../../../multi-zen/src/auth.ts';
 import { fromChat } from '../../../multi-zen/src/chat.ts';
 import { zenRequest } from '../../../multi-zen/src/request.ts';
 import type { ApprovalContext, NativeApprovalBridge } from './approval.ts';
 import { isApprovalRequest, parseApprovalRequest } from './approval.ts';
+import type { GatewayFetch } from './fetch.ts';
 import type {
   Emit,
   MessagesRequest,
@@ -31,6 +31,7 @@ import type {
 import type { PermissionContext, PermissionModes } from './mode-hook.ts';
 import type { PendingApprovalTool } from './permission-hook.ts';
 import { approvalCapabilityGuard } from './permission-hook.ts';
+import { estimateInputTokens } from './tokens.ts';
 import { originalToolNames } from './tools.ts';
 
 const OPENAI_URL = 'https://chatgpt.com/backend-api/codex/responses';
@@ -75,16 +76,6 @@ export interface GatewayEvent {
   permissionContext?: PermissionContext;
   usage?: MessagesResponse['usage'];
 }
-
-interface GatewayFetchInit {
-  method: string;
-  headers: Record<string, string>;
-  body?: Buffer | string;
-  signal: AbortSignal;
-  redirect: 'error';
-}
-
-export type GatewayFetch = (url: string, init: GatewayFetchInit) => Promise<Response>;
 
 export interface GatewayOptions {
   token: string;

@@ -107,6 +107,13 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 - Refresh README, development guidance and GitHub issue templates for the current
   native gateway. Correct privacy documentation for persistent Cursor state and
   Codex-owned credential renewal; preserve historical data-removal guidance.
+- Move the cross-plugin kernel file lock (`state-lock.ts`, now exporting
+  `lockStateFile`) and local token estimator (`tokens.ts`) out of the Cursor and
+  OpenAI plugins into `plugins/multi-core/src/gateway/`, and move the
+  `GatewayFetch` type out of `gateway/server.ts` into a new `gateway/fetch.ts` so
+  no provider imports the HTTP server. No behavior change; Cursor and Antigravity
+  keep sharing the file lock, and OpenAI, Zen, Cursor and Antigravity keep sharing
+  the token estimator.
 
 ### OpenAI gateway reliability
 

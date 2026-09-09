@@ -4,7 +4,7 @@ import type {
   MessagesRequest,
   RequestMessage,
 } from '../../multi-core/src/gateway/messages.ts';
-import { estimateTextTokens } from '../../multi-openai/src/tokens.ts';
+import { estimateTextTokens } from '../../multi-core/src/gateway/tokens.ts';
 
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 

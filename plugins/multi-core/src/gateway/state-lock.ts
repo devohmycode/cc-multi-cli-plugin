@@ -2,9 +2,9 @@ import { spawn } from 'node:child_process';
 import { lstat, open } from 'node:fs/promises';
 
 /** Linux flock belongs to the shared open-file description, retained by this process. */
-export async function lockCursorSession(file: string): Promise<() => Promise<void>> {
+export async function lockStateFile(file: string): Promise<() => Promise<void>> {
   if (process.platform !== 'linux') {
-    throw new Error('Native Cursor session locking currently requires Linux flock');
+    throw new Error('Native state locking currently requires Linux flock');
   }
   const info = await lstat(file).catch((error: unknown) => {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
@@ -13,9 +13,7 @@ export async function lockCursorSession(file: string): Promise<() => Promise<voi
     throw error;
   });
   if (info?.isDirectory()) {
-    throw new Error(
-      'Cursor session has a legacy interrupted lock; preserve it for manual recovery',
-    );
+    throw new Error('State file has a legacy interrupted lock; preserve it for manual recovery');
   }
   const descriptor = await open(file, 'a', 0o600);
   const child = spawn('flock', ['--exclusive', '--nonblock', '3'], {
@@ -30,7 +28,7 @@ export async function lockCursorSession(file: string): Promise<() => Promise<voi
   try {
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
-        reject(new Error('Cursor session lock acquisition timed out'));
+        reject(new Error('State file lock acquisition timed out'));
       }, 5000);
       child.once('error', (error) => {
         clearTimeout(timer);
@@ -41,7 +39,7 @@ export async function lockCursorSession(file: string): Promise<() => Promise<voi
         if (code === 0) {
           resolve();
         } else {
-          reject(new Error('Cursor session is locked by another gateway or flock is unavailable'));
+          reject(new Error('State file is locked by another gateway or flock is unavailable'));
         }
       });
     });

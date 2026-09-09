@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
 import test from 'node:test';
+import type { GatewayFetch } from '../../plugins/multi-core/src/gateway/fetch.ts';
 import { approvalCapabilityGuard } from '../../plugins/multi-core/src/gateway/permission-hook.ts';
-import type { GatewayFetch } from '../../plugins/multi-core/src/gateway/server.ts';
 import {
   createOpenAIApproval,
   discoverOpenAIReviewer,
