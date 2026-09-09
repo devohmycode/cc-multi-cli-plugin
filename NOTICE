@@ -1,26 +1,23 @@
 cc-multi-cli-plugin
 Copyright 2026 greenpolo
 
-This product includes software developed by:
+Earlier releases included software developed by:
 
 - OpenAI (https://openai.com), from the codex-plugin-cc project
   (https://github.com/openai/codex-plugin-cc), licensed under Apache 2.0.
-  Parts of the retained runtime under plugins/multi/src/ are derived from
-  this work.
+  The former companion runtime was derived from this work.
 
 - sakibsadmanshajib (https://github.com/sakibsadmanshajib), from the
   gemini-plugin-cc project
   (https://github.com/sakibsadmanshajib/gemini-plugin-cc), licensed under
-  Apache 2.0. The ACP transport layer (plugins/multi/src/transports/acp/) is
-  derived from this work.
+  Apache 2.0. The former ACP transport layer was derived from this work.
 
 - blowmage (https://github.com/blowmage), from the cursor-agent-acp-npm
   project (https://github.com/blowmage/cursor-agent-acp-npm), licensed under
-  MIT. The Cursor ACP adapter is informed by this work.
+  MIT. The former Cursor ACP adapter was informed by this work.
 
-plugins/multi/src/transports/acp/vendor/acp-sdk.bundle.mjs is a generated bundle of
-the official Agent Client Protocol SDK (https://agentclientprotocol.com,
-Apache 2.0) and its dependencies, including zod (https://zod.dev, MIT).
+Those companion and CLI/ACP modules, including the vendored ACP SDK bundle,
+have been removed. These acknowledgments preserve their provenance.
 
 This plugin is a community project, not affiliated with Anthropic, OpenAI,
 Google, GitHub, or Cursor.

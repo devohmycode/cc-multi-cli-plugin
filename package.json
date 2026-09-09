@@ -9,7 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && node --test \"test/unit/**/*.test.mjs\" \"test/unit/**/*.test.ts\"",
+    "test": "npm run typecheck && node --test \"test/unit/**/*.test.ts\"",
     "test:live:compaction": "node test/live/native-compaction.ts",
     "test:live:cursor": "node test/live/native-cursor-harness.ts",
     "test:live:cursor-harness": "node test/live/native-cursor-harness.ts",
@@ -17,7 +17,6 @@
     "test:live:provider-approval": "node test/live/native-provider-approval.ts",
     "test:live:reviewer": "node test/live/native-reviewer.ts",
     "test:live:approval-worker": "node test/live/native-approval-worker.ts",
-    "build:acp-vendor": "node scripts/build-acp-vendor.mjs",
     "test:live:permissions": "node test/live/native-permissions.ts",
     "format": "biome format --write .",
     "lint": "biome check --error-on-warnings .",
@@ -27,13 +26,10 @@
     "test:live:mode-hooks": "node test/live/native-mode-hooks.ts"
   },
   "devDependencies": {
-    "@agentclientprotocol/sdk": "^1.4.0",
     "@biomejs/biome": "2.5.12",
     "@types/node": "^26.4.1",
-    "esbuild": "^0.28.0",
     "knip": "6.34.0",
-    "typescript": "^7.0.2",
-    "zod": "^4.4.3"
+    "typescript": "^7.0.2"
   },
   "dependencies": {
     "@cursor/sdk": "1.0.31",

@@ -3,11 +3,10 @@
   "entry": [
     "plugins/multi/src/native-model-gateway.ts",
     "plugins/multi/src/gateway/permission-hook.ts",
-    "plugins/multi/src/transports/{cursor,opencode}.mjs",
-    "test/unit/**/*.test.{ts,mjs}",
+    "test/unit/**/*.test.ts",
     "test/live/*.ts",
     "scripts/*.mjs"
   ],
-  "project": ["plugins/multi/src/**/*.{ts,mjs}", "test/**/*.{ts,mjs}", "scripts/*.mjs"],
-  "ignoreBinaries": ["where.exe", "flock"]
+  "project": ["plugins/multi/src/**/*.ts", "test/**/*.ts", "scripts/*.mjs"],
+  "ignoreBinaries": ["flock"]
 }
