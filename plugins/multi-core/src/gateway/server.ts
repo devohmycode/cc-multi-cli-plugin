@@ -347,7 +347,7 @@ export function createNativeGateway({
       upstream.body,
       externalModel,
       body.stream ? emit : undefined,
-      { toolNames, stopSequences: body.stop_sequences },
+      { toolNames, stopSequences: body.stop_sequences, inputTokens: estimateInputTokens(request) },
     );
     rememberResult(exchange, result);
     if (result.stop_reason === 'stop_sequence') {
@@ -399,6 +399,7 @@ export function createNativeGateway({
       stopSequences: body.stop_sequences,
       signaturePrefix: prepared.signaturePrefix,
       requireUsage: true,
+      inputTokens: prepared.inputTokens,
     };
     const translate = prepared.endpoint === 'responses' ? fromResponses : fromChat;
     const result = await translate(

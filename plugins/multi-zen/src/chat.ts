@@ -570,6 +570,8 @@ function finishReason(value: unknown): StopReason | undefined {
 export interface ChatResponseOptions {
   toolNames?: ReadonlyMap<string, string>;
   stopSequences?: readonly string[];
+  /** Local input estimate for message_start; Chat Completions report usage last. */
+  inputTokens?: number;
 }
 
 class ChatAccumulator {
@@ -682,7 +684,7 @@ class ChatAccumulator {
         content: [],
         stop_reason: null,
         stop_sequence: null,
-        usage: { input_tokens: 0, output_tokens: 0 },
+        usage: { input_tokens: this.options.inputTokens ?? 0, output_tokens: 0 },
       },
     });
   }

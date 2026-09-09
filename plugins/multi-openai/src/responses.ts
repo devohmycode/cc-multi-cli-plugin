@@ -761,6 +761,8 @@ export interface ResponseOptions {
   stopSequences?: readonly string[];
   signaturePrefix?: string;
   requireUsage?: boolean;
+  /** Local input estimate for message_start; the provider only reports usage at completion. */
+  inputTokens?: number;
 }
 
 /** Assembles one ordered Claude response from possibly interleaved OpenAI output items. */
@@ -825,7 +827,9 @@ class ResponseStream {
       content: this.content,
       stop_reason: null,
       stop_sequence: null,
-      usage: { input_tokens: 0, output_tokens: 0 },
+      // Claude Code reads the input count from message_start; the terminal
+      // message_delta replaces this estimate with the provider's real usage.
+      usage: { input_tokens: this.options.inputTokens ?? 0, output_tokens: 0 },
     };
     this.emit('message_start', { message: { ...this.message, content: [] } });
   }

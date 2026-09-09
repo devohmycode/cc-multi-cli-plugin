@@ -140,6 +140,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ### OpenAI gateway reliability
 
+- Report the local input estimate in `message_start` for OpenAI and Zen responses.
+  Claude Code reads its per-turn token count from that event, so worker totals
+  no longer collapse to the last turn's output tokens; the terminal
+  `message_delta` still carries the provider's real usage.
 - Renew expiring Codex ChatGPT credentials through the official CLI app-server.
   Share concurrent renewal and retry an HTTP 401 once, checking account identity;
   never replay accepted inference or expose credential-bearing RPC errors.

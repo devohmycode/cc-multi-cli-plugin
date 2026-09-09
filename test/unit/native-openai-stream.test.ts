@@ -76,6 +76,21 @@ test('terminal-only text, reasoning and tool calls are recovered with usage and 
   }
 });
 
+test('message_start carries the local input estimate until the provider reports real usage', async () => {
+  const { events, emit } = capture();
+  await fromResponses(stream([created, terminal([text])]), model, emit, { inputTokens: 1234 });
+  const bodies = Object.fromEntries(events.map((event) => [event.type, event.value]));
+  const start = bodies.message_start as { message: { usage: unknown } };
+  assert.deepEqual(start.message.usage, { input_tokens: 1234, output_tokens: 0 });
+  const delta = bodies.message_delta as { usage: unknown };
+  assert.deepEqual(delta.usage, {
+    input_tokens: 60,
+    cache_read_input_tokens: 40,
+    cache_creation_input_tokens: 0,
+    output_tokens: 20,
+  });
+});
+
 test('terminal output finishes partial arguments and interleaved calls in output order exactly once', async () => {
   const seen = capture();
   const second = { ...tool, id: 'fc_b', call_id: 'call_b', arguments: '{"file_path":"b"}' };
