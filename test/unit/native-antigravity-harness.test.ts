@@ -46,20 +46,13 @@ async function setup() {
   return { stateDirectory, calls, run };
 }
 
-test('billing attribution changes do not change native session instructions', async (t) => {
+test('Claude system content is never forwarded to the native prompt', async (t) => {
   const fixture = await setup();
   const harness = new AntigravityHarness([model], { ...fixture, checkPermissions: policy });
   t.after(() => harness.close());
-  const system = (suffix: string, instruction = 'Keep the task scope') => [
-    {
-      type: 'text',
-      text: `x-anthropic-billing-header: cc_version=2.1.265.${suffix}; cc_entrypoint=sdk-cli;`,
-    },
-    { type: 'text', text: instruction },
-  ];
   const first = {
     model: model.model,
-    system: system('b00'),
+    system: 'Keep the task scope',
     messages: [{ role: 'user', content: 'first' }],
   };
   const response = await harness.handle(
@@ -71,7 +64,7 @@ test('billing attribution changes do not change native session instructions', as
   );
   const next = {
     ...first,
-    system: system('ebc'),
+    system: 'Different instructions entirely',
     messages: [
       ...first.messages,
       { role: 'assistant', content: response.content },
@@ -80,17 +73,9 @@ test('billing attribution changes do not change native session instructions', as
   };
   await harness.handle(next, 'billing', new AbortController().signal, undefined, context);
   assert.equal(fixture.calls.length, 2);
-  assert(!fixture.calls[0].prompt.includes('x-anthropic-billing-header'));
-  await assert.rejects(
-    harness.handle(
-      { ...next, system: system('ebc', 'Different instructions') },
-      'billing',
-      new AbortController().signal,
-      undefined,
-      context,
-    ),
-    /instructions changed/,
-  );
+  assert(!fixture.calls[0].prompt.includes('Keep the task scope'));
+  assert(!fixture.calls[1].prompt.includes('Different instructions entirely'));
+  assert.match(fixture.calls[0].prompt, /Antigravity coding agent/);
 });
 
 test('Antigravity replays completed requests and resumes native conversation', async (t) => {
@@ -257,7 +242,7 @@ test('a compact summary merged with the authenticated user text forwards only th
   assert(!fixture.calls[1].prompt.includes('Historical compact summary'));
 });
 
-test('authenticated compaction preserves native instructions and disables tools', async (t) => {
+test('authenticated compaction ignores Claude system content and disables tools', async (t) => {
   const setupResult = await setup();
   const harness = new AntigravityHarness([model], { ...setupResult, checkPermissions: policy });
   t.after(() => harness.close());
@@ -286,7 +271,7 @@ test('authenticated compaction preserves native instructions and disables tools'
   );
   assert.equal(setupResult.calls.length, 2);
   assert.deepEqual(setupResult.calls[1].env?.MULTI_ANTIGRAVITY_TOOLS, '[]');
-  assert.match(setupResult.calls[1].prompt, /Claude summary instructions/);
+  assert(!setupResult.calls[1].prompt.includes('Claude summary instructions'));
   assert.match(setupResult.calls[1].prompt, /summarized outer history/);
   assert(compact.content[0].type === 'text');
   assert.match(compact.content[0].text, /Compaction summary; native tools disabled/);

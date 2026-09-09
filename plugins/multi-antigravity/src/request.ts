@@ -8,15 +8,11 @@ import { estimateTextTokens } from '../../multi-openai/src/tokens.ts';
 
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
-/** Claude's billing attribution suffix changes after compaction; it is not an instruction. */
-export function antigravitySystem(system: MessagesRequest['system']) {
-  const billingHeader = (text: unknown) =>
-    typeof text === 'string' && /^x-anthropic-billing-header: [^\r\n]*$/.test(text);
-  if (Array.isArray(system)) {
-    return system.filter((block) => block.type !== 'text' || !billingHeader(block.text));
-  }
-  return billingHeader(system) ? undefined : system;
-}
+const PREAMBLE =
+  'You are the Antigravity coding agent displayed inside Claude Code. Complete the task ' +
+  'using your native tools and permissions, verify changes, and report results and any ' +
+  'denied actions. Previously recorded actions are complete; do not repeat them. Do not ' +
+  'spawn child agents or external coding CLIs.';
 
 /** Cache markers are transport metadata; moving them must not fork native history. */
 export function antigravityHistoryHash(messages: MessagesRequest['messages']): string {
@@ -93,15 +89,14 @@ function messageText(message: RequestMessage): string {
   return `${message.role}: ${contentText(message.content, message.role === 'assistant', message.role)}`;
 }
 
-/** Convert Messages context into one authenticated agy prompt. Native tools stay in agy. */
+/**
+ * Convert Messages context into one authenticated agy prompt: a fixed preamble plus the
+ * conversation text. `agy` applies its own system prompt and reads the repo's AGENTS.md
+ * natively, so Claude's `system` is never forwarded. Native tools stay in agy.
+ */
 export function prepareAntigravityRequest(body: MessagesRequest, model = body.model ?? '') {
   validateRequest(body);
-  const sections = [
-    'You are the Antigravity coding agent displayed inside Claude Code.',
-    'Use your native tools and permissions. Previously recorded actions are complete; do not repeat them.',
-    body.system ? `system: ${contentText(antigravitySystem(body.system), false, 'system')}` : '',
-    body.messages?.map(messageText).join('\n'),
-  ].filter(Boolean);
+  const sections = [PREAMBLE, body.messages?.map(messageText).join('\n')].filter(Boolean);
   const prompt = sections.join('\n\n');
   return { prompt, inputTokens: estimateTextTokens(prompt), model };
 }
@@ -120,9 +115,6 @@ function validateRequest(body: MessagesRequest) {
     )
   ) {
     throw new Error('Antigravity requires valid conversation messages');
-  }
-  if (body.system !== undefined && typeof body.system !== 'string' && !Array.isArray(body.system)) {
-    throw new Error('Antigravity requires valid system content');
   }
   if (body.output_config?.format || body.output_format) {
     throw new Error('Antigravity CLI does not support strict Messages output schemas');

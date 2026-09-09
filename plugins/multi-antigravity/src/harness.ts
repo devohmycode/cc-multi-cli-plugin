@@ -25,7 +25,6 @@ import { selectAntigravityModel } from './models.ts';
 import type { AntigravityPolicy } from './permissions.ts';
 import {
   antigravityHistoryHash,
-  antigravitySystem,
   antigravityTerminalSuffix,
   prepareAntigravityRequest,
 } from './request.ts';
@@ -53,7 +52,6 @@ type Saved = {
   identity: string;
   historyLength: number;
   historyHash: string;
-  instructions: string;
   response?: MessagesResponse;
   replay?: { key: string; events: Event[] };
   pending: boolean;
@@ -100,14 +98,6 @@ function noticeForRun(policy: AntigravityPolicy, context: PermissionContext) {
   return context.compaction === undefined
     ? policy.notice
     : 'Compaction summary; native tools disabled.';
-}
-
-function requestSystem(
-  body: MessagesRequest,
-  session: Session,
-  context: PermissionContext,
-): MessagesRequest['system'] {
-  return context.compaction !== undefined || !session.conversationId ? body.system : undefined;
 }
 
 export class AntigravityHarness {
@@ -177,7 +167,7 @@ export class AntigravityHarness {
         ...body,
         stream: undefined,
         messages: antigravityHistoryHash(body.messages),
-        system: systemHash(body),
+        system: undefined,
       },
       {
         permissionMode: context.permissionMode,
@@ -263,7 +253,7 @@ export class AntigravityHarness {
       }
       this.loading.add(identity);
       try {
-        saved = await this.loadSession(body, identity);
+        saved = await this.loadSession(identity);
       } finally {
         this.loading.delete(identity);
       }
@@ -315,10 +305,7 @@ export class AntigravityHarness {
     const signal = exchange.controller.signal;
     const initSaves: Promise<void>[] = [];
     try {
-      const prepared = prepareAntigravityRequest(
-        { ...body, messages, system: requestSystem(body, session, context) },
-        model.id,
-      );
+      const prepared = prepareAntigravityRequest({ ...body, messages }, model.id);
       const policy = await this.checkPermissions(cwd, context);
       const nativeTools = toolsForRun(policy, context);
       const notice = noticeForRun(policy, context);
@@ -468,7 +455,7 @@ export class AntigravityHarness {
     }
     this.creating.add(identity);
     try {
-      const session = current ?? (await this.loadSession(body, identity));
+      const session = current ?? (await this.loadSession(identity));
       const messages =
         session.response || session.needsPrompt
           ? continuation(session, body, context)
@@ -489,7 +476,7 @@ export class AntigravityHarness {
     return path.join(this.stateDirectory, `${digest(identity)}.session.json`);
   }
 
-  private async loadSession(body: MessagesRequest, identity: string): Promise<Session> {
+  private async loadSession(identity: string): Promise<Session> {
     await mkdir(this.stateDirectory, { recursive: true, mode: 0o700 });
     const file = this.sessionFile(identity);
     const release = await lockCursorSession(`${file}.lock`);
@@ -507,7 +494,6 @@ export class AntigravityHarness {
           identity,
           historyLength: 0,
           historyHash: antigravityHistoryHash([]),
-          instructions: systemHash(body),
           pending: false,
         }),
         file,
@@ -722,9 +708,6 @@ function safeText(value: string) {
 }
 
 function continuation(session: Session, body: MessagesRequest, context: PermissionContext) {
-  if (context.compaction === undefined && session.instructions !== systemHash(body)) {
-    throw new Error('Antigravity session instructions changed; use a new session');
-  }
   const messages = body.messages ?? [];
   const count = session.historyLength;
   if (
@@ -746,12 +729,6 @@ function continuation(session: Session, body: MessagesRequest, context: Permissi
     throw new Error('Antigravity continuation contains no new message');
   }
   return delta;
-}
-
-function systemHash(body: MessagesRequest) {
-  return antigravityHistoryHash([
-    { role: 'system', content: antigravitySystem(body.system) ?? '' },
-  ]);
 }
 
 function reconcileHistory(
@@ -874,7 +851,6 @@ async function readSession(file: string): Promise<Saved | undefined> {
     typeof saved.identity !== 'string' ||
     !isHash(saved.historyHash) ||
     !Number.isSafeInteger(saved.historyLength) ||
-    !isHash(saved.instructions) ||
     (saved.policyIdentity !== undefined && !isHash(saved.policyIdentity)) ||
     typeof saved.pending !== 'boolean' ||
     !validUsage(saved.usage) ||
