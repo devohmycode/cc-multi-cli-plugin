@@ -284,6 +284,7 @@ export class AntigravityHarness {
       session.policyIdentity = policyIdentity;
       signal.throwIfAborted();
       let streamed = '';
+      let initSave: Promise<void> | undefined;
       const startedAt = performance.now();
       const outcome = await this.run({
         cwd,
@@ -303,10 +304,20 @@ export class AntigravityHarness {
             },
             (conversationId) => {
               session.conversationId = conversationId;
+              session.interrupted = true;
               initConversationId = conversationId;
+              // Best-effort durability write: if the gateway crashes before a
+              // terminal result arrives, the next request resumes this native
+              // conversation with the interrupted notice instead of starting a
+              // fresh one. Fired here, not awaited here, so it never blocks the
+              // stream; awaited below before the terminal result is processed.
+              initSave = this.saveSession(session).catch(() => {
+                // The run continues regardless of a failed durability write.
+              });
             },
           ),
       });
+      await initSave;
       const result = outcome.result;
       session.conversationId = result.conversation_id;
       session.interrupted = false;

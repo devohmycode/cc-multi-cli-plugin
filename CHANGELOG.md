@@ -31,6 +31,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   newest turn on the native conversation with a notice instead of refusing an
   interrupted or history-changed session. Cache reuse and native compaction
   retain experimental status.
+- Persist the native conversation id and an interrupted flag as soon as a run's
+  `init` event reports one, before its terminal result arrives, so a gateway
+  crash mid-run still resumes the native conversation on the next request
+  instead of starting a fresh one.
 - Authenticate main-session compaction through Claude's PreCompact hook and deny
   native tools while generating the outer summary.
 

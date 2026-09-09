@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -193,6 +193,45 @@ test('an interrupted run keeps its native conversation and resumes with a notice
   assert(!calls[2].prompt.includes('previous turn was interrupted'));
   assert(third.content[0].type === 'text');
   assert(!third.content[0].text.includes('previous turn was interrupted'));
+});
+
+test('an init event durably saves the conversation id and interrupted state before a terminal result', async () => {
+  const stateDirectory = await mkdtemp(path.join(os.tmpdir(), 'agy-durability-'));
+  const run = async (options: AntigravityRunOptions): Promise<AntigravityRunResult> => {
+    options.onEvent?.({ event: 'init', conversation_id: 'durable-conversation', init: {} });
+    // Simulates a gateway crash: the run never settles on its own, only when
+    // the harness is closed (below) and aborts it.
+    return new Promise<AntigravityRunResult>((_, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), {
+        once: true,
+      });
+    });
+  };
+  const harness = new AntigravityHarness([model], {
+    stateDirectory,
+    checkPermissions: policy,
+    run,
+  });
+  const request = { model: model.model, messages: [{ role: 'user', content: 'crash mid-run' }] };
+  const pending = harness.handle(
+    request,
+    'session/worker',
+    new AbortController().signal,
+    undefined,
+    context,
+  );
+  // Give the fire-and-forget durability write time to land before the harness closes.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  const files = await readdir(stateDirectory);
+  const sessionFile = files.find((name) => name.endsWith('.session.json'));
+  assert(sessionFile, 'expected a persisted session file before the run settled');
+  const saved = JSON.parse(await readFile(path.join(stateDirectory, sessionFile), 'utf8'));
+  assert.equal(saved.conversationId, 'durable-conversation');
+  assert.equal(saved.interrupted, true);
+
+  await harness.close();
+  await assert.rejects(pending);
 });
 
 test('an aborted run without a native conversation id starts fresh next time', async (t) => {
