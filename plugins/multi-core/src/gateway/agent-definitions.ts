@@ -4,7 +4,6 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { parseDocument } from 'yaml';
-import { assertCursorClaudeSettings } from '../../../multi-cursor/src/permissions.ts';
 
 export interface WorkerPermissions {
   permissionMode?: string;
@@ -151,24 +150,8 @@ async function readDefinition(file: string): Promise<[string, WorkerPermissions]
       permissionMode,
       tools: toolList(definition.tools, file, 'tools'),
       disallowedTools: toolList(definition.disallowedTools, file, 'disallowedTools'),
-      ...nativeHookRestriction(definition.hooks, file),
     },
   ];
-}
-
-function nativeHookRestriction(
-  hooks: unknown,
-  file: string,
-): Pick<WorkerPermissions, 'nativePermissionError'> {
-  try {
-    assertCursorClaudeSettings({ hooks });
-    return {};
-  } catch (error) {
-    // Keep the catalog usable; only the selected native worker must reject its hook policy.
-    return {
-      nativePermissionError: `Native Cursor cannot honor worker hooks in ${file}: ${String(error)}`,
-    };
-  }
 }
 
 function toolList(value: unknown, file: string, field: string): string[] | undefined {
@@ -254,7 +237,7 @@ async function pluginAgents(
       throw error;
     }
   }
-  await pluginHooks(directory, manifest.hooks);
+  // Plugin hooks are Claude-loop observability; they never run for native harness tools.
   const configured = manifest.agents ?? ['./agents'];
   const locations = Array.isArray(configured) ? configured : [configured];
   const permissions: Record<string, WorkerPermissions> = Object.create(null);
@@ -302,29 +285,4 @@ function withinProject(cwd: string, project: string): boolean {
     relative === '' ||
     (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
   );
-}
-
-async function pluginHooks(directory: string, configured: unknown): Promise<void> {
-  const sources = ['./hooks/hooks.json', ...(configured === undefined ? [] : [configured].flat())];
-  for (const source of sources) {
-    if (typeof source !== 'string') {
-      assertCursorClaudeSettings(source);
-      continue;
-    }
-    let text: string;
-    try {
-      text = await readFile(path.resolve(directory, source), 'utf8');
-    } catch (error) {
-      if (
-        source === './hooks/hooks.json' &&
-        error instanceof Error &&
-        'code' in error &&
-        error.code === 'ENOENT'
-      ) {
-        continue;
-      }
-      throw error;
-    }
-    assertCursorClaudeSettings(JSON.parse(text));
-  }
 }

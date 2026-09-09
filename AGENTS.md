@@ -45,7 +45,9 @@ define the product direction.
 - Cursor supports Auto, Plan and Bypass at prompt boundaries. Plan excludes shell/edit;
   Bypass disables native Auto-review while retaining explicit capability restrictions;
   unsupported modes, unknown workers and untranslatable policies fail
-  explicitly. Settings admission currently supports Linux without WSL.
+  explicitly. Claude's PreToolUse/PermissionRequest hooks never run for native
+  harness tools; they are observability, not policy, and do not block admission.
+  Settings admission currently supports Linux without WSL.
 - Preserve Claude subscription passthrough and isolate provider credentials.
   Do not add our own Claude subscription login/token pool or extract Antigravity
   tokens for direct model requests. External operations retain external permissions.

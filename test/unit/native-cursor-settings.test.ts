@@ -69,10 +69,10 @@ test('native settings admission refuses CLI restrictions and caller hooks but ac
   await checkCursorSettings('/tmp', ['--setting-sources=', '--allowedTools', 'Bash'], {
     permissions: { allow: ['Bash'] },
   });
-  await assert.rejects(
-    checkCursorSettings('/tmp', ['--setting-sources='], { hooks: { PreToolUse: [{}] } }),
-    /PreToolUse/,
-  );
+  // Claude hooks never run for native tools, so they must not block admission.
+  await checkCursorSettings('/tmp', ['--setting-sources='], {
+    hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'log' }] }] },
+  });
 });
 
 test('native settings admission translates managed deny and refuses unknown controls', async (t) => {

@@ -55,6 +55,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ### Cursor harness simplification
 
+- Admit Claude settings, plugins and worker definitions that carry `PreToolUse`
+  or `PermissionRequest` hooks. Those hooks never run for native Cursor or
+  Antigravity tools, so they no longer block native execution. Found while
+  dogfooding with an observability hook installed in user settings.
 - Stop forwarding Claude's `system` content to the Cursor SDK prompt. Cursor's
   own system prompt remains active; the request is one fixed preamble plus the
   conversation text, with no "session instructions" JSON field or saved

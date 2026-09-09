@@ -126,7 +126,7 @@ test('discovers scoped plugin workers, manifest replacement paths and inherited 
   await assert.rejects(loadWorkerPermissions(cwd, {}), /Malformed plugin agent/);
 });
 
-test('rejects enabled plugin permission hooks instead of bypassing their policy', async () => {
+test('plugin and worker hooks never block native execution; Claude hooks do not run natively', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'plugin-hooks-'));
   await mkdir(path.join(root, 'hooks'));
   await writeFile(
@@ -134,10 +134,11 @@ test('rejects enabled plugin permission hooks instead of bypassing their policy'
     JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [] }] } }),
   );
   inventory = [{ id: 'guard@test', enabled: true, installPath: root }];
-  await assert.rejects(loadWorkerPermissions(root, {}), /cannot enforce Claude hooks.PreToolUse/);
+  const definitions = await loadWorkerPermissions(root, {});
+  assert.equal(definitions['general-purpose'].nativePermissionError, undefined);
 });
 
-test('worker permission hooks mark only their own definition unavailable to native execution', async () => {
+test('worker hooks do not restrict the native worker', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'worker-hooks-'));
   await writeAgent(
     root,
@@ -150,18 +151,11 @@ test('worker permission hooks mark only their own definition unavailable to nati
     '---\nname: ordinary\ndescription: ordinary\ntools: Read\n---\n',
   );
   const definitions = await loadWorkerPermissions(root, {});
-  assert.match(
-    definitions.guarded.nativePermissionError ?? '',
-    /cannot honor worker hooks.*guarded.md/,
-  );
+  assert.equal(definitions.guarded.nativePermissionError, undefined);
   assert.equal(definitions.ordinary.nativePermissionError, undefined);
   assert.deepEqual(definitions.ordinary.tools, ['Read']);
   assert.equal(definitions['general-purpose'].nativePermissionError, undefined);
-  assert.throws(
-    () => cursorPermissionPolicy({ ...definitions.guarded, permissionMode: 'auto' }),
-    /cannot honor worker hooks/,
-  );
-  assert.doesNotThrow(() =>
-    cursorPermissionPolicy({ ...definitions.ordinary, permissionMode: 'auto' }),
-  );
+  for (const definition of [definitions.guarded, definitions.ordinary]) {
+    assert.doesNotThrow(() => cursorPermissionPolicy({ ...definition, permissionMode: 'auto' }));
+  }
 });

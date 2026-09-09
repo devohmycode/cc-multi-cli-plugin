@@ -113,7 +113,6 @@ export function assertCursorClaudeSettings(settings: unknown): WorkerPermissions
     throw new Error('Native Cursor requires Claude mode hooks; disableAllHooks is unsupported.');
   }
   const permissions = settingsRecord(value.permissions ?? {});
-  const hooks = settingsRecord(value.hooks ?? {});
   assertEmptyRules(permissions.ask, 'permissions.ask');
   const denied = permissions.deny;
   if (
@@ -123,9 +122,8 @@ export function assertCursorClaudeSettings(settings: unknown): WorkerPermissions
     throw new Error('Native Cursor cannot enforce Claude permissions.deny');
   }
   claudeToolRules(denied);
-  for (const name of ['PreToolUse', 'PermissionRequest']) {
-    assertEmptyRules(hooks[name], `hooks.${name}`);
-  }
+  // Claude's PreToolUse/PermissionRequest hooks never run for native Cursor tools.
+  // They are not translatable policy, so they neither block admission nor apply.
   const sandbox = settingsRecord(value.sandbox ?? {});
   if (Object.keys(sandbox).some((key) => key !== 'enabled' || sandbox.enabled !== false)) {
     throw new Error(

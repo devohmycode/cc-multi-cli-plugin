@@ -103,8 +103,6 @@ test('native Cursor rejects Claude restrictions that cannot reach external execu
   for (const settings of [
     { permissions: { deny: ['Bash(rm:*)'] } },
     { permissions: { ask: ['Edit'] } },
-    { hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'check-policy' }] }] } },
-    { hooks: { PermissionRequest: [{ hooks: [{ type: 'command', command: 'approve' }] }] } },
     { sandbox: { enabled: true } },
     { sandbox: { network: { deniedDomains: ['example.com'] } } },
   ]) {
@@ -112,14 +110,14 @@ test('native Cursor rejects Claude restrictions that cannot reach external execu
   }
 });
 
-test('native Cursor accepts ordinary UI, grants and unrelated lifecycle hooks', () => {
+test('native Cursor accepts ordinary UI, grants and Claude hooks, which never run natively', () => {
   assert.doesNotThrow(() => assertCursorClaudeSettings({}));
   assert.doesNotThrow(() =>
     assertCursorClaudeSettings({
       permissions: { allow: ['Read'], deny: [], ask: [], defaultMode: 'acceptEdits' },
       hooks: {
-        PreToolUse: [],
-        PermissionRequest: [],
+        PreToolUse: [{ hooks: [{ type: 'command', command: 'log' }] }],
+        PermissionRequest: [{ hooks: [{ type: 'command', command: 'approve' }] }],
         Stop: [{ hooks: [{ type: 'command', command: 'notify' }] }],
       },
       sandbox: { enabled: false },
@@ -128,7 +126,6 @@ test('native Cursor accepts ordinary UI, grants and unrelated lifecycle hooks', 
     }),
   );
   assert.throws(() => assertCursorClaudeSettings([]), /Invalid Claude settings/);
-  assert.throws(() => assertCursorClaudeSettings({ hooks: 'invalid' }), /Invalid Claude settings/);
   assert.throws(
     () => assertCursorClaudeSettings({ permissions: { deny: 'Edit' } }),
     /cannot enforce Claude/,
