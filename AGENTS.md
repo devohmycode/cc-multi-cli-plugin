@@ -49,13 +49,13 @@ define the product direction.
 - Preserve Claude subscription passthrough and isolate provider credentials.
   Do not add our own Claude subscription login/token pool or extract Antigravity
   tokens for direct model requests. External operations retain external permissions.
-- Antigravity is an opt-in official CLI harness. Auto uses native edit acceptance
-  and native command policy without a reviewer. A namespaced global pre-tool hook
-  enforces tool restrictions only for gateway-launched processes; neutral native
-  hooks emit no stdout. Explicit native workspace selection is required, not just
-  subprocess cwd. Native children/MCP remain denied. Never replay uncertain runs.
-  Main-session PreCompact hooks authenticate summary requests with all native tools
-  denied; they never authorize replay or rewinding of native state.
+- Antigravity is an opt-in official CLI harness. Claude Code's permission mode
+  and tool rules take precedence; agy runs with native permissions skipped and a
+  namespaced global pre-tool hook enforces Claude's denials; native children and
+  MCP remain denied; no reviewer. Explicit native workspace selection is required,
+  not just subprocess cwd. Never replay uncertain runs. Main-session PreCompact
+  hooks authenticate summary requests with all native tools denied; they never
+  authorize replay or rewinding of native state.
 - Targets: OpenAI, Cursor, Antigravity through its real CLI, OpenCode, llama.cpp,
   and Grok Build. The direct GPT gateway and Cursor SDK harness are experimental.
   Native Cursor persists and resumes SDK state. Durable run IDs permit terminal-result

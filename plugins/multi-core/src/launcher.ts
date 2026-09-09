@@ -198,7 +198,7 @@ function nativeHarnesses(
   const antigravity = antigravityModels.length
     ? new AntigravityHarness(antigravityModels, {
         checkPermissions: async (cwd, context) => {
-          await checkAntigravityHooks(cwd);
+          await checkAntigravityHooks();
           const restrictions = await checkCursorSettings(cwd, args, callerSettings);
           return antigravityPermissionPolicy(mergeCursorPermissions(context, restrictions));
         },

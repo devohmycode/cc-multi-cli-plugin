@@ -65,9 +65,8 @@ export interface AntigravityRunOptions {
   effort?: 'low' | 'medium' | 'high';
   conversation?: string;
   agent?: string;
-  mode?: 'accept-edits' | 'plan';
+  mode?: 'plan';
   newProject?: boolean;
-  bypass?: boolean;
   printTimeout?: string;
   env?: NodeJS.ProcessEnv;
   executable?: string;
@@ -135,9 +134,10 @@ export function runAntigravity(options: AntigravityRunOptions): Promise<Antigrav
   if (options.printTimeout) {
     args.push('--print-timeout', options.printTimeout);
   }
-  if (options.bypass) {
-    args.push('--dangerously-skip-permissions');
-  }
+  // Native Ask/Deny config is bypassed on purpose: headless Ask is a denial and
+  // nobody using this gateway maintains native config. Claude's rules and the
+  // gateway's own pre-tool hook are the only enforcement that matters.
+  args.push('--dangerously-skip-permissions');
 
   return new Promise((resolve, reject) => {
     let child: ChildProcess;

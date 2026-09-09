@@ -86,6 +86,9 @@ test('runs agy with explicit flags and parses typed NDJSON events', async (t) =>
   const addDirIndex = args.indexOf('--add-dir');
   assert.equal(args[addDirIndex + 1], cli.cwd);
   assert.equal(args.includes('--new-project'), false);
+  assert.equal(args.includes('--dangerously-skip-permissions'), true);
+  const modeIndex = args.indexOf('--mode');
+  assert.equal(args[modeIndex + 1], 'plan');
   assert.deepEqual(
     events.map((event) => event.event),
     ['init', 'step_update', 'result'],
@@ -104,6 +107,8 @@ test('starts a new conversation in an isolated Antigravity project', async (t) =
   });
   const args = (await readFile(argsFile, 'utf8')).trim().split('\n');
   assert.equal(args.includes('--new-project'), true);
+  assert.equal(args.includes('--dangerously-skip-permissions'), true);
+  assert.equal(args.includes('--mode'), false);
 });
 
 test('preserves a terminal provider error even with a nonzero exit code', async (t) => {

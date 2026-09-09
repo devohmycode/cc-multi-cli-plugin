@@ -1,4 +1,4 @@
-import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { hookCommand } from '../../multi-core/src/gateway/permission-hook.ts';
@@ -14,7 +14,7 @@ function definition() {
         hooks: [
           {
             type: 'command',
-            command: `if [ "\${MULTI_ANTIGRAVITY_TOOLS+x}" = x ]; then ${hookCommand(new URL('./permission-hook.ts', import.meta.url))}; fi`,
+            command: `if [ "\${MULTI_ANTIGRAVITY_DENY+x}" = x ]; then ${hookCommand(new URL('./permission-hook.ts', import.meta.url))}; fi`,
             timeout: 10,
           },
         ],
@@ -49,7 +49,6 @@ export async function installAntigravityHook(file = hookFile()): Promise<void> {
   try {
     const hooks = await readHooks(file);
     hooks[namespace] = definition();
-    assertAntigravityHooks(hooks);
     const temporary = `${file}.multi-${process.pid}.tmp`;
     await writeFile(temporary, `${JSON.stringify(hooks, null, 2)}\n`, { mode: 0o600 });
     await rename(temporary, file);
@@ -59,7 +58,6 @@ export async function installAntigravityHook(file = hookFile()): Promise<void> {
 }
 
 export async function checkAntigravityHooks(
-  cwd = process.cwd(),
   files: { globalFile?: string; settingsFile?: string } = {},
 ): Promise<void> {
   assertAntigravityHooks(await readHooks(files.globalFile ?? hookFile()));
@@ -71,64 +69,12 @@ export async function checkAntigravityHooks(
       'Antigravity requires native account authentication and models; custom provider settings are unsupported.',
     );
   }
-  await assertWorkspaceHooks(cwd);
-}
-
-async function assertWorkspaceHooks(cwd: string): Promise<void> {
-  let directory = path.resolve(cwd);
-  try {
-    directory = await realpath(directory);
-  } catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
-      throw error;
-    }
-  }
-  while (true) {
-    const hooks = await readHooks(path.join(directory, '.agents', 'hooks.json'));
-    assertNoActivePreToolUse(hooks, 'workspace');
-    const parent = path.dirname(directory);
-    if (parent === directory) {
-      return;
-    }
-    directory = parent;
-  }
 }
 
 function assertAntigravityHooks(hooks: Record<string, unknown>): void {
   if (JSON.stringify(hooks[namespace]) !== JSON.stringify(definition())) {
     throw new Error(
       'Antigravity requires its native permission hook. Run the launcher with --antigravity-setup.',
-    );
-  }
-  for (const [name, value] of Object.entries(hooks)) {
-    if (name === namespace || !value || typeof value !== 'object') {
-      continue;
-    }
-    if ('enabled' in value && value.enabled === false) {
-      continue;
-    }
-    assertNoActivePreToolUse({ [name]: value }, 'global');
-  }
-}
-
-function assertNoActivePreToolUse(hooks: Record<string, unknown>, location: string): void {
-  const suffix = location === 'global' ? '' : ` (${location})`;
-  for (const value of Object.values(hooks)) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      continue;
-    }
-    if ('enabled' in value && value.enabled === false) {
-      continue;
-    }
-    if ('PreToolUse' in value) {
-      throw new Error(
-        `Antigravity cannot establish restriction precedence with another active PreToolUse hook${suffix}.`,
-      );
-    }
-  }
-  if ('PreToolUse' in hooks) {
-    throw new Error(
-      `Antigravity cannot establish restriction precedence with another active PreToolUse hook${suffix}.`,
     );
   }
 }

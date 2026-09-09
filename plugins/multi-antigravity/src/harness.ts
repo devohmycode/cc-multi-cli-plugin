@@ -21,7 +21,7 @@ import type {
 import { runAntigravity } from './cli.ts';
 import type { AntigravityModel } from './models.ts';
 import { selectAntigravityModel } from './models.ts';
-import type { AntigravityPolicy } from './permissions.ts';
+import { type AntigravityPolicy, antigravityCompactionDenyList } from './permissions.ts';
 import {
   antigravityHistoryHash,
   antigravityTerminalSuffix,
@@ -72,8 +72,8 @@ function modelEffort(model: AntigravityModel): AntigravityRunOptions['effort'] {
   return suffix === 'low' || suffix === 'medium' || suffix === 'high' ? suffix : undefined;
 }
 
-function toolsForRun(policy: AntigravityPolicy, context: PermissionContext) {
-  return context.compaction === undefined ? policy.tools : [];
+function deniedForRun(policy: AntigravityPolicy, context: PermissionContext) {
+  return context.compaction === undefined ? policy.denied : antigravityCompactionDenyList();
 }
 
 function noticeForRun(policy: AntigravityPolicy, context: PermissionContext) {
@@ -272,13 +272,12 @@ export class AntigravityHarness {
         prepared.prompt = `${INTERRUPTED_NOTICE}\n\n${prepared.prompt}`;
       }
       const policy = await this.checkPermissions(cwd, context);
-      const nativeTools = toolsForRun(policy, context);
+      const nativeDenied = deniedForRun(policy, context);
       const notice = noticeForRun(policy, context);
       const response = new HarnessResponse(body.model ?? model.model, prepared.inputTokens, emit);
       const policyIdentity = digest({
-        tools: nativeTools,
-        mode: policy.mode,
-        bypass: policy.bypass,
+        denied: nativeDenied,
+        plan: policy.plan,
         notice,
       });
       writeNotices(response, session, rewound, notice, policyIdentity);
@@ -292,9 +291,8 @@ export class AntigravityHarness {
         model: model.id,
         effort: modelEffort(model),
         ...(session.conversationId ? { conversation: session.conversationId } : {}),
-        mode: policy.mode,
-        bypass: policy.bypass,
-        env: { ...process.env, MULTI_ANTIGRAVITY_TOOLS: JSON.stringify(nativeTools) },
+        ...(policy.plan ? { mode: 'plan' as const } : {}),
+        env: { ...process.env, MULTI_ANTIGRAVITY_DENY: JSON.stringify(nativeDenied) },
         signal,
         onEvent: (event) =>
           this.eventText(

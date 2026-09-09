@@ -12,6 +12,7 @@ import {
   checkAntigravityHooks,
   installAntigravityHook,
 } from '../../plugins/multi-antigravity/src/hooks.ts';
+import { antigravityCompactionDenyList } from '../../plugins/multi-antigravity/src/permissions.ts';
 import {
   antigravityHistoryHash,
   prepareAntigravityRequest,
@@ -26,10 +27,9 @@ const model = {
 };
 const context: PermissionContext = { permissionMode: 'auto', cwd: process.cwd() };
 const policy = async () => ({
-  tools: ['view_file'],
-  mode: 'accept-edits' as const,
+  denied: ['run_command'],
+  plan: false,
   notice: 'Native policy',
-  bypass: false,
 });
 
 async function setup() {
@@ -375,7 +375,10 @@ test('authenticated compaction ignores Claude system content and disables tools'
     { ...context, compaction: 'authenticated-compaction' },
   );
   assert.equal(setupResult.calls.length, 2);
-  assert.deepEqual(setupResult.calls[1].env?.MULTI_ANTIGRAVITY_TOOLS, '[]');
+  assert.deepEqual(
+    JSON.parse(setupResult.calls[1].env?.MULTI_ANTIGRAVITY_DENY ?? '[]'),
+    antigravityCompactionDenyList(),
+  );
   assert(!setupResult.calls[1].prompt.includes('Claude summary instructions'));
   assert.match(setupResult.calls[1].prompt, /summarized outer history/);
   assert(compact.content[0].type === 'text');
@@ -387,10 +390,9 @@ test('a changed native policy emits its new mode notice', async (t) => {
   const harness = new AntigravityHarness([model], {
     ...setupResult,
     checkPermissions: async (_cwd, activeContext) => ({
-      tools: [],
-      mode: activeContext.permissionMode === 'acceptEdits' ? 'accept-edits' : 'plan',
+      denied: [],
+      plan: activeContext.permissionMode === 'plan',
       notice: `mode=${activeContext.permissionMode}`,
-      bypass: false,
     }),
   });
   t.after(() => harness.close());
@@ -634,34 +636,39 @@ test('terminal events wait for the completed response ledger', async (t) => {
   assert.equal(events.includes('message_stop'), false);
 });
 
-test('workspace PreToolUse hooks are rejected during native admission', async () => {
+test('native admission requires our installed hook and rejects custom model settings', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'agy-hooks-'));
   const globalFile = path.join(root, 'global', 'hooks.json');
   const settingsFile = path.join(root, 'settings.json');
-  const workspace = path.join(root, 'workspace', 'nested');
-  await mkdir(workspace, { recursive: true });
-  await installAntigravityHook(globalFile);
-  await mkdir(path.join(root, 'workspace', '.agents'), { recursive: true });
-  await writeFile(
-    path.join(root, 'workspace', '.agents', 'hooks.json'),
-    JSON.stringify({ project: { PreToolUse: [] } }),
-  );
+
   await assert.rejects(
-    checkAntigravityHooks(workspace, { globalFile, settingsFile }),
-    /active PreToolUse hook \(workspace\)/,
+    checkAntigravityHooks({ globalFile, settingsFile }),
+    /requires its native permission hook/,
+  );
+
+  await installAntigravityHook(globalFile);
+  await assert.doesNotReject(checkAntigravityHooks({ globalFile, settingsFile }));
+
+  await writeFile(settingsFile, JSON.stringify({ modelProvider: 'custom' }));
+  await assert.rejects(
+    checkAntigravityHooks({ globalFile, settingsFile }),
+    /custom provider settings are unsupported/,
   );
 });
 
-test('workspace hook admission accepts unrelated hook events', async () => {
+test('an unrelated active PreToolUse hook does not block native admission', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'agy-hooks-'));
   const globalFile = path.join(root, 'global', 'hooks.json');
   const settingsFile = path.join(root, 'settings.json');
-  const workspace = path.join(root, 'workspace');
-  await mkdir(path.join(workspace, '.agents'), { recursive: true });
-  await installAntigravityHook(globalFile);
+  await mkdir(path.dirname(globalFile), { recursive: true });
   await writeFile(
-    path.join(workspace, '.agents', 'hooks.json'),
-    JSON.stringify({ project: { PostToolUse: [] } }),
+    globalFile,
+    JSON.stringify({
+      other: {
+        PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'other' }] }],
+      },
+    }),
   );
-  await assert.doesNotReject(checkAntigravityHooks(workspace, { globalFile, settingsFile }));
+  await installAntigravityHook(globalFile);
+  await assert.doesNotReject(checkAntigravityHooks({ globalFile, settingsFile }));
 });

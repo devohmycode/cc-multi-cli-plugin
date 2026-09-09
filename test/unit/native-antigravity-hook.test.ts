@@ -16,9 +16,9 @@ const hook = fileURLToPath(
 function runHook(input: string, policy?: string): HookResult {
   const environment = { ...process.env };
   if (policy === undefined) {
-    delete environment.MULTI_ANTIGRAVITY_TOOLS;
+    delete environment.MULTI_ANTIGRAVITY_DENY;
   } else {
-    environment.MULTI_ANTIGRAVITY_TOOLS = policy;
+    environment.MULTI_ANTIGRAVITY_DENY = policy;
   }
   const child = spawnSync(process.execPath, [hook], {
     input,
@@ -42,7 +42,7 @@ test('native Antigravity hook emits no stdout when no gateway policy is present'
 test('native Antigravity hook denies excluded and malformed calls', async () => {
   const excluded = runHook(
     JSON.stringify({ toolCall: { name: 'run_command', args: {} } }),
-    JSON.stringify(['view_file']),
+    JSON.stringify(['run_command']),
   );
   assert.equal(excluded.code, 0);
   assert.ok(excluded.stdout, JSON.stringify(excluded));
@@ -51,7 +51,14 @@ test('native Antigravity hook denies excluded and malformed calls', async () => 
     reason: 'Claude session policy excludes this native Antigravity tool.',
   });
 
-  const malformedPayload = runHook('{malformed}', JSON.stringify(['view_file']));
+  const notExcluded = runHook(
+    JSON.stringify({ toolCall: { name: 'view_file', args: {} } }),
+    JSON.stringify(['run_command']),
+  );
+  assert.equal(notExcluded.code, 0);
+  assert.equal(notExcluded.stdout, '');
+
+  const malformedPayload = runHook('{malformed}', JSON.stringify(['run_command']));
   assert.equal(malformedPayload.code, 0);
   assert.deepEqual(JSON.parse(malformedPayload.stdout), {
     decision: 'deny',

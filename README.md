@@ -97,8 +97,9 @@ node plugins/multi-core/src/launcher.ts --antigravity-setup
 MULTI_ANTIGRAVITY=1 node plugins/multi-core/src/launcher.ts
 ```
 
-This enables experimental selections and incoming workers. Auto uses native edit acceptance and
-native command policy, without a reviewer model. See [setup, permissions and
+This enables experimental selections and incoming workers. Claude Code's
+permission mode and tool rules take precedence; native permissions are skipped
+and there is no reviewer model. See [setup, permissions and
 continuation limits](docs/antigravity.md). Prompt-cache reuse remains experimental.
 
 ## Development checks

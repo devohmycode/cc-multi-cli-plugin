@@ -18,8 +18,15 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 - Add opt-in official CLI models and named incoming workers, with native login,
   streamed progress, persisted conversation resume and completed-request replay.
-- Add a scoped native pre-tool hook: Auto falls back to native edit acceptance
-  without a reviewer; Plan and Bypass preserve explicit capability restrictions.
+- Run `agy` with `--dangerously-skip-permissions` in every supported mode and
+  let Claude Code's permission mode and tool rules take precedence: a scoped
+  native pre-tool hook denies exactly the native tools mapped from Claude's
+  disallowed/missing-from-allowlist tools, plus shell/write/edit/notebook-edit
+  and delegation tools in Plan, plus native child-agent and MCP tools always.
+  No reviewer in any mode. A live probe against CLI 1.1.28 confirmed a
+  PreToolUse hook deny wins regardless of hook order, against an explicit allow
+  from another hook, and under `--dangerously-skip-permissions`; other active
+  PreToolUse hooks are no longer treated as a precedence conflict.
 - Keep native actions display-only and reject unsupported policy/content. Resume the
   newest turn on the native conversation with a notice instead of refusing an
   interrupted or history-changed session. Cache reuse and native compaction

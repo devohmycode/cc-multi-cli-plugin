@@ -26,13 +26,15 @@ test('Antigravity hook installation preserves non-PreToolUse hooks', async (t) =
   assert(installed['multi-cli-antigravity']);
 });
 
-test('Antigravity hook installation rejects an active conflicting PreToolUse hook', async (t) => {
+test('Antigravity hook installation coexists with another active PreToolUse hook', async (t) => {
   const original = {
     other: {
       PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'other' }] }],
     },
   };
   const { file } = await fixture(t, original);
-  await assert.rejects(installAntigravityHook(file), /another active PreToolUse hook/);
-  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), original);
+  await installAntigravityHook(file);
+  const installed = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+  assert.deepEqual(installed.other, original.other);
+  assert(installed['multi-cli-antigravity']);
 });

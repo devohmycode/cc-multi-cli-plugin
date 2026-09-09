@@ -17,12 +17,16 @@ MULTI_ANTIGRAVITY=1 node plugins/multi-core/src/launcher.ts
 
 The setup command installs one `multi-cli-antigravity` entry in
 `~/.gemini/config/hooks.json`, preserving other entries. Ordinary CLI sessions
-skip the hook entirely. Gateway-launched processes carry a fixed tool policy in
-`MULTI_ANTIGRAVITY_TOOLS`. The native hook can deny tools; permitted tools continue
-through Antigravity's own permission checks. Re-run setup after moving the checkout
-or changing Node installations. Remove only this namespaced entry to uninstall it.
-Other active global or workspace PreToolUse hooks currently reject admission because their
-combined decision precedence has not been established.
+skip the hook entirely. Gateway-launched processes always run `agy` with
+`--dangerously-skip-permissions`; native Ask/Deny config is bypassed on purpose,
+since headless Ask is a denial and nobody using this gateway maintains native
+config. Claude's tool rules take precedence instead: each run carries a fixed
+denylist of native tool names in `MULTI_ANTIGRAVITY_DENY`, and the hook denies
+exactly those calls, leaving every other call's native decision path untouched
+(no stdout). Re-run setup after moving the checkout or changing Node
+installations. Remove only this namespaced entry to uninstall it. Other active
+global PreToolUse hooks may coexist; a deny from any hook wins regardless of
+hook order (see Upstream evidence).
 
 Select `multi/antigravity/<advertised-model>` in `/model`, or delegate to a named
 `antigravity-<advertised-model>` worker. Effort selects a matching advertised native
@@ -34,15 +38,17 @@ listing is not a guarantee of subscription entitlement or quota availability.
 
 | Claude mode | Antigravity behavior |
 | --- | --- |
-| Auto | Native accept-edits; commands still follow native policy. No reviewer model. |
-| acceptEdits | Same native behavior as Auto. |
-| Plan | Native plan prompting plus enforced denial of shell and edits. |
-| Bypass | Native permission bypass; the pre-tool hook still denies excluded capabilities. |
+| Auto | Native permissions skipped (`--dangerously-skip-permissions`); the hook denies whatever Claude's tool rules exclude. No reviewer model. |
+| acceptEdits | Same behavior as Auto. |
+| Bypass | Same behavior as Auto; explicit Claude tool restrictions are still enforced by the hook. |
+| Plan | Native permissions skipped plus `--mode plan`; the hook also denies shell, write, edit, notebook-edit and delegation tools. |
 | default / dontAsk | Unsupported; select a supported mode. |
 
-Claude's existing prompt/worker hooks determine the mode at prompt boundaries.
-An authenticated `PreCompact` hook supplies the main-session compaction boundary;
-summary requests run with every native tool denied and retain native history.
+Claude Code's permission mode and tool rules take precedence over native
+Antigravity settings; there is no reviewer in any mode. Claude's existing
+prompt/worker hooks determine the mode at prompt boundaries. An authenticated
+`PreCompact` hook supplies the main-session compaction boundary; summary
+requests run with every mapped native tool denied and retain native history.
 Whole-tool restrictions intersect the native capability list. Richer unsupported
 Claude policy rejects admission rather than being silently ignored. The bridge
 currently reuses the conservative Cursor-side Claude settings admission checks;
@@ -132,3 +138,18 @@ a native workspace. Customizations in an unmounted workspace did not enforce
 restrictions; execution must select the native workspace explicitly. Global native PreToolUse deny
 hooks did block execution, including under native bypass. An empty JSON decision
 is a denial; a successful hook with no stdout preserves the native decision path.
+
+Local CLI 1.1.28 probes extended this: a PreToolUse hook deny wins regardless of
+hook order, against an explicit `{"decision":"allow"}` from another hook in
+either file order, and under `--dangerously-skip-permissions`. No configuration
+tried got a denied tool to actually execute. This is why the gateway always
+passes `--dangerously-skip-permissions` and relies entirely on its own
+namespaced hook to enforce Claude's tool rules, and why other active PreToolUse
+hooks are no longer treated as a precedence conflict. The full native tool
+catalog (`init.tools`) includes `view_file`, `list_dir`, `grep_search`,
+`find_by_name`, `write_to_file`, `replace_file_content`,
+`multi_replace_file_content`, `sed_file`, `run_command`, `command_status`,
+`send_command_input`, `read_url_content`, `search_web`, `invoke_subagent`,
+`define_subagent`, `manage_subagents`, `browser_subagent`, `call_mcp_tool`,
+`notebook_edit`, `notebook_execution`, and a `browser_*` family, among others
+not driven by this gateway.

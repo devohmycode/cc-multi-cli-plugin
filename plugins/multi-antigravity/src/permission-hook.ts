@@ -10,10 +10,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         throw new Error('Native permission input exceeds limit');
       }
     }
-    const decision = antigravityToolDecision(
-      JSON.parse(input),
-      process.env.MULTI_ANTIGRAVITY_TOOLS,
-    );
+    const decision = antigravityToolDecision(JSON.parse(input), process.env.MULTI_ANTIGRAVITY_DENY);
     // agy treats even an empty JSON decision as a denial. No stdout is neutral.
     if (decision) {
       console.log(JSON.stringify(decision));

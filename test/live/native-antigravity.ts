@@ -95,7 +95,7 @@ const context: PermissionContext = {
   tools: ['Read', 'Write'],
 };
 const checkPermissions = async (runCwd: string, runContext: PermissionContext) => {
-  await checkAntigravityHooks(runCwd);
+  await checkAntigravityHooks();
   return antigravityPermissionPolicy({ ...runContext, cwd: runCwd });
 };
 const run = async (options: AntigravityRunOptions) => {
