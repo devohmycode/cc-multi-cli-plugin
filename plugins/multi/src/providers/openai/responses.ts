@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type {
   ContentBlock,
   Emit,
@@ -62,11 +63,13 @@ export interface ResponsesRequest {
 interface ResponsesUsage {
   input_tokens?: number;
   output_tokens?: number;
-  input_tokens_details?: { cached_tokens?: number };
+  input_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
 }
 
 interface ResponsesResponse {
   id: string;
+  status?: string;
+  output?: ResponsesOutputItem[];
   usage?: ResponsesUsage | null;
   incomplete_details?: { reason?: string };
   error?: { message?: string };
@@ -80,10 +83,11 @@ interface ResponsesOutputContent {
 }
 
 /** The output items this gateway understands; any other `type` is rejected. */
-type ResponsesOutputItem =
+type ResponsesOutputItem = (
   | { type: 'message'; content?: ResponsesOutputContent[] }
   | { type: 'function_call'; call_id?: string; name?: string; arguments?: string }
-  | { type: 'reasoning'; id?: string; encrypted_content?: string; summary?: unknown };
+  | { type: 'reasoning'; encrypted_content?: string | null; summary?: unknown }
+) & { id?: string };
 
 /** Streamed events the translation acts on. Any other `type` is ignored, exactly
  *  as an unrecognised event was before it had a name here. */
@@ -96,6 +100,7 @@ type ResponseStreamEvent =
   | { type: 'response.function_call_arguments.delta'; output_index: number; delta: string }
   | { type: 'response.reasoning_summary_text.delta'; output_index: number; delta: string }
   | { type: 'response.completed'; response: ResponsesResponse }
+  | { type: 'response.done'; response: ResponsesResponse }
   | { type: 'response.incomplete'; response: ResponsesResponse }
   | { type: 'response.failed'; response?: Pick<ResponsesResponse, 'error'>; message?: string }
   | { type: 'error'; response?: Pick<ResponsesResponse, 'error'>; message?: string };
@@ -114,7 +119,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isOutputItem(value: unknown, done: boolean): value is ResponsesOutputItem {
-  if (!isRecord(value) || typeof value.type !== 'string') {
+  if (
+    !isRecord(value) ||
+    typeof value.type !== 'string' ||
+    (value.id !== undefined && typeof value.id !== 'string')
+  ) {
     return false;
   }
   if (value.type === 'function_call') {
@@ -137,8 +146,9 @@ function isOutputItem(value: unknown, done: boolean): value is ResponsesOutputIt
   }
   if (value.type === 'reasoning') {
     return (
-      (value.id === undefined || typeof value.id === 'string') &&
-      (value.encrypted_content == null ? !done : typeof value.encrypted_content === 'string') &&
+      (value.encrypted_content === undefined ||
+        (!done && value.encrypted_content === null) ||
+        typeof value.encrypted_content === 'string') &&
       (value.summary === undefined ||
         (Array.isArray(value.summary) &&
           value.summary.every(
@@ -154,6 +164,15 @@ function validResponse(value: unknown): boolean {
   if (!isRecord(value) || typeof value.id !== 'string') {
     return false;
   }
+  if (
+    value.output !== undefined &&
+    (!Array.isArray(value.output) || !value.output.every((item) => isOutputItem(item, true)))
+  ) {
+    return false;
+  }
+  if (value.status !== undefined && typeof value.status !== 'string') {
+    return false;
+  }
   if (value.usage == null) {
     return true;
   }
@@ -167,7 +186,9 @@ function validResponse(value: unknown): boolean {
     count(usage.input_tokens) &&
     count(usage.output_tokens) &&
     (usage.input_tokens_details === undefined ||
-      (isRecord(usage.input_tokens_details) && count(usage.input_tokens_details.cached_tokens)))
+      (isRecord(usage.input_tokens_details) &&
+        count(usage.input_tokens_details.cached_tokens) &&
+        count(usage.input_tokens_details.cache_write_tokens)))
   );
 }
 
@@ -181,6 +202,7 @@ function isStreamEvent(value: unknown): value is ResponseStreamEvent {
   switch (value.type) {
     case 'response.created':
     case 'response.completed':
+    case 'response.done':
     case 'response.incomplete':
       valid = validResponse(value.response);
       break;
@@ -237,7 +259,11 @@ export function forAnthropic(body: MessagesRequest): MessagesRequest {
         return message;
       }
       const content = message.content.filter((block) => {
-        const foreign = block.type === 'thinking' && block.signature?.startsWith(SIGNATURE_PREFIX);
+        const foreign =
+          block.type === 'thinking' &&
+          [SIGNATURE_PREFIX, 'multi-zen-responses:', 'multi-zen-chat:'].some((prefix) =>
+            block.signature?.startsWith(prefix),
+          );
         changed ||= Boolean(foreign);
         return !foreign;
       });
@@ -495,7 +521,7 @@ function reasoningEffort(body: MessagesRequest): Effort {
   return effort;
 }
 
-function assistantInput(block: ContentBlock): ResponsesInputItem[] {
+function assistantInput(block: ContentBlock, signaturePrefix: string): ResponsesInputItem[] {
   switch (block.type) {
     case 'tool_use':
       if (!block.id || !block.name || !isRecord(block.input)) {
@@ -510,11 +536,11 @@ function assistantInput(block: ContentBlock): ResponsesInputItem[] {
         },
       ];
     case 'thinking': {
-      if (!block.signature?.startsWith(SIGNATURE_PREFIX)) {
+      if (!block.signature?.startsWith(signaturePrefix)) {
         return [];
       }
       const item: unknown = JSON.parse(
-        Buffer.from(block.signature.slice(SIGNATURE_PREFIX.length), 'base64url').toString(),
+        Buffer.from(block.signature.slice(signaturePrefix.length), 'base64url').toString(),
       );
       if (!isReasoningState(item)) {
         throw new Error('Invalid reasoning state');
@@ -557,7 +583,7 @@ function userInput(block: ContentBlock): ResponsesInputItem[] {
   }
 }
 
-function messageInput(message: unknown): ResponsesInputItem[] {
+function messageInput(message: unknown, signaturePrefix: string): ResponsesInputItem[] {
   if (!isRecord(message)) {
     throw new Error('Invalid message');
   }
@@ -577,7 +603,7 @@ function messageInput(message: unknown): ResponsesInputItem[] {
       ];
     }
     if (role === 'assistant') {
-      return assistantInput(block);
+      return assistantInput(block, signaturePrefix);
     }
     if (role === 'user') {
       return userInput(block);
@@ -586,13 +612,17 @@ function messageInput(message: unknown): ResponsesInputItem[] {
   });
 }
 
-export function toResponses(body: MessagesRequest, model: string): ResponsesRequest {
+export function toResponses(
+  body: MessagesRequest,
+  model: string,
+  signaturePrefix = SIGNATURE_PREFIX,
+): ResponsesRequest {
   if (!Array.isArray(body.messages)) {
     throw new Error('messages must be an array');
   }
   validateRequestOptions(body);
   const format = outputFormat(body);
-  const input = body.messages.flatMap(messageInput);
+  const input = body.messages.flatMap((message) => messageInput(message, signaturePrefix));
   const tools = (body.tools ?? []).map(inputTool);
   const choice = toolChoice(body.tool_choice, tools);
   const effort = reasoningEffort(body);
@@ -692,9 +722,45 @@ interface OutputSlot {
   emitted: number;
 }
 
+function finalOutputItem(
+  previous: ResponsesOutputItem,
+  item: ResponsesOutputItem,
+): ResponsesOutputItem {
+  if (previous.type !== item.type) {
+    throw new Error('OpenAI output item changed type');
+  }
+  const before = [previous.id];
+  const after = [item.id];
+  if (previous.type === 'function_call' && item.type === 'function_call') {
+    before.push(previous.call_id, previous.name);
+    after.push(item.call_id, item.name);
+  }
+  if (before.some((value, index) => value && after[index] && value !== after[index])) {
+    throw new Error('OpenAI output item changed identity');
+  }
+  // Prefer final encrypted state; retain an earlier snapshot only when omitted.
+  if (previous.type === 'reasoning' && item.type === 'reasoning') {
+    return { ...previous, ...item };
+  }
+  return { ...item, id: item.id ?? previous.id };
+}
+
+function outputValue(item: ResponsesOutputItem): unknown {
+  switch (item.type) {
+    case 'message':
+      return item.content;
+    case 'function_call':
+      return [item.call_id, item.name, item.arguments];
+    case 'reasoning':
+      return [item.encrypted_content, item.summary ?? []];
+  }
+}
+
 export interface ResponseOptions {
   toolNames?: ReadonlyMap<string, string>;
   stopSequences?: readonly string[];
+  signaturePrefix?: string;
+  requireUsage?: boolean;
 }
 
 /** Assembles one ordered Claude response from possibly interleaved OpenAI output items. */
@@ -731,6 +797,7 @@ class ResponseStream {
       case 'error':
         throw new Error(event.message ?? event.response?.error?.message ?? 'OpenAI stream failed');
       case 'response.completed':
+      case 'response.done':
       case 'response.incomplete':
         this.complete(event);
         return;
@@ -769,11 +836,12 @@ class ResponseStream {
       throw new Error('OpenAI stream omitted response.created');
     }
     const cached = usage?.input_tokens_details?.cached_tokens ?? 0;
+    const written = usage?.input_tokens_details?.cache_write_tokens ?? 0;
     message.usage = {
-      input_tokens: Math.max(0, (usage?.input_tokens ?? 0) - cached),
+      input_tokens: Math.max(0, (usage?.input_tokens ?? 0) - cached - written),
       output_tokens: usage?.output_tokens ?? 0,
       cache_read_input_tokens: cached,
-      cache_creation_input_tokens: 0,
+      cache_creation_input_tokens: written,
     };
     message.stop_reason = stopReason;
     message.stop_sequence = this.stopped;
@@ -786,51 +854,90 @@ class ResponseStream {
   }
 
   private complete(
-    event: Extract<ResponseStreamEvent, { type: 'response.completed' | 'response.incomplete' }>,
+    event: Extract<
+      ResponseStreamEvent,
+      { type: 'response.completed' | 'response.incomplete' | 'response.done' }
+    >,
   ) {
-    this.start(event.response);
     if (
-      event.type === 'response.incomplete' &&
-      event.response.incomplete_details?.reason !== 'max_output_tokens'
+      this.options.requireUsage &&
+      (event.response.usage?.input_tokens === undefined ||
+        event.response.usage.output_tokens === undefined)
     ) {
+      throw new Error('Provider completed without token usage; cost accounting is unavailable');
+    }
+    this.start(event.response);
+    if (event.response.status && !['completed', 'incomplete'].includes(event.response.status)) {
+      throw new Error(`OpenAI terminal response has status ${event.response.status}`);
+    }
+    const incomplete =
+      event.type === 'response.incomplete' || event.response.status === 'incomplete';
+    if (incomplete && event.response.incomplete_details?.reason !== 'max_output_tokens') {
       throw new Error(
         `OpenAI response incomplete: ${event.response.incomplete_details?.reason ?? 'unknown'}`,
       );
     }
+    this.reconcile(event.response.output);
     if ([...this.slots.values()].some((slot) => !slot.done)) {
       throw new Error('OpenAI completed with an unfinished content block');
     }
     this.drain();
+    if (this.stopped) {
+      this.finish('stop_sequence', event.response.usage);
+      return;
+    }
+    if (!this.content.length || this.cursor !== this.slots.size) {
+      throw new Error('OpenAI completed with missing output');
+    }
     let stopReason: StopReason = this.content.some((block) => block.type === 'tool_use')
       ? 'tool_use'
       : 'end_turn';
-    if (event.type === 'response.incomplete') {
+    if (incomplete) {
       stopReason = 'max_tokens';
     }
     this.finish(stopReason, event.response.usage);
   }
 
+  private reconcile(output?: ResponsesOutputItem[]) {
+    // Some streams omit the redundant output array or send []; their finished
+    // incremental items remain authoritative. A populated array must agree.
+    if (!output?.length) {
+      return;
+    }
+    if ([...this.slots.keys()].some((index) => index >= output.length)) {
+      throw new Error('OpenAI terminal output omitted a streamed item');
+    }
+    for (const [index, item] of output.entries()) {
+      const slot = this.slots.get(index) ?? this.addSlot(index, item);
+      this.finishItem(slot, item);
+    }
+  }
+
+  private addSlot(index: number, item: ResponsesOutputItem): OutputSlot {
+    if (this.slots.has(index)) {
+      throw new Error('Duplicate OpenAI output item');
+    }
+    const slot = { item, text: '', arguments: '', done: false, emitted: 0 };
+    this.slots.set(index, slot);
+    return slot;
+  }
+
   private update(event: Extract<ResponseStreamEvent, { output_index: number }>) {
     if (event.type === 'response.output_item.added') {
-      if (this.slots.has(event.output_index)) {
-        throw new Error('Duplicate OpenAI output item');
-      }
-      this.slots.set(event.output_index, {
-        item: event.item,
-        text: '',
-        arguments: '',
-        done: false,
-        emitted: 0,
-      });
+      this.addSlot(event.output_index, event.item);
+      return;
+    }
+    if (event.type === 'response.output_item.done') {
+      const slot =
+        this.slots.get(event.output_index) ?? this.addSlot(event.output_index, event.item);
+      this.finishItem(slot, event.item);
       return;
     }
     const slot = this.slots.get(event.output_index);
     if (!slot || slot.done) {
       throw new Error('OpenAI event without an active output item');
     }
-    if (event.type === 'response.output_item.done') {
-      this.finishItem(slot, event.item);
-    } else if (event.type === 'response.function_call_arguments.delta') {
+    if (event.type === 'response.function_call_arguments.delta') {
       if (slot.item.type !== 'function_call') {
         throw new Error('Arguments without function call');
       }
@@ -845,22 +952,31 @@ class ResponseStream {
   }
 
   private finishItem(slot: OutputSlot, item: ResponsesOutputItem) {
-    if (slot.item.type !== item.type) {
-      throw new Error('OpenAI output item changed type');
+    const final = finalOutputItem(slot.item, item);
+    if (slot.done) {
+      if (!isDeepStrictEqual(outputValue(slot.item), outputValue(final))) {
+        throw new Error('OpenAI terminal output changed a completed item');
+      }
+      return;
     }
-    slot.item = item;
-    slot.done = true;
-    if (item.type === 'message') {
-      const text = (item.content ?? [])
+    if (final.type === 'message') {
+      const text = (final.content ?? [])
         .map((block) => (block.type === 'refusal' ? block.refusal : block.text))
         .join('');
-      if (slot.text && slot.text !== text) {
+      if (!text.startsWith(slot.text)) {
         throw new Error('OpenAI text changed after streaming');
       }
       slot.text = text;
-    } else if (item.type === 'reasoning' && !slot.text && Array.isArray(item.summary)) {
-      slot.text = item.summary.map((part) => (part as { text: string }).text).join('\n');
+    } else if (final.type === 'function_call') {
+      if (!final.arguments?.startsWith(slot.arguments)) {
+        throw new Error('OpenAI function arguments changed after streaming');
+      }
+      slot.arguments = final.arguments;
+    } else if (!slot.text && Array.isArray(final.summary)) {
+      slot.text = final.summary.map((part) => (part as { text: string }).text).join('\n');
     }
+    slot.item = final;
+    slot.done = true;
   }
 
   private createBlock(slot: OutputSlot): ResponseContentBlock {
@@ -885,7 +1001,11 @@ class ResponseStream {
     if (this.options.toolNames && !this.options.toolNames.has(item.name)) {
       throw new Error('OpenAI returned an undeclared tool');
     }
-    return { type: 'tool_use', id: callId(item.call_id), name, input };
+    const id = callId(item.call_id);
+    if (this.content.some((block) => block.type === 'tool_use' && block.id === id)) {
+      throw new Error('OpenAI repeated a tool call ID');
+    }
+    return { type: 'tool_use', id, name, input };
   }
 
   private beginBlock(slot: OutputSlot) {
@@ -955,7 +1075,8 @@ class ResponseStream {
         throw new Error('OpenAI omitted encrypted reasoning state');
       }
       block.signature =
-        SIGNATURE_PREFIX + Buffer.from(JSON.stringify(slot.item)).toString('base64url');
+        (this.options.signaturePrefix ?? SIGNATURE_PREFIX) +
+        Buffer.from(JSON.stringify(slot.item)).toString('base64url');
       this.emit('content_block_delta', {
         index,
         delta: { type: 'signature_delta', signature: block.signature },
@@ -965,9 +1086,11 @@ class ResponseStream {
   }
 
   private drain() {
-    const ordered = [...this.slots.values()];
-    while (this.cursor < ordered.length && !this.stopped) {
-      const slot = ordered[this.cursor];
+    while (this.slots.has(this.cursor) && !this.stopped) {
+      const slot = this.slots.get(this.cursor);
+      if (!slot) {
+        return;
+      }
       if (slot.item.type === 'function_call' && !slot.done) {
         return;
       }
@@ -983,7 +1106,7 @@ class ResponseStream {
 }
 
 /** Hold suffixes that might become a stop sequence in a later text delta. */
-function prefixSafeLength(text: string, stops: readonly string[]): number {
+export function prefixSafeLength(text: string, stops: readonly string[]): number {
   let limit = text.length;
   for (const stop of stops) {
     for (let length = 1; length < stop.length; length++) {

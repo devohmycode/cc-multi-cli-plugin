@@ -8,5 +8,5 @@
     "scripts/*.mjs"
   ],
   "project": ["plugins/multi/src/**/*.ts", "test/**/*.ts", "scripts/*.mjs"],
-  "ignoreBinaries": ["flock"]
+  "ignoreBinaries": ["flock", "codex"]
 }

@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { ApprovalAction, ApprovalContext, ApprovalVerdict } from '../../gateway/approval.ts';
 import { NativeApprovalBridge } from '../../gateway/approval.ts';
 import type { GatewayFetch } from '../../gateway/server.ts';
-import { readCodexAuth } from './auth.ts';
+import { codexRequest } from './auth.ts';
 import { readSse } from './responses.ts';
 
 const REVIEW_FAILURE_EVENTS: readonly unknown[] = [
@@ -23,12 +23,15 @@ export async function discoverOpenAIReviewer(
   authFile: string,
   fetchImpl: GatewayFetch = fetch,
 ): Promise<boolean> {
-  const response = await fetchImpl(`${endpoint}/models?client_version=0.155.0`, {
-    method: 'GET',
-    headers: { ...(await readCodexAuth(authFile)) },
-    signal: AbortSignal.timeout(10000),
-    redirect: 'error',
-  });
+  const signal = AbortSignal.timeout(10000);
+  const response = await codexRequest(authFile, signal, (headers) =>
+    fetchImpl(`${endpoint}/models?client_version=0.155.0`, {
+      method: 'GET',
+      headers: { ...headers },
+      signal,
+      redirect: 'error',
+    }),
+  );
   if (!response.ok) {
     await response.body?.cancel();
     return false;
@@ -104,63 +107,65 @@ export async function createOpenAIApproval(
     // ponytail: six bounded investigation turns; missing evidence blocks rather than spawning a second coding harness.
     for (let turn = 0; turn < 6; turn++) {
       signal.throwIfAborted();
-      const response = await fetchImpl(`${endpoint}/responses`, {
-        method: 'POST',
-        redirect: 'error',
-        signal,
-        headers: {
-          ...(await readCodexAuth(authFile)),
-          'content-type': 'application/json',
-          accept: 'text/event-stream',
-          originator: 'cc_multi_native',
-          session_id: session,
-        },
-        body: JSON.stringify({
-          model: 'codex-auto-review',
-          instructions,
-          input,
-          tools: [
-            {
-              type: 'function',
-              name: 'inspect_path',
-              description:
-                'Read up to 32 KiB of a workspace file, or list up to 256 directory entries. Read-only evidence; no commands or network.',
-              parameters: {
-                type: 'object',
-                properties: { path: { type: 'string' } },
-                required: ['path'],
-                additionalProperties: false,
-              },
-              strict: true,
-            },
-          ],
-          text: {
-            format: {
-              type: 'json_schema',
-              name: 'approval',
-              strict: true,
-              schema: {
-                type: 'object',
-                properties: {
-                  outcome: { type: 'string', enum: ['allow', 'deny'] },
-                  risk_level: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
-                  user_authorization: {
-                    type: 'string',
-                    enum: ['unknown', 'low', 'medium', 'high'],
-                  },
-                  rationale: { type: 'string' },
-                },
-                required: ['outcome', 'risk_level', 'user_authorization', 'rationale'],
-                additionalProperties: false,
-              },
-            },
+      const response = await codexRequest(authFile, signal, (auth) =>
+        fetchImpl(`${endpoint}/responses`, {
+          method: 'POST',
+          redirect: 'error',
+          signal,
+          headers: {
+            ...auth,
+            'content-type': 'application/json',
+            accept: 'text/event-stream',
+            originator: 'cc_multi_native',
+            session_id: session,
           },
-          parallel_tool_calls: false,
-          reasoning: { effort: 'low' },
-          store: false,
-          stream: true,
+          body: JSON.stringify({
+            model: 'codex-auto-review',
+            instructions,
+            input,
+            tools: [
+              {
+                type: 'function',
+                name: 'inspect_path',
+                description:
+                  'Read up to 32 KiB of a workspace file, or list up to 256 directory entries. Read-only evidence; no commands or network.',
+                parameters: {
+                  type: 'object',
+                  properties: { path: { type: 'string' } },
+                  required: ['path'],
+                  additionalProperties: false,
+                },
+                strict: true,
+              },
+            ],
+            text: {
+              format: {
+                type: 'json_schema',
+                name: 'approval',
+                strict: true,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    outcome: { type: 'string', enum: ['allow', 'deny'] },
+                    risk_level: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+                    user_authorization: {
+                      type: 'string',
+                      enum: ['unknown', 'low', 'medium', 'high'],
+                    },
+                    rationale: { type: 'string' },
+                  },
+                  required: ['outcome', 'risk_level', 'user_authorization', 'rationale'],
+                  additionalProperties: false,
+                },
+              },
+            },
+            parallel_tool_calls: false,
+            reasoning: { effort: 'low' },
+            store: false,
+            stream: true,
+          }),
         }),
-      });
+      );
       if (!response.ok) {
         await response.body?.cancel();
         throw new Error(`OpenAI automatic reviewer returned HTTP ${response.status}`);
