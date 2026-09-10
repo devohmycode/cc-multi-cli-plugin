@@ -27,9 +27,13 @@ test('Antigravity Auto denies excluded Claude tools and always denies delegation
 });
 
 test('Bypass carries the same denylist shape as Auto', () => {
+  const auto = antigravityPermissionPolicy({ permissionMode: 'auto' });
   const bypass = antigravityPermissionPolicy({ permissionMode: 'bypassPermissions' });
   assert.equal(bypass.plan, false);
   assert.match(bypass.notice, /Claude Code rules take precedence/);
+  assert.deepEqual(bypass.denied, ALWAYS_DENIED);
+  assert.deepEqual(bypass.denied, auto.denied);
+  assert.equal(bypass.notice, auto.notice);
 });
 
 test('Plan denies shell, edit, write, notebook-edit natives plus delegation/MCP', () => {
