@@ -55,17 +55,14 @@ const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'ut
     assert.equal(result.settingsCount, 1);
     assert.equal(result.apiTimeout, auth === 'api' ? '1000' : '2147483647');
     assert.deepEqual(result.settings.permissions.deny, ['Bash(denied)']);
-    assert.equal(
-      result.settings.permissions.disableAutoMode,
-      auth === 'no' ? 'disable' : undefined,
-    );
+    assert.equal(result.settings.permissions.disableAutoMode, 'disable');
     assert.equal(
       result.hasLocalToken,
       true,
       'local hooks authenticate independently of Claude login',
     );
     assert.equal(result.auth, { no: 'local', api: 'api', yes: 'native' }[auth]);
-    assert.equal(result.settings.hooks.PreToolUse?.length, auth === 'no' ? 1 : undefined);
+    assert.equal(result.settings.hooks.PreToolUse?.length, 1);
   }
   for (const auth of ['malformed', 'error', 'missing']) {
     await assert.rejects(

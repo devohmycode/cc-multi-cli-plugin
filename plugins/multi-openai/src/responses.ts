@@ -48,6 +48,7 @@ type ResponsesToolChoice = 'auto' | 'none' | 'required' | { type: 'function'; na
 
 export interface ResponsesRequest {
   model: string;
+  prompt_cache_key?: string;
   instructions: string;
   input: ResponsesInputItem[];
   tools: ResponsesTool[];

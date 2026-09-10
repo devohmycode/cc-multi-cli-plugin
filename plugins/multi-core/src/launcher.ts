@@ -26,6 +26,7 @@ import { MODELS, OPENAI_WORKERS } from '../../multi-openai/src/models.ts';
 import type { Effort } from '../../multi-openai/src/responses.ts';
 import { readZenKey } from '../../multi-zen/src/auth.ts';
 import { ZEN_MODELS, ZEN_WORKERS, zenPickerOptions } from '../../multi-zen/src/models.ts';
+import { AgentCatalog } from './gateway/agent-catalog.ts';
 import { loadWorkerPermissions } from './gateway/agent-definitions.ts';
 import { checkCursorSettings } from './gateway/cursor-settings.ts';
 import { PermissionModes } from './gateway/mode-hook.ts';
@@ -90,7 +91,7 @@ async function main() {
     process.env.CODEX_HOME || path.join(os.homedir(), '.codex'),
     'auth.json',
   );
-  const { codexSignedIn, openaiReview } = await discoverOpenAI(authFile, anthropic);
+  const { codexSignedIn, openaiReview } = await discoverOpenAI(authFile);
   const zenKey = providerEnabled('zen') ? await readZenKey() : undefined;
   const antigravityModels = await discoverAntigravity();
   const token = randomBytes(32).toString('hex');
@@ -126,7 +127,11 @@ async function main() {
     approvalBridge,
     approvalProviders,
     blockAnthropic: !anthropic,
-    guardAuto: !anthropic,
+    guardAuto: true,
+    agentCatalog: new AgentCatalog(
+      agents,
+      settings.modelPicker.options.map((option) => option.model),
+    ),
     onEvent: traceEvent,
   });
   await new Promise<void>((resolve, reject) => {
@@ -144,9 +149,7 @@ async function main() {
   if (!initialModel && selectedModel) {
     args.push('--model', selectedModel);
   }
-  if (!anthropic) {
-    configureApproval(settings, approvalProviders, selectedModel, Boolean(antigravity));
-  }
+  configureApproval(settings, approvalProviders, selectedModel, Boolean(antigravity), anthropic);
   await writeFile(settingsFile, JSON.stringify(settings), { mode: 0o600 });
   const definitions = JSON.stringify(agents);
   if (Buffer.byteLength(definitions) > 120000) {
@@ -294,7 +297,7 @@ async function anthropicSignedIn(): Promise<boolean> {
   return parseAuthProbeOutput(stdout);
 }
 
-async function discoverOpenAI(authFile: string, anthropic: boolean) {
+async function discoverOpenAI(authFile: string) {
   if (!providerEnabled('openai')) {
     return { codexSignedIn: false, openaiReview: false };
   }
@@ -306,7 +309,7 @@ async function discoverOpenAI(authFile: string, anthropic: boolean) {
     console.error('OpenAI choices unavailable: sign in with codex login to enable them.');
   }
   let openaiReview = false;
-  if (!anthropic && codexSignedIn) {
+  if (codexSignedIn) {
     try {
       openaiReview = await discoverOpenAIReviewer(authFile);
     } catch {
@@ -469,10 +472,13 @@ function configureApproval(
   providers: readonly ('openai' | 'cursor')[],
   selectedModel?: string,
   antigravityAvailable = false,
+  anthropic = false,
 ) {
   const provider = approvalProvider(selectedModel);
   const nativeAntigravity = antigravityAvailable && selectedModel?.startsWith('multi/antigravity/');
-  if (!nativeAntigravity && (!provider || !providers.includes(provider))) {
+  const nativeClaude =
+    anthropic && (!selectedModel?.startsWith('multi/') || selectedModel.startsWith('multi/zen/'));
+  if (!nativeClaude && !nativeAntigravity && (!provider || !providers.includes(provider))) {
     settings.permissions = { ...settings.permissions, disableAutoMode: 'disable' };
   }
   // --settings is fixed for the session. A per-tool capability guard also covers

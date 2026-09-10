@@ -35,6 +35,7 @@ export function approvalCapabilityGuard(
   input: unknown,
   pending: PendingApprovalTool | undefined,
   available: readonly ('openai' | 'cursor')[],
+  anthropic = false,
 ) {
   if (
     typeof input !== 'object' ||
@@ -53,7 +54,11 @@ export function approvalCapabilityGuard(
     pending.session === input.session_id &&
     pending.name === input.tool_name;
   const provider = providerFor(pending?.model);
-  if (known && provider && available.includes(provider)) {
+  const nativeClaude =
+    anthropic &&
+    pending &&
+    (!pending.model.startsWith('multi/') || pending.model.startsWith('multi/zen/'));
+  if (known && (nativeClaude || (provider && available.includes(provider)))) {
     return {};
   }
   if (known) {

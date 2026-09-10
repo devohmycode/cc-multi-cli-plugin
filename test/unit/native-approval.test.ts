@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import type { TestContext } from 'node:test';
 import test from 'node:test';
 import type { ApprovalContext } from '../../plugins/multi-core/src/gateway/approval.ts';
 import { NativeApprovalBridge } from '../../plugins/multi-core/src/gateway/approval.ts';
@@ -136,6 +140,7 @@ test('opt-in gateway review never forwards Anthropic traffic; authentication sti
   const server = createNativeGateway({
     token: 'test-token',
     authFile: '/unused',
+    blockAnthropic: true,
     approvalBridge: new NativeApprovalBridge(async () => {
       reviews++;
       return { model: 'codex-auto-review', outcome: 'allow' };
@@ -253,8 +258,8 @@ test('gateway isolates review context by worker and blocks classifier fallback f
   assert.equal(seen.length, 1);
   assert(seen[0].includes('worker-a'));
   await send({ ...inference, model: 'multi/cursor/auto' }, 'worker-b');
-  await send(request(), 'worker-b');
-  assert(seen[1].startsWith('multi/cursor/auto:'));
+  assert.equal((await send(request(), 'worker-b')).status, 400);
+  assert.equal(seen.length, 1, 'Cursor actions cannot borrow the OpenAI reviewer');
   assert.equal(fetches, 0);
 });
 
@@ -376,4 +381,248 @@ test('headerless classifier uses pending worker context and rejects ambiguous ac
   await prepare('worker-a', 'node b.js');
   assert.equal((await send(request(1, session, 'node b.js'))).status, 400);
   assert.equal(contexts.length, 2);
+});
+
+const toolEvents = (id: string, command: string) => [
+  {
+    type: 'content_block_start',
+    index: 0,
+    content_block: { type: 'tool_use', id, name: 'Bash', input: {} },
+  },
+  {
+    type: 'content_block_delta',
+    index: 0,
+    delta: { type: 'input_json_delta', partial_json: JSON.stringify({ command }) },
+  },
+  { type: 'content_block_stop', index: 0 },
+];
+
+function providerToolResponse(url: string, id: string, command: string, stream: boolean) {
+  if (url.includes('api.anthropic.com')) {
+    if (!stream) {
+      return Response.json({
+        content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }],
+      });
+    }
+    const raw = `: keepalive\n\n${toolEvents(id, command)
+      .map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+      .join('')}`;
+    const bytes = new TextEncoder().encode(raw);
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          for (let index = 0; index < bytes.length; index += 7) {
+            controller.enqueue(bytes.slice(index, index + 7));
+          }
+          controller.close();
+        },
+      }),
+      { headers: { 'content-type': 'text/event-stream', 'x-provider-test': 'preserved' } },
+    );
+  }
+  const item = {
+    type: 'function_call',
+    call_id: id,
+    name: 'Bash',
+    arguments: JSON.stringify({ command }),
+  };
+  return new Response(
+    [
+      { type: 'response.created', response: { id: 'response' } },
+      { type: 'response.output_item.added', output_index: 0, item },
+      { type: 'response.output_item.done', output_index: 0, item },
+      {
+        type: 'response.completed',
+        response: { id: 'response', usage: { input_tokens: 1, output_tokens: 1 } },
+      },
+    ]
+      .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+      .join(''),
+  );
+}
+
+async function mixedReviewGateway(t: TestContext, reviewer = true, blockAnthropic = false) {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'mixed-review-'));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const authFile = path.join(cwd, 'auth.json');
+  await writeFile(
+    authFile,
+    JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'fake', account_id: 'fake' } }),
+  );
+  const reviews: ApprovalContext[] = [];
+  const nativeReviews: string[] = [];
+  let outcome: 'allow' | 'deny' = 'allow';
+  let next = { id: '', command: '', stream: false };
+  const bridge = new NativeApprovalBridge(async (_input, _signal, context) => {
+    assert(context);
+    reviews.push(context);
+    return { model: 'codex-auto-review', outcome };
+  });
+  const server = createNativeGateway({
+    token: 'token',
+    authFile,
+    guardAuto: true,
+    blockAnthropic,
+    approvalBridge: reviewer ? bridge : undefined,
+    zen: { apiKey: 'zen-fixture' },
+    fetchImpl: async (url, init) => {
+      const body = JSON.parse(String(init.body));
+      if (body.messages?.[0]?.content?.[0]?.text === '<transcript>\n') {
+        assert(url.includes('api.anthropic.com'));
+        nativeReviews.push(body.model);
+        return Response.json({
+          model: body.model,
+          content: [{ type: 'text', text: '<severity>0</severity>' }],
+        });
+      }
+      return providerToolResponse(url, next.id, next.command, next.stream);
+    },
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  const address = server.address();
+  assert(address && typeof address !== 'string');
+  const send = (body: unknown, endpoint = '/v1/messages', worker?: string) =>
+    fetch(`http://127.0.0.1:${address.port}${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'x-multi-gateway-token': 'token',
+        ...(worker ? { 'x-claude-code-agent-id': worker } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+  const prepare = async (model: string, command: string, worker?: string, stream = false) => {
+    next = { id: `tool-${worker ?? 'main'}-${reviews.length}`, command, stream };
+    const response = await send(
+      {
+        model,
+        stream,
+        metadata: { user_id: JSON.stringify({ session_id: 'mixed' }) },
+        messages: [{ role: 'user', content: command }],
+        tools: [
+          {
+            name: 'Bash',
+            input_schema: { type: 'object', properties: { command: { type: 'string' } } },
+          },
+        ],
+      },
+      '/v1/messages',
+      worker,
+    );
+    assert.equal(response.status, 200);
+    const raw = await response.text();
+    if (model.startsWith('claude') && stream) {
+      assert.equal(response.headers.get('x-provider-test'), 'preserved');
+      assert.equal(
+        raw,
+        `: keepalive\n\n${toolEvents(next.id, command)
+          .map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+          .join('')}`,
+      );
+    }
+    return send(
+      {
+        tool_use_id: next.id,
+        session_id: 'mixed',
+        tool_name: 'Bash',
+        tool_input: { command },
+        cwd,
+        permission_mode: 'auto',
+      },
+      '/multi/permission',
+    );
+  };
+  const classify = (command: string, stage = 1, model = 'claude-sonnet-5', session = 'mixed') =>
+    send({ ...request(stage, JSON.stringify({ session_id: session }), command), model });
+  return {
+    prepare,
+    classify,
+    reviews,
+    nativeReviews,
+    deny: () => {
+      outcome = 'deny';
+    },
+  };
+}
+
+test('authenticated mixed-provider review follows main and headerless worker origins', async (t) => {
+  const gateway = await mixedReviewGateway(t);
+  const claude = 'claude-sonnet-5';
+  const gpt = 'multi/openai/gpt-6-astra';
+  const zen = 'multi/zen/gpt-5.6-luna';
+  assert.deepEqual(
+    await (await gateway.prepare(claude, 'node parent.js', undefined, true)).json(),
+    {},
+  );
+  assert.deepEqual(
+    await (await gateway.prepare(gpt, 'node worker.js', 'gpt-worker', true)).json(),
+    {},
+  );
+  assert.equal((await gateway.classify('node worker.js')).status, 200);
+  assert.equal(gateway.reviews[0].model, gpt);
+  assert.equal(gateway.reviews[0].rootRequest?.messages?.[0].content, 'node parent.js');
+  assert(gateway.reviews[0].scope.includes('gpt-worker'));
+  assert.equal((await gateway.classify('node parent.js')).status, 200);
+  assert.deepEqual(gateway.nativeReviews, [claude]);
+  assert.deepEqual(await (await gateway.prepare(gpt, 'node main.js')).json(), {});
+  assert.deepEqual(
+    await (await gateway.prepare(claude, 'node claude-worker.js', 'claude-worker')).json(),
+    {},
+  );
+  assert.equal((await gateway.classify('node claude-worker.js')).status, 200);
+  assert.equal((await gateway.classify('node main.js', 1, gpt)).status, 200);
+  assert.deepEqual(await (await gateway.prepare(zen, 'node zen.js')).json(), {});
+  assert.equal((await gateway.classify('node zen.js')).status, 200);
+  assert.equal(gateway.reviews.length, 2, 'Claude and Zen never borrow GPT review');
+  assert.equal(gateway.nativeReviews.length, 3);
+  assert.equal(
+    (await gateway.classify('node main.js')).status,
+    400,
+    'A provider switch invalidates stale main actions',
+  );
+});
+
+test('mixed-provider review rejects missing, cross-session, ambiguous, and unavailable GPT origins', async (t) => {
+  const gateway = await mixedReviewGateway(t, false);
+  const gpt = 'multi/openai/gpt-6-astra';
+  const guard = await gateway.prepare(gpt, 'node unavailable.js');
+  assert.partialDeepStrictEqual(await guard.json(), {
+    hookSpecificOutput: { permissionDecision: 'deny' },
+  });
+  assert.equal((await gateway.classify('node unavailable.js')).status, 400);
+  assert.equal((await gateway.classify('node missing.js')).status, 400);
+  assert.equal(
+    (await gateway.classify('node unavailable.js', 1, 'claude-sonnet-5', 'other')).status,
+    400,
+  );
+  await gateway.prepare('claude-sonnet-5', 'node unavailable.js', 'claude-worker');
+  assert.equal((await gateway.classify('node unavailable.js')).status, 400);
+  assert.deepEqual(
+    gateway.nativeReviews,
+    [],
+    'Never fall back to Claude for an unavailable or ambiguous GPT reviewer',
+  );
+});
+
+test('GPT second-stage denial remains provider-scoped with or without Claude credentials', async (t) => {
+  for (const blockAnthropic of [false, true]) {
+    const gateway = await mixedReviewGateway(t, true, blockAnthropic);
+    gateway.deny();
+    assert.deepEqual(
+      await (await gateway.prepare('multi/openai/gpt-6-astra', 'node denied.js')).json(),
+      {},
+    );
+    const first = await gateway.classify('node denied.js');
+    assert.equal(first.status, 200);
+    assert.partialDeepStrictEqual(await first.json(), {
+      content: [{ text: '<severity>100</severity>' }],
+    });
+    assert.equal((await gateway.classify('node denied.js', 2)).status, 200);
+    assert.equal(gateway.reviews.length, 1);
+    assert.equal((await gateway.classify('node denied.js', 2)).status, 502);
+    assert.deepEqual(gateway.nativeReviews, []);
+  }
 });

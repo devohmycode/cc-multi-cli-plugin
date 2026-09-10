@@ -6,6 +6,30 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+### Smaller worker announcements and OpenAI cache affinity
+
+- Advertise one provider worker per finalized `/model` picker model, without
+  separate reasoning rows. All registered models and effort variants remain
+  callable through the native subagent tool; built-in and custom agents are unchanged.
+- Compact known native catalog announcements at the gateway, not the stored
+  transcript or worker registry. Unknown formats pass through unchanged.
+- Add opaque OpenAI `prompt_cache_key` affinity scoped by session, worker and model,
+  stable across gateway restarts when a session identity is available.
+- Verify with four live Astra requests: hidden rows absent, all fixture workers
+  registered, stable cache keys across two resumes, and 99.0%/98.8% warm cache reuse.
+  Cache reuse does not establish subscription-quota savings.
+
+### Provider-owned automatic review
+
+- Route GPT main-session and worker actions to the OpenAI account's automatic
+  reviewer even when Claude is signed in. Preserve native Claude review and Zen's
+  existing Claude-backed review; unavailable GPT review never falls back to Claude.
+- Correlate classifier requests with pending tool origins across model switches
+  and headerless worker requests. Observe Claude response tools while preserving
+  passthrough bytes, and retain explicit deny/ask rules and provider-scoped denials.
+- Add mixed-provider routing and authenticated reviewer discovery regressions, plus
+  a live authenticated-branch fixture that uses no real Claude credentials.
+
 - Add Antigravity and OpenCode Zen to the SVG banner alongside Cursor and OpenAI
   Codex, preserving the black background and Anthropic orange styling. Remove
   status labels and space connector dots clear of provider marks and names.
@@ -63,6 +87,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   or `PermissionRequest` hooks. Those hooks never run for native Cursor or
   Antigravity tools, so they no longer block native execution. Found while
   dogfooding with an observability hook installed in user settings.
+- Likewise admit a user or workspace `.cursor/hooks.json`; isolated SDK settings
+  never run it. A `.cursor/permissions.json` still refuses, since that is deny
+  policy the SDK would silently drop.
 - Stop forwarding Claude's `system` content to the Cursor SDK prompt. Cursor's
   own system prompt remains active; the request is one fixed preamble plus the
   conversation text, with no "session instructions" JSON field or saved

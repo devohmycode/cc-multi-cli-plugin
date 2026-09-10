@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
 import test from 'node:test';
+import { AgentCatalog } from '../../plugins/multi-core/src/gateway/agent-catalog.ts';
 import type { GatewayFetch } from '../../plugins/multi-core/src/gateway/fetch.ts';
 import type {
   MessagesRequest,
@@ -420,7 +421,7 @@ test('fragmented SSE and truncated or failed responses never become successful c
 async function gateway(
   t: TestContext,
   fetchImpl: GatewayFetch,
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; agentCatalog?: AgentCatalog } = {},
 ) {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'native-gateway-test-'));
   const authFile = path.join(cwd, 'auth.json');
@@ -483,6 +484,74 @@ test('Claude subscription requests retain their raw body, OAuth and beta headers
     'anthropic-beta': 'oauth-test,tools-test',
   });
   assert.equal(await response.text(), 'original stream');
+});
+
+test('OpenAI cache keys survive history changes and restart, isolating sessions, workers and models', async (t) => {
+  const keys: string[] = [];
+  const upstream: GatewayFetch = async (_url, options) => {
+    const request = JSON.parse(String(options.body));
+    assert.match(request.prompt_cache_key, /^[a-f0-9]{64}$/);
+    keys.push(request.prompt_cache_key);
+    return new Response(sse(textEvents));
+  };
+  const call = await gateway(t, upstream);
+  const restarted = await gateway(t, upstream);
+  const payload = { ...body, metadata: { user_id: JSON.stringify({ session_id: 'session-a' }) } };
+  await (await call(payload)).text();
+  await (
+    await call({ ...payload, messages: [{ role: 'user', content: 'Different history' }] })
+  ).text();
+  await (await restarted(payload)).text();
+  await (
+    await call({ ...body, metadata: { user_id: JSON.stringify({ session_id: 'session-b' }) } })
+  ).text();
+  await (await call(payload, { 'x-claude-code-agent-id': 'worker-a' })).text();
+  await (await call({ ...payload, model: 'multi/openai/gpt-5.6-luna' })).text();
+  await (await call(body)).text();
+  await (await call(body)).text();
+  await (await restarted(body)).text();
+  assert.equal(keys.length, 9);
+  assert.equal(keys[0], keys[1]);
+  assert.equal(keys[0], keys[2]);
+  assert.equal(new Set([keys[0], ...keys.slice(3, 7), keys[8]]).size, 6);
+  assert.equal(keys[6], keys[7]);
+});
+
+test('catalog filtering reaches Claude and OpenAI without changing user text or native registration', async (t) => {
+  const row = '- hidden: Hidden worker (Tools: Read)';
+  const text = `<system-reminder>\nAvailable agent types for the Agent tool:\n${row}\n- custom: Keep this (Tools: Read)\n</system-reminder>`;
+  const seen: string[] = [];
+  const call = await gateway(
+    t,
+    async (url, options) => {
+      seen.push(String(options.body));
+      return url.includes('anthropic')
+        ? Response.json({ content: [] })
+        : new Response(sse(textEvents));
+    },
+    {
+      agentCatalog: new AgentCatalog(
+        { hidden: { model, description: 'Hidden worker', tools: ['Read'] } },
+        [],
+      ),
+    },
+  );
+  for (const choice of [model, 'claude-sonnet-5']) {
+    await (
+      await call({
+        model: choice,
+        messages: [
+          { role: 'user', content: text },
+          { role: 'user', content: row },
+        ],
+      })
+    ).text();
+  }
+  assert.equal(seen.length, 2);
+  for (const sent of seen) {
+    assert.equal(sent.split('Hidden worker').length - 1, 1);
+    assert(sent.includes('Keep this'));
+  }
 });
 
 test('external route isolates provider credentials and handles simultaneous worker identities', async (t) => {

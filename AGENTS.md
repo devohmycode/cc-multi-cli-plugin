@@ -40,8 +40,11 @@ define the product direction.
 - The launcher uses the native Cursor harness. The callback runtime and separate
   reviewer are removed; do not restore SDK source patches or a second reviewer.
 - Native Cursor review belongs to the originating run, including workers,
-  irrespective of Claude login availability. The OpenAI route retains its existing
-  no-Claude-access reviewer behavior. External execution retains explicit permissions.
+  irrespective of Claude login availability. OpenAI actions likewise use the originating
+  OpenAI account's reviewer, even with Claude login available, for main sessions and
+  workers. Claude actions retain native Anthropic review; Zen never borrows Codex
+  review. Missing GPT review fails explicitly, without Claude fallback. External
+  execution retains explicit permissions.
 - Cursor supports Auto, Plan and Bypass at prompt boundaries. Plan excludes shell/edit;
   Bypass disables native Auto-review while retaining explicit capability restrictions;
   unsupported modes, unknown workers and untranslatable policies fail

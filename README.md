@@ -188,6 +188,19 @@ use the ChatGPT login
 saved by Codex (`CODEX_HOME/auth.json`, or `~/.codex/auth.json`). Sign in with
 `claude` and `codex login` first. No API key is needed.
 
+Provider worker announcements match the finalized `/model` picker: one worker per
+model, without separate reasoning rows. All other registered workers and effort
+variants remain callable by name through the native subagent tool. Built-in and
+user-defined agents are untouched. The gateway filters exact known announcement
+rows; unknown formats pass through. Local transcripts and Claude's local context
+estimates can still contain the full catalog. Restart through the updated launcher
+to apply this behavior.
+
+OpenAI requests include an opaque `prompt_cache_key` scoped by session, worker and
+model. It remains stable across gateway restarts with a recognized session ID;
+missing session IDs use a gateway-local fallback. This improves explicit cache
+affinity, not prompt-prefix matching or guaranteed subscription-quota savings.
+
 The launcher registers these workers (unsuffixed names use `medium` reasoning):
 
 | Worker | OpenAI model |
@@ -282,7 +295,11 @@ fresh gateway instances. It expects at least 90% warm cache reuse and verifies
 Claude's cached/uncached input and output totals against upstream usage. It uses
 Codex login, low effort and at most six upstream requests; evidence stays in `/tmp`.
 The 2026-09-08 run used four requests: the two resumed turns reused 20,480 of
-20,610 and 20,651 input tokens (99.4% and 99.2%). No runtime cache change was needed.
+20,610 and 20,651 input tokens (99.4% and 99.2%). No runtime cache change was needed for that earlier probe.
+The current cache-key/catalog probe used four Astra requests, retained all fixture
+worker registrations while hiding non-picker/effort rows from provider input, and
+kept the cache key stable across gateway restarts. Resumed requests reused
+20,608 of 20,814 and 20,855 input tokens (99.0% and 98.8%).
 Append `--terminal-only` to move actual completed upstream items into the terminal
 output array, withhold incremental events, and verify the same native tool loop
 and saved-session resumes. This also exercises endpoints that omit that array.
@@ -498,10 +515,12 @@ acceptEdits and dontAsk remain unsupported; there is no separate mode selector.
 Worker tool lists, whole-tool deny rules and supported CLI restrictions intersect
 native capabilities. Settings and plugin policies are rechecked before dispatch.
 Linux managed settings and fragments support the same narrow policy translation;
-unsupported managed controls, argument/path-specific rules, ask rules, permission
-hooks and Claude sandbox policies fail explicitly. Unknown plugin definitions and
-Cursor policy files that isolated SDK settings cannot honor also fail. macOS,
-Windows and WSL policy admission remain unsupported. No policy is silently dropped.
+unsupported managed controls, argument/path-specific rules, ask rules and Claude
+sandbox policies fail explicitly. Unknown plugin definitions and a Cursor
+`permissions.json` that isolated SDK settings cannot honor also fail. Claude and
+Cursor hook files are observability, never run for native tools, and do not block
+admission. macOS, Windows and WSL policy admission remain unsupported. No deny
+policy is silently dropped.
 
 `/effort` selects an exact advertised effort value where the model supports one;
 unsupported values fail explicitly. Catalog presets retain their parameters.
@@ -569,11 +588,14 @@ advisories. No incompatible dependency override has been applied.
 
 ## OpenAI approval and permission checks
 
-Claude-executed OpenAI tools retain Claude's ordinary permissions. When Claude
-credentials are available, native Anthropic classification passes through. Without
-them, the launcher uses the authenticated OpenAI account's `codex-auto-review`
-capability where available. Unsupported review actions and unavailable evidence
-fail explicitly; the working model never substitutes for a reviewer.
+Claude-executed OpenAI tools retain Claude's ordinary permissions. GPT actions use
+the authenticated OpenAI account's `codex-auto-review` capability regardless of
+Claude login availability, for both main sessions and workers. Review follows the
+originating tool, not the parent's current model or the classifier request's model
+ID. Claude actions retain native Anthropic classification, and Zen never borrows
+Codex review. Missing GPT review capability, ambiguous origins, unsupported actions
+and unavailable evidence fail explicitly; neither Claude nor the working model
+substitutes for the GPT reviewer.
 
 The OpenAI reviewer uses the bundled Guardian policy and a bounded read-only
 investigation loop. It receives the classification transcript, originating request,
@@ -588,10 +610,15 @@ These opt-in checks use real logins and retain temporary diagnostics:
 ```sh
 npm run test:live:auto-mode
 npm run test:live:provider-approval -- --launcher
+npm run test:live:provider-approval -- --launcher --claude-auth-fixture
 npm run test:live:reviewer
 npm run test:live:approval-worker
 npm run test:live:permissions
 ```
+
+The `--claude-auth-fixture` variant uses an unusable token to exercise the launcher's
+Claude-authenticated branch, while real OpenAI inference/review must complete with
+zero Anthropic requests. It does not copy or test a real Claude login.
 
 The Claude/OpenAI checks exercise classifier routing and Claude-executed tool
 permissions. Their historical Cursor callback cases are retired and do not prove

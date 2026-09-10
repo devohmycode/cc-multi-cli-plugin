@@ -17,21 +17,16 @@ import { forAnthropic, fromResponses, toResponses } from '../../../multi-openai/
 import { validateZenKey } from '../../../multi-zen/src/auth.ts';
 import { fromChat } from '../../../multi-zen/src/chat.ts';
 import { zenRequest } from '../../../multi-zen/src/request.ts';
+import type { AgentCatalog } from './agent-catalog.ts';
 import type { ApprovalContext, NativeApprovalBridge } from './approval.ts';
 import { isApprovalRequest, parseApprovalRequest } from './approval.ts';
 import type { GatewayFetch } from './fetch.ts';
-import type {
-  Emit,
-  MessagesRequest,
-  MessagesResponse,
-  StopReason,
-  StreamEventBody,
-  StreamEventName,
-} from './messages.ts';
+import type { Emit, MessagesRequest, MessagesResponse, StopReason } from './messages.ts';
 import type { PermissionContext, PermissionModes } from './mode-hook.ts';
 import type { PendingApprovalTool } from './permission-hook.ts';
 import { approvalCapabilityGuard } from './permission-hook.ts';
 import { estimateInputTokens } from './tokens.ts';
+import { forwardObservedTools, ToolObserver } from './tool-observer.ts';
 import { originalToolNames } from './tools.ts';
 
 const OPENAI_URL = 'https://chatgpt.com/backend-api/codex/responses';
@@ -87,13 +82,14 @@ export interface GatewayOptions {
   cursor?: Pick<CursorHarness, 'validate' | 'handle'>;
   antigravity?: Pick<AntigravityHarness, 'validate' | 'handle'>;
   zen?: { apiKey: string };
-  /** Explicit credential-independent review. Disables all Anthropic passthrough. */
+  /** OpenAI review for GPT-originated actions, independent of Claude authentication. */
   approvalBridge?: Pick<NativeApprovalBridge, 'respond'>;
   approvalProviders?: readonly ('openai' | 'cursor')[];
   /** No Anthropic credentials: also block passthrough if no reviewer is available. */
   blockAnthropic?: boolean;
   guardAuto?: boolean;
   permissionModes?: PermissionModes;
+  agentCatalog?: AgentCatalog;
 }
 
 /** Rejected before any provider call; answered as HTTP 400 rather than 502. */
@@ -157,6 +153,7 @@ export function createNativeGateway({
   blockAnthropic,
   guardAuto,
   permissionModes,
+  agentCatalog,
 }: GatewayOptions): Server {
   if (!token) {
     throw new Error('Gateway token required');
@@ -209,7 +206,7 @@ export function createNativeGateway({
         reviewCandidates.set(id, { tool: pending, context: { ...context, cwd: parsed.cwd } });
       }
     }
-    return approvalCapabilityGuard(parsed, pending, approvalProviders);
+    return approvalCapabilityGuard(parsed, pending, approvalProviders, !blockAnthropic);
   }
   function retainContext(
     approvalScope: string,
@@ -302,6 +299,16 @@ export function createNativeGateway({
   async function handleOpenAI(exchange: ProviderRequest, externalModel: string) {
     const { req, res, body, url, signal, abort, agentId, emit } = exchange;
     const request = openaiRequest(exchange, externalModel);
+    request.prompt_cache_key = createHash('sha256')
+      .update(
+        JSON.stringify([
+          'openai',
+          exchange.identity.session || fallbackSession,
+          agentId ?? 'main',
+          request.model,
+        ]),
+      )
+      .digest('hex');
     if (url.pathname === '/v1/messages/count_tokens') {
       res.writeHead(200, {
         'content-type': 'application/json',
@@ -442,29 +449,21 @@ export function createNativeGateway({
       delete responseHeaders[name];
     }
     res.writeHead(upstream.status, responseHeaders);
-    if (upstream.body) {
+    if (guardAuto && upstream.ok && body.tools?.length) {
+      await forwardObservedTools(upstream, res, exchange.remember, signal);
+    } else if (upstream.body) {
       await pipeline(Readable.fromWeb(upstream.body), res);
     } else {
       res.end();
     }
   }
-  async function handleReview(
-    exchange: ProviderRequest,
-    metadata: ReturnType<typeof requestIdentity>,
-  ) {
+  async function handleReview(exchange: ProviderRequest, context: ApprovalContext | undefined) {
     const { req, res, parsed, url, signal, agentId } = exchange;
-    const { session: sourceSession, scope: approvalScope } = metadata;
     if (!approvalBridge) {
       throw new Error('Approval bridge unavailable');
     }
     if (url.pathname !== '/v1/messages' || req.method !== 'POST') {
       throw new BadRequest('Anthropic passthrough is disabled');
-    }
-    let context = approvalScope ? approvalContexts.get(approvalScope) : undefined;
-    if (guardAuto) {
-      // Native classifier requests can omit the worker header. Resolve against
-      // the actual pending tool, never the most recent main-agent request.
-      context = pendingReview(parsed, sourceSession);
     }
     const result = await approvalBridge.respond(parsed, signal, context);
     const worker = context ? JSON.parse(context.scope)[1] : agentId;
@@ -484,7 +483,7 @@ export function createNativeGateway({
     { identity, scope }: ReturnType<typeof requestIdentity>,
     external: string,
   ) {
-    if (!approvalBridge || !scope || !body.tools?.length) {
+    if ((!guardAuto && !approvalBridge) || !scope || !body.tools?.length) {
       return;
     }
     if (url.pathname !== '/v1/messages' || req.method !== 'POST') {
@@ -519,21 +518,38 @@ export function createNativeGateway({
   ) {
     const { parsed } = exchange;
     const classification = isApprovalRequest(parsed);
-    if (external && !classification) {
-      retainRequestContext(exchange, metadata, external);
+    if (classification) {
+      return dispatchReview(exchange, metadata, external);
     }
-    if (approvalBridge && (!external || classification)) {
-      return handleReview(exchange, metadata);
-    }
-    if (classification && external) {
-      throw new BadRequest(
-        'Automatic review cannot use ordinary external inference. No matching provider reviewer is enabled.',
-      );
-    }
+    retainRequestContext(exchange, metadata, String(exchange.body.model ?? ''));
     if (!external && blockAnthropic) {
       throw new BadRequest('Anthropic is not signed in. Select an external model.');
     }
     return forwardProvider(exchange, external);
+  }
+  async function dispatchReview(
+    exchange: ProviderRequest,
+    metadata: ReturnType<typeof requestIdentity>,
+    external: string | null,
+  ) {
+    // Native classification may omit the worker header or retry with a working
+    // model ID. The pending action, not that ID or the current parent, owns review.
+    let context = metadata.scope ? approvalContexts.get(metadata.scope) : undefined;
+    if (guardAuto) {
+      context = pendingReview(exchange.parsed, metadata.session);
+    }
+    const openai = context?.model.startsWith('multi/openai/');
+    if (approvalBridge && (openai || (!guardAuto && !context))) {
+      return handleReview(exchange, context);
+    }
+    const nativeClaude =
+      context && (!context.model.startsWith('multi/') || context.model.startsWith('multi/zen/'));
+    if (openai || external || blockAnthropic || (context && !nativeClaude)) {
+      throw new BadRequest(
+        'Automatic review cannot use ordinary external inference. No matching provider reviewer is enabled.',
+      );
+    }
+    return handleAnthropic(exchange);
   }
   async function forwardProvider(exchange: ProviderRequest, external: string | null) {
     const { body, agentId, url } = exchange;
@@ -580,7 +596,7 @@ export function createNativeGateway({
     let sourceModel = '';
     let sourceSession = '';
     let sourceScope: string | undefined;
-    const toolBlocks = new Map<number, { id: string; name: string; json: string }>();
+    const observer = new ToolObserver((tool) => remember(tool));
     const remember = (tool: { id: string; name: string; input: unknown }) => {
       if (!guardAuto || !sourceSession) {
         return;
@@ -596,7 +612,7 @@ export function createNativeGateway({
     };
     const emit: Emit = (type, value) => {
       if (guardAuto) {
-        observeTool(type, value, toolBlocks, remember);
+        observer.event({ type, ...value });
       }
       return res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...value })}\n\n`);
     };
@@ -605,8 +621,7 @@ export function createNativeGateway({
         return;
       }
       const url = new URL(req.url ?? '', 'http://localhost');
-      const { raw, parsed } = await readRequest(req);
-      const body: MessagesRequest = parsed;
+      const { raw, parsed, body } = await readRequest(req, agentCatalog);
       const external =
         typeof body.model === 'string' && body.model.startsWith('multi/') ? body.model : null;
       assertProviderEnabled(external, enabledProviders);
@@ -617,7 +632,7 @@ export function createNativeGateway({
         agentId,
         header(req.headers['x-claude-code-session-id']),
       );
-      sourceModel = external ?? '';
+      sourceModel = String(body.model ?? '');
       sourceSession = metadata.session;
       sourceScope = metadata.scope;
       const exchange: ProviderRequest = {
@@ -674,7 +689,7 @@ function providerSignal(disconnected: AbortSignal, model: string | null, timeout
   return AbortSignal.any([disconnected, AbortSignal.timeout(timeoutMs ?? 180000)]);
 }
 
-async function readRequest(req: http.IncomingMessage) {
+async function readRequest(req: http.IncomingMessage, catalog?: AgentCatalog) {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
@@ -694,7 +709,10 @@ async function readRequest(req: http.IncomingMessage) {
   if (!isRecord(parsed) || (parsed.model !== undefined && typeof parsed.model !== 'string')) {
     throw new BadRequest('Expected an object with a string model');
   }
-  return { raw, parsed };
+  const body: MessagesRequest = isApprovalRequest(parsed)
+    ? parsed
+    : (catalog?.compact(parsed) ?? parsed);
+  return { raw: body === parsed ? raw : Buffer.from(JSON.stringify(body)), parsed, body };
 }
 
 function providerRoute(
@@ -905,35 +923,6 @@ function failResponse(res: http.ServerResponse, emit: Emit, error: unknown) {
   } else {
     res.writeHead(status, { 'content-type': 'application/json' });
     res.end(JSON.stringify(failure));
-  }
-}
-
-function observeTool(
-  type: StreamEventName,
-  value: StreamEventBody,
-  toolBlocks: Map<number, { id: string; name: string; json: string }>,
-  remember: ProviderRequest['remember'],
-) {
-  if (!('index' in value)) {
-    return;
-  }
-  if ('content_block' in value) {
-    const block = value.content_block;
-    if (block.type === 'tool_use') {
-      toolBlocks.set(value.index, { ...block, json: '' });
-    }
-    return;
-  }
-  const tool = toolBlocks.get(value.index);
-  if (!tool) {
-    return;
-  }
-  if ('delta' in value && 'partial_json' in value.delta) {
-    tool.json += value.delta.partial_json;
-  }
-  if (type === 'content_block_stop') {
-    remember({ ...tool, input: JSON.parse(tool.json || '{}') });
-    toolBlocks.delete(value.index);
   }
 }
 

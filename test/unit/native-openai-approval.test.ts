@@ -115,7 +115,16 @@ test('capability guard follows exact tool origin across model switches and worke
     approvalCapabilityGuard(input, { ...pending, model: 'multi/cursor/composer-2.5' }, ['cursor']),
     {},
   );
+  for (const model of ['claude-sonnet-5', 'multi/zen/gpt-5.6-luna']) {
+    assert.deepEqual(approvalCapabilityGuard(input, { ...pending, model }, ['openai'], true), {});
+    assert.equal(
+      approvalCapabilityGuard(input, { ...pending, model }, ['openai'], false).hookSpecificOutput
+        ?.permissionDecision,
+      'deny',
+    );
+  }
   for (const result of [
+    approvalCapabilityGuard(input, pending, [], true),
     approvalCapabilityGuard(input, pending, []),
     approvalCapabilityGuard(input, { ...pending, model: 'multi/cursor/composer' }, ['openai']),
   ]) {

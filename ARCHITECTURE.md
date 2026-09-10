@@ -13,6 +13,18 @@ and configuration. Worker lifecycle, elapsed time, streamed progress, completion
 failure and cancellation are product requirements. Claude access is optional for
 external providers; authentication remains owned by each provider.
 
+Provider worker advertisement follows the finalized picker, with one registered
+worker per model and no duplicate effort rows. Registration remains complete so
+other workers and effort variants are callable explicitly. The gateway removes
+only exact Multi-owned rows from known native catalog announcements; built-in and
+custom agents, unknown formats, stored transcripts and tool permissions are not
+rewritten. Approval envelopes bypass this prompt normalization.
+
+OpenAI cache affinity uses an opaque hash of session, worker and model identity.
+A recognized session ID preserves the key across gateway restarts; otherwise a
+per-gateway fallback provides stable affinity only within that gateway.
+The key is a routing hint, not a guarantee of cache hits or quota savings.
+
 There are two execution paths:
 
 1. Direct model adapters use Claude Code's tools, permissions and execution loop.
@@ -138,11 +150,16 @@ See [implementation and setup](docs/antigravity.md).
 
 ## Direct OpenAI permissions and provider boundaries
 
-OpenAI continues to use Claude-executed tools and native static permissions. With
-Claude credentials, preserve Anthropic classification passthrough. Without them,
-use the authenticated OpenAI account's supported reviewer capability. Missing
-review capability, malformed evidence and unsupported formats cannot grant approval;
-the working model never substitutes for the reviewer. Native ask rules retain
+OpenAI continues to use Claude-executed tools and native static permissions. GPT
+main-session and worker actions use the originating OpenAI account's supported
+reviewer capability regardless of Claude login availability. Classifier model IDs
+and parent selections do not determine ownership: correlate the pending tool with
+its originating session, worker and provider. Observe Claude passthrough tool output
+without changing its bytes so mixed-provider workers retain distinct ownership.
+Claude actions retain Anthropic classification; Zen retains Claude-backed review
+where available and never borrows Codex review. Missing GPT review capability,
+ambiguous origins, malformed evidence and unsupported formats fail explicitly,
+without falling back to Claude or the working model. Native ask rules retain
 Claude's permission prompt. This is separate from Cursor's native review policy.
 
 Provider review contexts remain isolated by session, worker and originating provider.

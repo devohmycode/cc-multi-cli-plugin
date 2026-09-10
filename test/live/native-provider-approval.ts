@@ -19,16 +19,20 @@ import { pty } from './native-pty.ts';
 
 if (process.argv.includes('--help')) {
   console.log(
-    'Usage: node test/live/native-provider-approval.ts [--native-escalation | --launcher]\nReal provider review and Claude terminal auto/manual approval. Requires Python 3 (stdlib PTY), Claude, and Node 24. Temporary canaries only.',
+    'Usage: node test/live/native-provider-approval.ts [--native-escalation | --launcher [--claude-auth-fixture]]\nReal provider review and Claude terminal auto/manual approval. Requires Python 3 (stdlib PTY), Claude, and Node 24. Temporary canaries only.\n--claude-auth-fixture exercises the authenticated launcher branch with an unusable token; no real Claude credentials are copied or used.',
   );
   process.exit(0);
 }
 const initialModel = 'multi/openai/gpt-5.6-luna';
 const launcher = process.argv.includes('--launcher');
 const nativeEscalation = launcher || process.argv.includes('--native-escalation');
+const claudeAuthFixture = process.argv.includes('--claude-auth-fixture');
+assert(!claudeAuthFixture || launcher, '--claude-auth-fixture requires --launcher');
 assert(
-  process.argv.slice(2).every((arg) => ['--native-escalation', '--launcher'].includes(arg)),
-  'Only --native-escalation and --launcher are supported; native Cursor has no separate reviewer.',
+  process.argv
+    .slice(2)
+    .every((arg) => ['--native-escalation', '--launcher', '--claude-auth-fixture'].includes(arg)),
+  'Unsupported option; native Cursor has no separate reviewer.',
 );
 assert.notEqual(process.platform, 'win32', 'PTY proof requires Linux/macOS');
 assert.equal(spawnSync('python3', ['--version']).status, 0, 'Python 3 required');
@@ -351,6 +355,7 @@ const child = spawn(
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       PATH: process.env.PATH,
+      TMPDIR: process.env.TMPDIR,
       HOME: os.homedir(),
       TERM: 'xterm-256color',
       CLAUDE_CONFIG_DIR: config,
@@ -358,7 +363,13 @@ const child = spawn(
       ...(launcher
         ? {
             MULTI_NATIVE_TRACE: '1',
+            MULTI_ENABLED_PROVIDERS: 'openai',
             CODEX_HOME: process.env.CODEX_HOME,
+            // Exercise the authenticated branch without copying a real Claude login.
+            // This token cannot authenticate upstream; any Anthropic route fails the proof.
+            ...(claudeAuthFixture
+              ? { ANTHROPIC_AUTH_TOKEN: 'unusable-anthropic-auth-fixture' }
+              : {}),
           }
         : {
             ANTHROPIC_AUTH_TOKEN: token,
@@ -603,6 +614,7 @@ try {
         {
           passed: !failure,
           launcher,
+          claudeAuthFixture,
           nativeEscalation,
           permissionInputs,
           code,

@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { AgentCatalog } from '../../plugins/multi-core/src/gateway/agent-catalog.ts';
 import type { MessagesResponse } from '../../plugins/multi-core/src/gateway/messages.ts';
 import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 import type { ResponsesRequest } from '../../plugins/multi-openai/src/responses.ts';
@@ -14,6 +15,7 @@ interface Sample {
   turn: number;
   model: string;
   session: string;
+  cacheKey: string;
   instructionsHash: string;
   toolsHash: string;
   input: number;
@@ -36,6 +38,28 @@ if (process.argv.includes('--help')) {
 const terminalOnly = process.argv.includes('--terminal-only');
 const cwd = await mkdtemp(path.join(os.tmpdir(), 'native-openai-cache-'));
 console.log(`Artifacts: ${cwd}`);
+const workers = {
+  'openai-native': {
+    model: 'multi/openai/gpt-6-astra',
+    description: 'CACHE_VISIBLE_WORKER',
+    prompt: 'Follow the task.',
+    tools: ['Read'],
+  },
+  'openai-native-high': {
+    model: 'multi/openai/gpt-6-astra',
+    description: 'CACHE_HIDDEN_EFFORT',
+    prompt: 'Follow the task.',
+    tools: ['Read'],
+    effort: 'high',
+  },
+  'openai-luna': {
+    model: 'multi/openai/gpt-5.6-luna',
+    description: 'CACHE_HIDDEN_MODEL',
+    prompt: 'Follow the task.',
+    tools: ['Read'],
+  },
+};
+const catalog = new AgentCatalog(workers, ['multi/openai/gpt-6-astra']);
 const session = randomUUID();
 const token = randomUUID();
 const samples: Sample[] = [];
@@ -147,6 +171,8 @@ async function runClaude(port: number, turn: number) {
       'low',
       '--allowedTools',
       'Read',
+      '--agents',
+      JSON.stringify(workers),
       '--strict-mcp-config',
       '--setting-sources',
       '',
@@ -184,6 +210,16 @@ async function runClaude(port: number, turn: number) {
     await writeFile(path.join(cwd, `claude-${turn}.jsonl`), stdout);
     await writeFile(path.join(cwd, `claude-${turn}.stderr`), stderr);
     assert.equal(code, 0, stderr);
+    assert(!stderr.includes('DEP0190'), 'Deprecated shell spawning');
+    const init = stdout
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .find((event) => event.type === 'system' && event.subtype === 'init');
+    assert(init && Array.isArray(init.agents), 'Native registered agent list unavailable');
+    for (const name of Object.keys(workers)) {
+      assert(init.agents.includes(name), `Hidden worker lost native registration: ${name}`);
+    }
     const result: ClaudeResult | undefined = stdout
       .trim()
       .split('\n')
@@ -202,16 +238,28 @@ for (let turn = 0; turn < 3; turn++) {
     token,
     authFile,
     blockAnthropic: true,
+    agentCatalog: catalog,
     fetchImpl: async (url, init) => {
       assert.equal(url, 'https://chatgpt.com/backend-api/codex/responses');
       assert(samples.length < 6, 'Six-request inference budget exhausted');
       const body: ResponsesRequest = JSON.parse(String(init.body));
       assert.equal(body.model, 'gpt-6-astra');
       assert.equal(body.reasoning.effort, 'low');
+      assert(body.prompt_cache_key);
+      assert.match(body.prompt_cache_key, /^[a-f0-9]{64}$/);
+      const input = JSON.stringify(body.input);
+      await writeFile(
+        path.join(cwd, `input-${turn}-${samples.length}.json`),
+        JSON.stringify(body.input, null, 2),
+      );
+      assert(input.includes('CACHE_VISIBLE_WORKER'), 'Native CLI catalog was not observed');
+      assert(!input.includes('CACHE_HIDDEN_EFFORT'), 'Reasoning variant leaked into context');
+      assert(!input.includes('CACHE_HIDDEN_MODEL'), 'Non-picker model leaked into context');
       const sample: Sample = {
         turn,
         model: body.model,
         session: init.headers.session_id,
+        cacheKey: body.prompt_cache_key,
         instructionsHash: hash(body.instructions),
         toolsHash: hash(body.tools),
         input: 0,
@@ -251,6 +299,7 @@ for (let turn = 0; turn < 3; turn++) {
   }
 }
 assert.equal(new Set(samples.map((sample) => sample.session)).size, 1);
+assert.equal(new Set(samples.map((sample) => sample.cacheKey)).size, 1);
 assert.equal(new Set(samples.map((sample) => sample.instructionsHash)).size, 1);
 assert.equal(new Set(samples.map((sample) => sample.toolsHash)).size, 1);
 const cold = samples[0];
