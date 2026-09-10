@@ -70,10 +70,11 @@ export async function cursorNativePermissions(
       break;
     }
   }
+  // Isolated SDK settings never load a user's .cursor policy. A permissions.json
+  // is a deny list, so refuse rather than silently drop it. A hooks.json is
+  // observability (Orca and similar) and is simply not run for gateway sessions.
   for (const directory of roots) {
-    for (const name of ['permissions.json', 'hooks.json']) {
-      await rejectIgnoredPolicy(path.join(directory, '.cursor', name));
-    }
+    await rejectIgnoredPolicy(path.join(directory, '.cursor', 'permissions.json'));
   }
   return {
     tools: policy.tools,

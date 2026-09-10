@@ -89,10 +89,12 @@ test('native Cursor refuses explicit ancestor and user policies its isolated set
   await writeFile(policy, '{"deny":["Shell(rm)"]}');
   await assert.rejects(cursorNativePermissions(workspace), /permissions.json.*unsupported/);
   await rm(policy);
+  // A user hooks.json is observability that isolated SDK settings never run; it
+  // must not block native execution (Orca installs one globally).
   const hooks = path.join(home, '.cursor', 'hooks.json');
   await mkdir(path.dirname(hooks), { recursive: true });
-  await writeFile(hooks, '{}');
-  await assert.rejects(cursorNativePermissions(workspace), /hooks.json.*unsupported/);
+  await writeFile(hooks, '{"hooks":{"stop":[{"command":"log"}]}}');
+  await cursorNativePermissions(workspace);
 });
 
 test('native Cursor rejects Claude restrictions that cannot reach external execution', () => {
