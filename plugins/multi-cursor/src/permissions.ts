@@ -4,7 +4,6 @@ import path from 'node:path';
 import type { AgentModeOption, AgentOptions } from '@cursor/sdk';
 import type { WorkerPermissions } from '../../multi-core/src/gateway/agent-definitions.ts';
 import type { PermissionContext } from '../../multi-core/src/gateway/mode-hook.ts';
-import { isNativeRowTool } from '../../multi-core/src/gateway/native-rows-protocol.ts';
 
 const TOOL_CAPABILITIES = [
   ['shell', ['Bash']],
@@ -47,7 +46,7 @@ function claudeToolRules(rules: string[] | undefined): Set<string> | undefined {
   supported.add('Agent');
   supported.add('Task');
   for (const rule of rules) {
-    if (!supported.has(rule) && !isNativeRowTool(rule)) {
+    if (!supported.has(rule)) {
       throw new Error(`Native Cursor cannot enforce Claude tool rule ${rule}; unsupported policy.`);
     }
   }
@@ -161,8 +160,7 @@ function settingsRecord(value: unknown): Record<string, unknown> {
 function assertNativeAskRules(value: unknown): void {
   if (
     value !== undefined &&
-    (!Array.isArray(value) ||
-      value.some((rule) => typeof rule !== 'string' || !isNativeRowTool(rule)))
+    (!Array.isArray(value) || value.length > 0 || value.some((rule) => typeof rule !== 'string'))
   ) {
     throw new Error(
       'Native Cursor cannot enforce Claude permissions.ask; native execution is unavailable.',

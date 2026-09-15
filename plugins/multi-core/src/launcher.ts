@@ -30,9 +30,8 @@ import { ZEN_MODELS, ZEN_WORKERS, zenPickerOptions } from '../../multi-zen/src/m
 import { AgentCatalog } from './gateway/agent-catalog.ts';
 import { loadWorkerPermissions } from './gateway/agent-definitions.ts';
 import { checkCursorSettings } from './gateway/cursor-settings.ts';
+import { ModBridge } from './gateway/mod-bridge.ts';
 import { PermissionModes } from './gateway/mode-hook.ts';
-import { NativeRows } from './gateway/native-rows.ts';
-import { nativeRowNames } from './gateway/native-rows-protocol.ts';
 import { hookCommand } from './gateway/permission-hook.ts';
 import type { GatewayEvent } from './gateway/server.ts';
 import { createNativeGateway } from './gateway/server.ts';
@@ -84,15 +83,9 @@ async function main() {
   if (args[0] === '--') {
     args.shift();
   }
-  if (process.env.ANTHROPIC_BASE_URL) {
-    throw new Error(
-      'Start without ANTHROPIC_BASE_URL; this launcher supplies the central gateway.',
-    );
-  }
+  validateSessionLaunch(args);
+  await assertFunctionHooksSupported();
   const anthropic = await anthropicSignedIn();
-  if (args.some((arg) => arg === '--agents' || arg.startsWith('--agents='))) {
-    throw new Error('This launcher supplies --agents; use agent files for additional agents.');
-  }
   const cursorPicker = cursorPickerOptions(
     cursorModels,
     cursorModels.length ? process.env.MULTI_CURSOR_EXTRA_MODELS : undefined,
@@ -107,6 +100,10 @@ async function main() {
   const token = randomBytes(32).toString('hex');
   const settings = pickerSettings(codexSignedIn, cursorPicker, Boolean(zenKey), antigravityModels);
   await mergeSettings(args, settings);
+  // The supervisor does not transfer --agents or our session-local gateway env,
+  // and can outlive the child whose exit releases settingsDir and the gateway.
+  // Keep ordinary background subagent tasks available within this owned session.
+  settings.disableAgentView = true;
   filterPicker(settings, process.env.MULTI_MODELS);
   const callerSettings = structuredClone(settings);
   const { cursor, antigravity } = nativeHarnesses(
@@ -116,18 +113,11 @@ async function main() {
     callerSettings,
   );
   const agents = workerDefinitions(codexSignedIn, cursorModels, Boolean(zenKey), antigravityModels);
-  const showNativeRows = process.env.MULTI_CURSOR_TOOL_ROWS === '1';
-  configureNativeRowWorkers(agents, showNativeRows);
+  const modBridge = new ModBridge();
   const settingsDir = await mkdtemp(path.join(os.tmpdir(), 'multi-native-settings-'));
   const permissionModes = [cursor, antigravity].some(Boolean)
-    ? new PermissionModes(
-        (cwd) =>
-          loadWorkerPermissions(cwd, agents, [
-            ...args,
-            '--settings',
-            JSON.stringify(callerSettings),
-          ]),
-        settingsDir,
+    ? new PermissionModes((cwd) =>
+        loadWorkerPermissions(cwd, agents, [...args, '--settings', JSON.stringify(callerSettings)]),
       )
     : undefined;
   const { approvalBridge, approvalProviders } = await discoverApprovals(
@@ -139,10 +129,7 @@ async function main() {
     token,
     enabledProviders,
     authFile,
-    nativeRows: new NativeRows(
-      path.join(os.homedir(), '.cursor', 'multi-native-rows'),
-      showNativeRows,
-    ),
+    modBridge,
     cursor,
     antigravity,
     zen: zenKey ? { apiKey: zenKey } : undefined,
@@ -165,8 +152,6 @@ async function main() {
   if (address === null || typeof address === 'string') {
     throw new Error('Gateway did not bind a local port.');
   }
-  configureModeHooks(settings, permissionModes, Boolean(antigravity), address.port, settingsDir);
-  await configureNativeRowMcp(settings, args, settingsDir, address.port, token, showNativeRows);
   const settingsFile = path.join(settingsDir, 'settings.json');
   const { initialModel, selectedModel } = await initialSelection(args, settings, anthropic);
   if (!initialModel && selectedModel) {
@@ -184,6 +169,7 @@ async function main() {
       'Cursor worker catalog exceeds the launcher argument limit. Worker registration needs a file-based Claude plugin.',
     );
   }
+  const ready = awaitModSessionStart();
   const child = spawn(
     claudeExecutable,
     ['--settings', settingsFile, '--agents', definitions, ...args],
@@ -199,6 +185,13 @@ async function main() {
     await antigravity?.close();
     await rm(settingsDir, { recursive: true, force: true });
   };
+  try {
+    await ready;
+  } catch (error) {
+    child.kill();
+    await shutdown();
+    throw error;
+  }
   child.once('error', (error) => {
     console.error(error.message);
     void shutdown().finally(() => process.exit(1));
@@ -216,6 +209,25 @@ void main().catch((error) => {
   console.error(`Native gateway: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 });
+
+function validateSessionLaunch(args: string[]) {
+  if (
+    args.some((arg) => arg === '--bg' || arg === '--background') ||
+    ['attach', 'respawn'].includes(args[0] ?? '')
+  ) {
+    throw new Error(
+      'Multi sessions must stay attached to their launcher. Exit and use --resume <session-id> to continue with a fresh gateway; whole-session background handoff is unsupported.',
+    );
+  }
+  if (process.env.ANTHROPIC_BASE_URL) {
+    throw new Error(
+      'Start without ANTHROPIC_BASE_URL; this launcher supplies the central gateway.',
+    );
+  }
+  if (args.some((arg) => arg === '--agents' || arg.startsWith('--agents='))) {
+    throw new Error('This launcher supplies --agents; use agent files for additional agents.');
+  }
+}
 
 function nativeHarnesses(
   cursorModels: CursorModelOption[],
@@ -301,6 +313,53 @@ function parseAuthProbeOutput(stdout: string): boolean {
     throw new Error('Claude auth status probe returned no boolean loggedIn field');
   }
   return details.loggedIn;
+}
+
+async function assertFunctionHooksSupported(): Promise<void> {
+  let stdout: string;
+  try {
+    ({ stdout } = await promisify(execFile)(claudeExecutable, ['--version'], {
+      timeout: 10000,
+      maxBuffer: 65536,
+    }));
+  } catch {
+    throw new Error(
+      'Claude Code 2.1.272 or newer with function hooks is required; unable to read claude --version.',
+    );
+  }
+  const match = stdout.match(/\b(\d+)\.(\d+)\.(\d+)\b/);
+  if (!match || !atLeastVersion(match.slice(1).map(Number), [2, 1, 272])) {
+    throw new Error('Claude Code 2.1.272 or newer with function hooks is required.');
+  }
+}
+
+function atLeastVersion(actual: number[], required: number[]): boolean {
+  for (let index = 0; index < required.length; index++) {
+    const received = actual[index] ?? 0;
+    const minimum = required[index] ?? 0;
+    if (received !== minimum) {
+      return received > minimum;
+    }
+  }
+  return true;
+}
+
+function awaitModSessionStart(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      process.off('multi-mod-session-start', ready);
+      reject(
+        new Error(
+          'Claude Code 2.1.272 or newer with loaded function hooks is required; the Multi mod did not acknowledge session.start.',
+        ),
+      );
+    }, 5000);
+    const ready = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    process.once('multi-mod-session-start', ready);
+  });
 }
 
 async function anthropicSignedIn(): Promise<boolean> {
@@ -661,11 +720,14 @@ function gatewayEnvironment(port: number, token: string, anthropic: boolean) {
   delete env.OPENCODE_API_KEY;
   return {
     ...env,
+    CLAUDE_CODE_DISABLE_AGENT_VIEW: '1',
     // Native runs and extended OpenAI reasoning can outlive Claude's default
     // API timer; preserve explicit user limits.
     API_TIMEOUT_MS: process.env.API_TIMEOUT_MS ?? '2147483647',
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
     MULTI_GATEWAY_TOKEN: token,
+    CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1',
+    MULTI_MOD_GATEWAY_URL: `http://127.0.0.1:${port}`,
     ...(!anthropic ? { ANTHROPIC_AUTH_TOKEN: token } : {}),
     ANTHROPIC_CUSTOM_HEADERS: [
       process.env.ANTHROPIC_CUSTOM_HEADERS,
@@ -674,31 +736,6 @@ function gatewayEnvironment(port: number, token: string, anthropic: boolean) {
       .filter(Boolean)
       .join('\n'),
   };
-}
-
-function configureModeHooks(
-  settings: LaunchSettings,
-  permissionModes: PermissionModes | undefined,
-  antigravity: boolean,
-  port: number,
-  settingsDir: string,
-) {
-  if (permissionModes) {
-    const hooks = settings.hooks as Record<string, unknown[]> | undefined;
-    // Launcher-bound control address, independent of Claude settings/env API overrides.
-    const command = `${hookCommand(new URL('./gateway/mode-hook.ts', import.meta.url))} http://127.0.0.1:${port}/multi/mode '${settingsDir.replaceAll("'", "'\\''")}'`;
-    settings.hooks = {
-      ...hooks,
-      ...Object.fromEntries(
-        ['UserPromptSubmit', 'SubagentStart', ...(antigravity ? ['PreCompact'] : [])].map(
-          (event) => [
-            event,
-            [...(hooks?.[event] ?? []), { hooks: [{ type: 'command', command, timeout: 10 }] }],
-          ],
-        ),
-      ),
-    };
-  }
 }
 
 function traceEvent(event: GatewayEvent) {
@@ -716,44 +753,4 @@ async function discoverAntigravity() {
     await installAntigravityHook();
   }
   return antigravityModels;
-}
-
-function configureNativeRowWorkers(agents: Record<string, AgentDefinition>, enabled: boolean) {
-  if (enabled) {
-    for (const agent of Object.values(agents)) {
-      if (agent.model.startsWith('multi/cursor/')) {
-        agent.tools.push(...nativeRowNames);
-      }
-    }
-  }
-}
-
-async function configureNativeRowMcp(
-  settings: LaunchSettings,
-  args: string[],
-  settingsDir: string,
-  port: number,
-  token: string,
-  enabled: boolean,
-) {
-  if (enabled) {
-    const file = path.join(settingsDir, 'native-mcp.json');
-    await writeFile(
-      file,
-      JSON.stringify({
-        mcpServers: {
-          multi_cursor: {
-            type: 'http',
-            url: `http://127.0.0.1:${port}/multi/native-mcp`,
-            headers: { 'x-multi-gateway-token': token },
-          },
-        },
-      }),
-      { mode: 0o600 },
-    );
-    args.push('--mcp-config', file);
-    const permissions = settings.permissions ?? {};
-    const allow = Array.isArray(permissions.allow) ? permissions.allow : [];
-    settings.permissions = { ...permissions, allow: [...allow, ...nativeRowNames] };
-  }
 }

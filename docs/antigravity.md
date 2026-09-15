@@ -55,14 +55,16 @@ or quota availability.
 | default / dontAsk | Unsupported; select a supported mode. |
 
 Claude Code's permission mode and tool rules take precedence over native
-Antigravity settings; there is no reviewer in any mode. Claude's existing
-prompt/worker hooks determine the mode at prompt boundaries. An authenticated
-`PreCompact` hook supplies the main-session compaction boundary; summary
-requests run with every mapped native tool denied and retain native history.
-Whole-tool restrictions intersect the native capability list. Richer unsupported
-Claude policy rejects admission rather than being silently ignored. The bridge
-currently reuses the conservative Cursor-side Claude settings admission checks;
-this does not invoke Cursor or its reviewer.
+Antigravity settings; there is no reviewer in any mode. The bundled Claude Mod is
+the permission synchronization path. It posts mode, worker and compaction snapshots
+through authenticated loopback `/multi/mod/*` routes, with generation
+acknowledgements that fail closed when stale or unavailable. Compaction summary
+requests run with every mapped native tool denied and retain native history. The
+global native Antigravity `PreToolUse` hook remains the enforcement point for those
+denials. Whole-tool restrictions intersect the native capability list. Richer
+unsupported Claude policy rejects admission rather than being silently ignored. The
+bridge currently reuses the conservative Cursor-side Claude settings admission
+checks; this does not invoke Cursor or its reviewer.
 
 Native child delegation and MCP tools are denied. Claude/OpenAI parents coordinate
 incoming Antigravity workers. Every external tool event is display-only text;
@@ -131,11 +133,11 @@ routing passed through the production launcher with a fixture CLI; an OpenAI Lun
 parent also passed the routing fixture. These checks do not establish native
 automatic-compaction fidelity or consistent cache reuse.
 
-Claude 2.1.265 also passed a real manual `/compact` boundary and the following
-Antigravity turn through the production launcher with a fixture CLI. This caught
-and fixed omitted PreCompact mode fields, changing billing attribution metadata,
-and merged command-output/user-prompt blocks. Worker outer compaction and native
-automatic compaction remain unverified.
+A historical pre-Mod probe on Claude 2.1.265 passed a real manual `/compact`
+boundary and the following Antigravity turn through the production launcher with a
+fixture CLI. It is not validation of the current Mods runtime, whose launcher
+requires Claude Code 2.1.272 or newer. Worker outer compaction and native automatic
+compaction remain unverified.
 
 ## Upstream evidence
 

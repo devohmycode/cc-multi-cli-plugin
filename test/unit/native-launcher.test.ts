@@ -18,9 +18,11 @@ test('launcher preserves native auth, disables unavailable auto mode, and merges
     path.join(cwd, 'bin', 'claude'),
     `#!/usr/bin/env node
 const fs=require('node:fs');const args=process.argv.slice(2);
+if(args[0]==='--version'){console.log(process.env.TEST_CLAUDE_VERSION??'2.1.272');process.exit(0)}
+const result=(value)=>{const base=process.env.MULTI_MOD_GATEWAY_URL;if(!base){console.log(value);return}const url=new URL(base+'/multi/mod/session');const req=require('node:http').request(url,{method:'POST',headers:{'content-type':'application/json','x-multi-gateway-token':process.env.MULTI_GATEWAY_TOKEN}},()=>console.log(value));req.on('error',()=>console.log(value));req.end(JSON.stringify({sessionId:'fixture',event:'start'}));};
 if(args[0]==='auth'){if(process.env.TEST_AUTH==='malformed'){console.log('not-json');process.exit(0)}if(process.env.TEST_AUTH==='error'){process.exit(2)}if(process.env.TEST_AUTH==='missing'){console.log('{}');process.exit(0)}process.stdout.write(JSON.stringify({loggedIn:process.env.TEST_AUTH==='yes'}));process.exitCode=process.env.TEST_AUTH==='yes'?0:1}else{
 const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'utf8'));
- console.log(JSON.stringify({mcp:args.includes('--mcp-config')?JSON.parse(fs.readFileSync(args[args.lastIndexOf('--mcp-config')+1],'utf8')):null,settings,models:args.filter(x=>x.startsWith('multi/')),settingsCount:args.filter(x=>x==='--settings').length,hasLocalToken:!!process.env.MULTI_GATEWAY_TOKEN,apiTimeout:process.env.API_TIMEOUT_MS,auth:process.env.ANTHROPIC_API_KEY?'api':process.env.ANTHROPIC_AUTH_TOKEN?'local':'native'}));}
+ result(JSON.stringify({agentView:process.env.CLAUDE_CODE_DISABLE_AGENT_VIEW,backgroundTasks:process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS,functionHooks:process.env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS,settings,models:args.filter(x=>x.startsWith('multi/')),settingsCount:args.filter(x=>x==='--settings').length,hasLocalToken:!!process.env.MULTI_GATEWAY_TOKEN,apiTimeout:process.env.API_TIMEOUT_MS,auth:process.env.ANTHROPIC_API_KEY?'api':process.env.ANTHROPIC_AUTH_TOKEN?'local':'native'}));}
 `,
     { mode: 0o755 },
   );
@@ -36,7 +38,11 @@ const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'ut
         '--model',
         'multi/cursor/auto',
         '--settings',
-        JSON.stringify({ permissions: { deny: ['Bash(denied)'] }, hooks: { Stop: [] } }),
+        JSON.stringify({
+          disableAgentView: false,
+          permissions: { deny: ['Bash(denied)'] },
+          hooks: { Stop: [] },
+        }),
       ],
       {
         cwd,
@@ -47,7 +53,7 @@ const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'ut
           CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
           CODEX_HOME: cwd,
           TEST_AUTH: auth,
-          MULTI_CURSOR_TOOL_ROWS: auth === 'api' ? '1' : undefined,
+          CLAUDE_CODE_DISABLE_AGENT_VIEW: '0',
           API_TIMEOUT_MS: auth === 'api' ? '1000' : undefined,
           ...(auth === 'api' ? { ANTHROPIC_API_KEY: 'fake-test-key' } : {}),
         },
@@ -55,16 +61,10 @@ const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'ut
     );
     const result = JSON.parse(stdout);
     assert.equal(result.settingsCount, 1);
-    if (auth === 'api') {
-      assert.equal(result.mcp.mcpServers.multi_cursor.type, 'http');
-      assert.match(
-        result.mcp.mcpServers.multi_cursor.url,
-        /^http:\/\/127\.0\.0\.1:\d+\/multi\/native-mcp$/,
-      );
-      assert.ok(result.settings.permissions.allow.includes('mcp__multi_cursor__read'));
-    } else {
-      assert.equal(result.mcp, null);
-    }
+    assert.equal(result.settings.disableAgentView, true);
+    assert.equal(result.agentView, '1');
+    assert.equal(result.backgroundTasks, undefined);
+    assert.equal(result.functionHooks, '1');
     assert.equal(result.apiTimeout, auth === 'api' ? '1000' : '2147483647');
     assert.deepEqual(result.settings.permissions.deny, ['Bash(denied)']);
     assert.equal(result.settings.permissions.disableAutoMode, 'disable');
@@ -92,6 +92,20 @@ const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'ut
       /Claude auth status probe (returned invalid JSON|failed|returned no boolean loggedIn field)/,
     );
   }
+  await assert.rejects(
+    promisify(execFile)(process.execPath, [launcher], {
+      cwd,
+      timeout: 20000,
+      env: {
+        PATH: path.join(cwd, 'bin') + path.delimiter + process.env.PATH,
+        HOME: cwd,
+        CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
+        CODEX_HOME: cwd,
+        TEST_CLAUDE_VERSION: '2.1.271',
+      },
+    }),
+    /Claude Code 2\.1\.272 or newer with function hooks is required/,
+  );
   await mkdir(path.join(cwd, 'claude'));
   await writeFile(
     path.join(cwd, 'claude', 'settings.json'),
@@ -127,10 +141,12 @@ test('Zen credentials add picker models and named workers without leaking the ke
     path.join(bin, 'claude'),
     `#!/usr/bin/env node
 const fs=require('node:fs');const args=process.argv.slice(2);
+if(args[0]==='--version'){console.log(process.env.TEST_CLAUDE_VERSION??'2.1.272');process.exit(0)}
+const result=(value)=>{const base=process.env.MULTI_MOD_GATEWAY_URL;if(!base){console.log(value);return}const url=new URL(base+'/multi/mod/session');const req=require('node:http').request(url,{method:'POST',headers:{'content-type':'application/json','x-multi-gateway-token':process.env.MULTI_GATEWAY_TOKEN}},()=>console.log(value));req.on('error',()=>console.log(value));req.end(JSON.stringify({sessionId:'fixture',event:'start'}));};
 if(args[0]==='auth'){process.stdout.write(JSON.stringify({loggedIn:false}));process.exitCode=1}else{
 const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'utf8'));
 const agents=JSON.parse(args[args.indexOf('--agents')+1]);
-console.log(JSON.stringify({settings,agents:Object.keys(agents),models:args.filter(x=>x.startsWith('multi/')),zenKeyInChild:process.env.OPENCODE_API_KEY,args}));}
+result(JSON.stringify({settings,agents:Object.keys(agents),models:args.filter(x=>x.startsWith('multi/')),zenKeyInChild:process.env.OPENCODE_API_KEY,args}));}
 `,
     { mode: 0o755 },
   );
@@ -253,9 +269,11 @@ test('Zen saved auth supplies the no-login fallback without exposing credentials
     path.join(bin, 'claude'),
     `#!/usr/bin/env node
 const fs=require('node:fs');const args=process.argv.slice(2);
+if(args[0]==='--version'){console.log(process.env.TEST_CLAUDE_VERSION??'2.1.272');process.exit(0)}
+const result=(value)=>{const base=process.env.MULTI_MOD_GATEWAY_URL;if(!base){console.log(value);return}const url=new URL(base+'/multi/mod/session');const req=require('node:http').request(url,{method:'POST',headers:{'content-type':'application/json','x-multi-gateway-token':process.env.MULTI_GATEWAY_TOKEN}},()=>console.log(value));req.on('error',()=>console.log(value));req.end(JSON.stringify({sessionId:'fixture',event:'start'}));};
 if(args[0]==='auth'){process.stdout.write(JSON.stringify({loggedIn:false}));process.exitCode=1}else{
 const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'utf8'));
-console.log(JSON.stringify({settings,models:args.filter(x=>x.startsWith('multi/')),zenKeyInChild:process.env.OPENCODE_API_KEY}));}
+result(JSON.stringify({settings,models:args.filter(x=>x.startsWith('multi/')),zenKeyInChild:process.env.OPENCODE_API_KEY}));}
 `,
     { mode: 0o755 },
   );
@@ -283,7 +301,7 @@ console.log(JSON.stringify({settings,models:args.filter(x=>x.startsWith('multi/'
   );
 });
 
-test('Antigravity launcher groups picker families, keeps workers and binds independent control hooks', async (t) => {
+test('Antigravity launcher groups picker families, keeps workers and enables function hooks', async (t) => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'launcher-agy-picker-'));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const bin = path.join(cwd, 'bin');
@@ -300,15 +318,14 @@ console.log('gemini-low\\tGemini Low\\ngemini-medium\\tGemini Medium\\ngemini-hi
     path.join(bin, 'claude'),
     `#!/usr/bin/env node
 const fs=require('node:fs'); const {execFileSync}=require('node:child_process'); const args=process.argv.slice(2);
+if(args[0]==='--version'){console.log(process.env.TEST_CLAUDE_VERSION??'2.1.272');process.exit(0)}
+const result=(value)=>{const base=process.env.MULTI_MOD_GATEWAY_URL;if(!base){console.log(value);return}const url=new URL(base+'/multi/mod/session');const req=require('node:http').request(url,{method:'POST',headers:{'content-type':'application/json','x-multi-gateway-token':process.env.MULTI_GATEWAY_TOKEN}},()=>console.log(value));req.on('error',()=>console.log(value));req.end(JSON.stringify({sessionId:'fixture',event:'start'}));};
 if(args[0]==='auth'){console.log('{"loggedIn":false}');process.exit(1)}
 if(args.includes('plugin')){console.log('[]');process.exit(0)}
 const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'utf8'));
 const agents=JSON.parse(args[args.indexOf('--agents')+1]);
-for (const name of ['UserPromptSubmit','UserPromptSubmit','SubagentStart','PreCompact']) {
- const command=settings.hooks[name].at(-1).hooks[0].command;
- execFileSync('/bin/sh',['-c',command],{input:JSON.stringify({hook_event_name:name,session_id:'fixture',permission_mode:'plan',agent_id:'worker',agent_type:'antigravity-gemini',cwd:process.cwd(),trigger:'manual'}),env:{...process.env,ANTHROPIC_BASE_URL:'http://127.0.0.1:1'},stdio:['pipe','pipe','pipe']});
-}
-console.log(JSON.stringify({settings,agents}));
+if(process.env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS !== '1') throw new Error('function hooks missing');
+result(JSON.stringify({settings,agents}));
 `,
     { mode: 0o755 },
   );

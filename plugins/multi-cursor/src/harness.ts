@@ -11,8 +11,8 @@ import type {
   StreamEventBody,
   StreamEventName,
 } from '../../multi-core/src/gateway/messages.ts';
+import type { ModDisplayEvent } from '../../multi-core/src/gateway/mod-bridge.ts';
 import type { PermissionContext } from '../../multi-core/src/gateway/mode-hook.ts';
-import type { NativeRowObserver } from '../../multi-core/src/gateway/native-rows-protocol.ts';
 import { lockStateFile } from '../../multi-core/src/gateway/state-lock.ts';
 import { estimateTextTokens } from '../../multi-core/src/gateway/tokens.ts';
 import { CursorProviderError, cursorRunError } from './errors.ts';
@@ -22,6 +22,7 @@ import {
   cursorPermissionPolicy,
   mergeCursorPermissions,
 } from './permissions.ts';
+import type { NativeRowObserver } from './progress.ts';
 import { cursorRowObservation, formatCursorProgress } from './progress.ts';
 import { cursorHistoryHash, cursorTerminalSuffix, prepareCursorRequest } from './request.ts';
 
@@ -572,8 +573,9 @@ export class CursorHarness {
       onDelta: ({ update }) => {
         signal.throwIfAborted();
         const observation = rowObserver ? cursorRowObservation(update) : undefined;
-        if (observation) {
-          rowObserver?.(observation);
+        const display = observation ? rowObserver?.(observation) : undefined;
+        if (display) {
+          stream.displayRow(display);
         }
         if (update.type === 'text-delta') {
           appendText(update.text);
@@ -703,7 +705,7 @@ async function observe(exchange: Exchange, signal: AbortSignal, emit?: Emit) {
 class HarnessResponse {
   private readonly response: MessagesResponse;
   private readonly emit: Emit;
-  private started = false;
+  private activeTextIndex: number | undefined;
   private bytes = 0;
 
   constructor(model: string, inputTokens: number, emit: Emit) {
@@ -729,21 +731,50 @@ class HarnessResponse {
     if (this.bytes > 32 * 1024 * 1024) {
       throw new Error('Cursor run exceeded the 32 MiB output limit');
     }
-    if (!this.started) {
-      this.started = true;
+    if (this.activeTextIndex === undefined) {
+      this.activeTextIndex = this.response.content.length;
       this.response.content.push({ type: 'text', text: '' });
-      this.emit('content_block_start', { index: 0, content_block: { type: 'text', text: '' } });
+      this.emit('content_block_start', {
+        index: this.activeTextIndex,
+        content_block: { type: 'text', text: '' },
+      });
     }
-    const block = this.response.content[0];
+    const block = this.response.content[this.activeTextIndex];
     if (block.type === 'text') {
       block.text += text;
     }
-    this.emit('content_block_delta', { index: 0, delta: { type: 'text_delta', text } });
+    this.emit('content_block_delta', {
+      index: this.activeTextIndex,
+      delta: { type: 'text_delta', text },
+    });
+  }
+
+  displayRow(event: ModDisplayEvent) {
+    if (this.activeTextIndex !== undefined) {
+      this.emit('content_block_stop', { index: this.activeTextIndex });
+      this.activeTextIndex = undefined;
+    }
+    const index = this.response.content.length;
+    this.response.content.push({
+      type: 'tool_use',
+      id: event.toolUseId,
+      name: event.tool,
+      input: event.input,
+    });
+    this.emit('content_block_start', {
+      index,
+      content_block: { type: 'tool_use', id: event.toolUseId, name: event.tool, input: {} },
+    });
+    this.emit('content_block_delta', {
+      index,
+      delta: { type: 'input_json_delta', partial_json: JSON.stringify(event.input) },
+    });
+    this.emit('content_block_stop', { index });
   }
 
   finish() {
-    if (this.started) {
-      this.emit('content_block_stop', { index: 0 });
+    if (this.activeTextIndex !== undefined) {
+      this.emit('content_block_stop', { index: this.activeTextIndex });
     }
     this.response.stop_reason = 'end_turn';
     this.response.usage.output_tokens = estimateTextTokens(JSON.stringify(this.response.content));

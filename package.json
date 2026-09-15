@@ -10,6 +10,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && node --test \"test/unit/**/*.test.ts\"",
+    "test:mod": "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude plugin test plugins/multi-core",
     "test:live:compaction": "node test/live/native-compaction.ts",
     "test:live:zen": "node test/live/native-zen.ts",
     "test:live:cursor": "node test/live/native-cursor-harness.ts",
@@ -25,7 +26,6 @@
     "lint:fix": "biome check --write .",
     "check:unused": "knip",
     "check": "npm run banner:check && npm run lint && npm run check:unused && npm test",
-    "test:live:mode-hooks": "node test/live/native-mode-hooks.ts",
     "banner:generate": "node scripts/banner.mjs",
     "banner:check": "node scripts/banner.mjs --check",
     "test:live:install": "node test/live/native-install.ts"

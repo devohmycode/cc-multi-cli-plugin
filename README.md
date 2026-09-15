@@ -161,6 +161,22 @@ From a checkout, start a new Claude Code session with:
 node plugins/multi-core/src/launcher.ts
 ```
 
+Saved conversations can be continued with `claude-multi --resume <session-id>`
+(or add `--resume <session-id>` to the checkout launcher above). Each launch
+creates a fresh gateway, Mods connection and named-worker catalog.
+
+Multi disables Claude's whole-session background supervisor (`/background`, agent
+view and `--bg`). The supervisor drops launcher-supplied workers and gateway
+environment, while retaining settings paths that disappear when the launcher exits.
+Ordinary named subagents and their background tasks remain available. Exit the
+session normally before resuming it. If an older Multi session is already owned by
+the supervisor, run `claude stop <id>` before resuming through Multi.
+
+`node test/live/native-session-lifecycle.ts` checks saved resume through two real
+launcher processes with isolated credentials and mocked model responses. It verifies
+history, regenerated worker definitions, settings cleanup and background admission
+without spending provider usage.
+
 Run `/model` to select GPT-6 Astra or GPT-5.6 Sol, Terra, or Luna as the **main
 agent**. The picker retains the built-in Claude choices. Press **s** on a selected
 row to switch for this session only. You can also type a model ID directly:
@@ -513,32 +529,29 @@ Cursor executes native shell/read/edit/search tools. Task and MCP capabilities
 are disabled, including ambient MCP servers. An observed external action is only
 displayed in Claude Code; it is never replayed as an executable `tool_use`.
 
-Claude's existing permission selector controls Cursor at the next prompt through
-UserPromptSubmit/SubagentStart hooks. Worker modes resolve from parent inheritance
-and built-in, user/project, supplied CLI or discovered plugin definitions. Unknown
-workers fail explicitly. Auto requests native SDK Auto-review; its accepted fallback
-when the classifier is unavailable may execute without review. Completion is not
-proof of classification. Plan selects SDK plan mode with only read, grep, glob and
-listing tools. Bypass selects native agent mode with Auto-review disabled, while
-retaining explicit tool restrictions and the SDK's sandbox configuration. Default,
-acceptEdits and dontAsk remain unsupported; there is no separate mode selector.
+Claude's existing permission selector controls Cursor at the next prompt. Worker
+modes resolve from parent inheritance and built-in, user/project, supplied CLI or
+discovered plugin definitions. Unknown workers fail explicitly. Auto requests native
+SDK Auto-review; its accepted fallback when the classifier is unavailable may execute
+without review. Completion is not proof of classification. Plan selects SDK plan mode
+with only read, grep, glob and listing tools. Bypass selects native agent mode with
+Auto-review disabled, while retaining explicit tool restrictions and the SDK's
+sandbox configuration. Default, acceptEdits and dontAsk remain unsupported; there is
+no separate mode selector.
 
-Permission-sync command hooks use the launcher's bound loopback control endpoint,
-not a mutable `ANTHROPIC_BASE_URL` inherited by the hook. Their token stays in the
-environment, not command arguments. Redirects are rejected, requests time out after
-five seconds, and sync failures report a non-blocking warning (exit code 1) after
-marking the affected native permission snapshot unavailable. Prompts and worker
-completion notifications can still reach Claude/OpenAI/Zen; Cursor and Antigravity
-cannot reuse the stale snapshot. A successful sync clears the marker. If the hook
-cannot write that marker, it still blocks rather than leave old permissions usable.
-Markers live in the launcher's private temporary settings directory and are removed
-with it on shutdown. Diagnostics identify the safe endpoint,
-hook event and HTTP status or recognized transport cause (such as `ECONNREFUSED`),
-without prompt bodies, response bodies or credentials. Relaunch through the updated
-Multi launcher and submit a new prompt after a failure; check that its gateway is
-still running. This isolation is not proof of the cause of an earlier `fetch failed`
-report: the historical failure has not been reproduced against the reachable listener.
-Existing sessions keep their original generated hooks until relaunched.
+The launcher requires Claude Code 2.1.272 or newer, sets
+`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`, and fails explicitly when function hooks are
+unavailable. The bundled Multi core Claude Mod is the only display-row and
+permission synchronization path. The former MCP display server and row store are
+gone. Gateway-streamed observations appear as wrapped, display-only `tool_use` rows;
+the mod answers each row through `tool.call`. It never executes observed external
+actions or grants native permission. Rewriting these rows as native Read/Edit rows
+remains unproven pending a TTY probe.
+
+The mod posts mode, worker and compaction snapshots through authenticated loopback
+`/multi/mod/*` routes. Each snapshot uses a generation acknowledgement; stale or
+unreachable acknowledgements fail closed. Bounded detached polling and UI
+invalidation keep display progress current.
 
 Worker tool lists, whole-tool deny rules and supported CLI restrictions intersect
 native capabilities. Settings and plugin policies are rechecked before dispatch.
@@ -593,10 +606,10 @@ context occupancy or billed usage. Model-specific fidelity remains experimental.
 
 `npm run test:live:cursor` (also `test:live:cursor-harness`) runs the bounded native
 SDK tool/continuation/resume smoke check with Fast explicitly disabled. The ordinary
-`npm test` suite is offline. `npm run test:live:mode-hooks` checks unmodified Claude
-mode hooks against local fake responses without provider inference. Append `-- --plan`
-to the Cursor check for one read-only turn. Integrated validation passed a real
-Claude-parent Composer 2.5 worker edit, persisted SDK resume, cached retry,
+`npm test` suite is offline. Test the bundled mod offline with
+`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude plugin test plugins/multi-core`. Append
+`-- --plan` to the Cursor check for one read-only turn. Integrated validation passed
+a real Claude-parent Composer 2.5 worker edit, persisted SDK resume, cached retry,
 follow-up recall and read-only Plan, all with Fast disabled. Historical callback
 tests do not establish native parity. Append `-- --compact --recover` to check
 outer-history continuation and terminal SDK-run recovery using the same two turns.
@@ -638,8 +651,10 @@ behavioral evidence, not a guarantee for every prompt.
 
 ## OpenAI approval and permission checks
 
-Claude-executed OpenAI tools retain Claude's ordinary permissions. GPT actions use
-the authenticated OpenAI account's `codex-auto-review` capability regardless of
+Claude-executed OpenAI tools retain Claude's ordinary permissions. Classic
+`PreToolUse` events continue to correlate permission decisions with their originating
+tool calls. GPT actions use the authenticated OpenAI account's `codex-auto-review`
+capability regardless of
 Claude login availability, for both main sessions and workers. Review follows the
 originating tool, not the parent's current model or the classifier request's model
 ID. Claude actions retain native Anthropic classification, and Zen never borrows

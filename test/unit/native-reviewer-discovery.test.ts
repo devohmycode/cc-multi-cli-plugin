@@ -24,11 +24,22 @@ test('launcher discovers GPT review with Claude subscription, API credentials, o
     `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2);
+if (args[0] === '--version') { console.log('2.1.272'); process.exit(0); }
+const emit = (value) => {
+  const base = process.env.MULTI_MOD_GATEWAY_URL;
+  if (!base) { console.log(value); return; }
+  const req = require('node:http').request(new URL(base + '/multi/mod/session'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-multi-gateway-token': process.env.MULTI_GATEWAY_TOKEN },
+  }, () => console.log(value));
+  req.on('error', () => console.log(value));
+  req.end(JSON.stringify({ sessionId: 'fixture', event: 'start' }));
+};
 if (args[0] === 'auth') {
   console.log(JSON.stringify({loggedIn: process.env.TEST_AUTH === 'yes'}));
   process.exit(process.env.TEST_AUTH === 'yes' ? 0 : 1);
 }
-console.log(fs.readFileSync(args[args.indexOf('--settings') + 1], 'utf8'));
+emit(fs.readFileSync(args[args.indexOf('--settings') + 1], 'utf8'));
 `,
     { mode: 0o755 },
   );

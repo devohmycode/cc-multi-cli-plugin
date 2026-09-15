@@ -1,8 +1,13 @@
 import type { InteractionUpdate } from '@cursor/sdk';
+
 import type {
+  ModDisplayEvent,
   NativeObservation,
   NativeRowKind,
-} from '../../multi-core/src/gateway/native-rows-protocol.ts';
+} from '../../multi-core/src/gateway/mod-bridge.ts';
+
+export type { NativeObservation } from '../../multi-core/src/gateway/mod-bridge.ts';
+export type NativeRowObserver = (event: NativeObservation) => ModDisplayEvent | undefined;
 
 type ToolCall = Extract<InteractionUpdate, { type: 'tool-call-started' }>['toolCall'];
 const escapeCharacter = String.fromCharCode(27);

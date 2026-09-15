@@ -502,8 +502,10 @@ test('repeated session cleanup cannot remove a replacement gateway lock', async 
   const f = await fixture(t);
   const harness = f.make();
   const response = await harness.handle(body, 'main', signal());
+  // biome-ignore lint/complexity/useLiteralKeys: test intentionally inspects private session state.
   const session = harness['sessions'].get('main');
   assert(session);
+  // biome-ignore lint/complexity/useLiteralKeys: test intentionally invokes private cleanup.
   await harness['releaseLock'](session);
   const release = await lockStateFile(`${f.sessionFile}.lock`);
   t.after(release);

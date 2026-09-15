@@ -6,16 +6,17 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
-### Opt-in Cursor live display rows
+### Claude Mods runtime
 
-- Set `MULTI_CURSOR_TOOL_ROWS=1` when launching to show Cursor action and model-text
-  rows in main sessions and named foreground/background workers. The gateway streams
-  display-only MCP waiters within one open Messages response; Cursor alone executes
-  tools. Existing text progress remains the default and the fallback for missing tools.
-- Persist completed display exchanges for local terminal acknowledgements and replay.
-  Disconnecting a pending waiter cancels its originating run; interrupted display
-  retries do not execute native work again. Claude permission policy still applies at
-  prompt boundaries. Antigravity retains its existing text progress.
+- Make Claude Mods the only display-row and permission synchronization path, removing the MCP display server and row store. The launcher requires Claude Code 2.1.272 or newer and enables function hooks; wrapped rows and mode, worker and compaction snapshots use authenticated loopback routes with generation-based fail-closed acknowledgements.
+
+### Session lifetime
+
+- Disable whole-session supervisor handoff in Multi and reject `--bg`,
+  `--background`, `attach` and `respawn`. Claude's supervisor loses the launcher's
+  worker definitions and gateway environment, then can run hooks against deleted
+  temporary settings. Saved-session `--resume` and ordinary background subagent
+  tasks remain supported; a resumed conversation receives a fresh gateway.
 
 ### Neutral worker prompts
 
@@ -318,9 +319,6 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   the authenticated gateway without inserting permission markers into prompts.
   Preserve worker tool restrictions as separate context; native enforcement is
   still part of the pending harness transition.
-- Add an opt-in unmodified-Claude hook check using only local fake model replies
-  (`npm run test:live:mode-hooks`); it spends no provider usage.
-
 - Resolve gateway session identity consistently from headers and metadata; reject
   conflicting identities before execution and retain worker isolation.
 - Commit native completion and replay data together, allow safe pre-send retries,

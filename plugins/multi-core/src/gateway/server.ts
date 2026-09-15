@@ -23,9 +23,9 @@ import type { ApprovalContext, NativeApprovalBridge } from './approval.ts';
 import { isApprovalRequest, parseApprovalRequest } from './approval.ts';
 import type { GatewayFetch } from './fetch.ts';
 import type { Emit, MessagesRequest, MessagesResponse, StopReason } from './messages.ts';
+import { ModBridge } from './mod-bridge.ts';
+import { handleModRoute } from './mod-routes.ts';
 import type { PermissionContext, PermissionModes } from './mode-hook.ts';
-import { emitRowResponse, type NativeRows } from './native-rows.ts';
-import { isNativeRowTool } from './native-rows-protocol.ts';
 import type { PendingApprovalTool } from './permission-hook.ts';
 import { approvalCapabilityGuard } from './permission-hook.ts';
 import { estimateInputTokens } from './tokens.ts';
@@ -77,7 +77,6 @@ export interface GatewayEvent {
 
 export interface GatewayOptions {
   token: string;
-  nativeRows?: NativeRows;
   enabledProviders?: readonly string[];
   authFile: string;
   fetchImpl?: GatewayFetch;
@@ -94,6 +93,7 @@ export interface GatewayOptions {
   guardAuto?: boolean;
   permissionModes?: PermissionModes;
   agentCatalog?: AgentCatalog;
+  modBridge?: ModBridge;
 }
 
 /** Rejected before any provider call; answered as HTTP 400 rather than 502. */
@@ -144,7 +144,6 @@ interface ProviderRequest {
 
 export function createNativeGateway({
   token,
-  nativeRows,
   enabledProviders,
   authFile,
   fetchImpl = fetch,
@@ -159,6 +158,7 @@ export function createNativeGateway({
   guardAuto,
   permissionModes,
   agentCatalog,
+  modBridge = new ModBridge(),
 }: GatewayOptions): Server {
   if (!token) {
     throw new Error('Gateway token required');
@@ -209,15 +209,6 @@ export function createNativeGateway({
     const id = typeof parsed.tool_use_id === 'string' ? parsed.tool_use_id : '';
     const pending = pendingTools.get(id);
     pendingTools.delete(id);
-    if (
-      nativeRows &&
-      pending?.model.startsWith('multi/cursor/') &&
-      pending.session === parsed.session_id &&
-      pending.name === parsed.tool_name &&
-      isNativeRowTool(pending.name)
-    ) {
-      return {};
-    }
     if (
       pending?.scope &&
       pending.session === parsed.session_id &&
@@ -287,13 +278,6 @@ export function createNativeGateway({
       throw new BadRequest(unavailable[provider]);
     }
     const scope = identity.scope ?? JSON.stringify([fallbackSession, agentId ?? 'main']);
-    const rowScope = JSON.stringify([
-      scope,
-      path.resolve(exchange.permissionContext?.cwd ?? process.cwd()),
-    ]);
-    if (provider === 'cursor' && (await prepareNativeRows(exchange, rowScope, nativeRows))) {
-      return;
-    }
     const nativeBody = exchange.body;
     const inputTokens = validateHarness(exchange, provider, bridge);
     if (url.pathname === '/v1/messages/count_tokens') {
@@ -304,18 +288,14 @@ export function createNativeGateway({
       return res.end(JSON.stringify({ input_tokens: inputTokens }));
     }
     exchange.startStream();
-    if (
-      provider === 'cursor' &&
-      (await runNativeRows(exchange, scope, rowScope, nativeRows, cursor))
-    ) {
-      return;
-    }
+    const displayRows = provider === 'cursor' && modBridge.available(nativeBody);
     const result = await bridge.handle(
       nativeBody,
       scope,
       signal,
       body.stream ? emit : undefined,
       exchange.permissionContext,
+      displayRows ? (observation) => modBridge.observe(scope, observation) : undefined,
     );
     rememberResult(exchange, result);
     onEvent({
@@ -326,6 +306,7 @@ export function createNativeGateway({
       tools: result.content.filter((b) => b.type === 'tool_use').map((b) => b.name),
     });
     sendResult(exchange, result);
+    modBridge.complete(scope);
   }
   async function handleOpenAI(exchange: ProviderRequest, externalModel: string) {
     const { req, res, body, url, signal, abort, agentId, emit } = exchange;
@@ -530,18 +511,6 @@ export function createNativeGateway({
     res.writeHead(200, { 'content-type': 'application/json' });
     return res.end(JSON.stringify(decision));
   }
-  async function recordMode(exchange: ProviderRequest) {
-    if (!permissionModes || exchange.req.method !== 'POST') {
-      throw new BadRequest('Mode hook is unavailable');
-    }
-    try {
-      await permissionModes.record(exchange.parsed);
-    } catch (error) {
-      throw new BadRequest(reason(error));
-    }
-    exchange.res.writeHead(200, { 'content-type': 'application/json' });
-    return exchange.res.end('{}');
-  }
   async function dispatch(
     exchange: ProviderRequest,
     metadata: ReturnType<typeof requestIdentity>,
@@ -656,8 +625,8 @@ export function createNativeGateway({
       }
       const url = new URL(req.url ?? '', 'http://localhost');
       const { raw, parsed, body } = await readRequest(req, agentCatalog);
-      if (url.pathname === '/multi/native-mcp') {
-        return await handleNativeMcp(req, res, parsed, abort.signal, nativeRows);
+      if (url.pathname.startsWith('/multi/mod/')) {
+        return handleModRoute(req, res, url, parsed, modBridge, permissionModes);
       }
       const external = externalModel(body.model);
       assertProviderEnabled(external, enabledProviders);
@@ -695,9 +664,6 @@ export function createNativeGateway({
       };
       if (url.pathname === '/multi/permission') {
         return sendPermissionDecision(exchange);
-      }
-      if (url.pathname === '/multi/mode') {
-        return await recordMode(exchange);
       }
       await dispatch(exchange, metadata, external);
     } catch (error) {
@@ -903,7 +869,8 @@ function authorizeRequest(
   guardAuto?: boolean,
 ) {
   if (req.headers.origin || !authenticated(req.headers['x-multi-gateway-token'], token)) {
-    res.writeHead(403);
+    const pathName = new URL(req.url ?? '', 'http://localhost').pathname;
+    res.writeHead(pathName.startsWith('/multi/mod/') ? 401 : 403);
     res.end('Forbidden');
     return false;
   }
@@ -914,8 +881,9 @@ function authorizeRequest(
       '/v1/messages/count_tokens',
       '/v1/models',
       '/api/hello',
-      '/multi/mode',
-      '/multi/native-mcp',
+      '/multi/mod/session',
+      '/multi/mod/worker',
+      '/multi/mod/mode',
       ...(guardAuto ? ['/multi/permission'] : []),
     ].includes(url.pathname) ||
     !['POST', 'GET', 'HEAD'].includes(req.method ?? '')
@@ -968,86 +936,6 @@ function assertProviderEnabled(model: string | null, enabled: readonly string[] 
   if (model && enabled && !enabled.includes(model.split('/')[1])) {
     throw new BadRequest('This provider plugin is not enabled for this session.');
   }
-}
-
-async function handleNativeMcp(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
-  parsed: Record<string, unknown>,
-  signal: AbortSignal,
-  nativeRows?: NativeRows,
-) {
-  if (!nativeRows || req.method !== 'POST') {
-    res.writeHead(405);
-    return res.end();
-  }
-  if (parsed.id === undefined) {
-    res.writeHead(202);
-    return res.end();
-  }
-  let result: unknown;
-  try {
-    result = {
-      jsonrpc: '2.0',
-      id: parsed.id,
-      result: await nativeRows.rpc(parsed, signal),
-    };
-  } catch (error) {
-    result = {
-      jsonrpc: '2.0',
-      id: parsed.id,
-      error: { code: -32602, message: reason(error) },
-    };
-  }
-  res.writeHead(200, { 'content-type': 'application/json' });
-  return res.end(JSON.stringify(result));
-}
-
-async function prepareNativeRows(exchange: ProviderRequest, scope: string, rows?: NativeRows) {
-  if (!rows) {
-    return false;
-  }
-  if (exchange.url.pathname === '/v1/messages') {
-    const reply = await rows.followup(exchange.body, scope);
-    if (reply) {
-      exchange.startStream();
-      if (exchange.body.stream) {
-        emitRowResponse(reply, exchange.emit);
-      }
-      sendResult(exchange, reply);
-      return true;
-    }
-  }
-  exchange.body = await rows.normalize(exchange.body, scope);
-  return false;
-}
-async function runNativeRows(
-  exchange: ProviderRequest,
-  scope: string,
-  rowScope: string,
-  rows: NativeRows | undefined,
-  cursor: GatewayOptions['cursor'],
-) {
-  if (!cursor || !rows?.available(exchange.body) || !exchange.body.stream) {
-    return false;
-  }
-  const result = await rows.run(
-    exchange.body,
-    rowScope,
-    exchange.emit,
-    exchange.abort,
-    (observer) =>
-      cursor.handle(
-        exchange.body,
-        scope,
-        exchange.signal,
-        undefined,
-        exchange.permissionContext,
-        observer,
-      ),
-  );
-  sendResult(exchange, result);
-  return true;
 }
 
 function externalModel(model: unknown) {

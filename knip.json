@@ -5,11 +5,11 @@
     "plugins/multi-core/src/gateway/permission-hook.ts",
     "test/unit/**/*.test.ts",
     "test/live/*.ts",
-    "scripts/banner.mjs",
     "plugins/multi-core/src/setup.ts",
     "plugins/multi-core/src/account.ts",
     "plugins/multi-core/src/install/bootstrap.ts"
   ],
-  "project": ["plugins/*/src/**/*.ts", "test/**/*.ts", "scripts/banner.mjs"],
+  "project": ["plugins/*/src/**/*.ts", "test/**/*.ts"],
+  "ignore": ["plugins/multi-core/hooks/**/*.ts"],
   "ignoreBinaries": ["flock", "codex"]
 }
