@@ -37,7 +37,7 @@ function option(name: string): string | undefined {
   return index === -1 ? undefined : args[index + 1];
 }
 
-const requestedModel = option('--model') ?? 'gemini-3.7-flash-low';
+const requestedModel = option('--model') ?? 'gemini-3.8-flash-low';
 const requestedSwitch = option('--switch');
 const requestedMode = option('--mode') ?? 'auto';
 const compact = args.includes('--compact') || args.includes('--compaction');

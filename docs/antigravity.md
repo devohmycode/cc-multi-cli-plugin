@@ -132,10 +132,10 @@ The opt-in live check uses native subscription usage and retains its evidence in
 a temporary directory:
 
 ```sh
-npm run test:live:antigravity -- --compact --switch gemini-3.8-flash-low --children
+npm run test:live:antigravity -- --compact --switch gemini-3.7-flash-low --children
 ```
 
-The default check uses two native turns for a workspace write and read, with a
+The default check runs Gemini 3.8 Flash (Low) for two native turns for a workspace write and read, with a
 disk-backed replay between them. `--compact` adds conversation-only recall after
 removing outer history; it does not force Antigravity's own context compaction.
 `--children` adds an attempted native child call to verify denial. Every turn has
