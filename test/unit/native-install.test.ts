@@ -17,10 +17,14 @@ import {
 
 const execute = promisify(execFile);
 
-function windowsCommand(pathname: string, args: string[]) {
-  const quote = (value: string) =>
-    `"${value.replaceAll(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`;
-  return [quote(pathname), ...args.map(quote)].join(' ');
+function windowsInvocation(pathname: string, args: string[], env: NodeJS.ProcessEnv) {
+  const quote = (value: string) => `"${value.replaceAll('"', '\\"')}"`;
+  const commandLine = [pathname, ...args].map(quote).join(' ');
+  return {
+    command: env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
+    args: ['/d', '/s', '/c', `"${commandLine}"`],
+    windowsVerbatimArguments: true,
+  };
 }
 const setup = fileURLToPath(new URL('../../plugins/multi-core/src/setup.ts', import.meta.url));
 const marketplace = 'cc-multi-cli-plugin';
@@ -80,11 +84,13 @@ if (args.includes('plugin') && args.includes('list')) {
   const bin = path.join(home, '.local/share/multi-cli/bin');
   const invoke = (name: string, args: string[], extra: Record<string, string> = {}) => {
     const executable = path.join(bin, windows ? `${name}.cmd` : name);
-    const command = windows ? (env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe') : executable;
-    const commandArgs = windows ? ['/d', '/s', '/c', windowsCommand(executable, args)] : args;
-    return execute(command, commandArgs, {
+    const invocation = windows
+      ? windowsInvocation(executable, args, env)
+      : { command: executable, args, windowsVerbatimArguments: false };
+    return execute(invocation.command, invocation.args, {
       env: { ...env, ...extra },
       timeout: 20000,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     });
   };
   return { directory, home, shell, listing, real, env, install, invoke, windows };
@@ -191,7 +197,8 @@ test('Windows installation writes quoted PowerShell and cmd shims and uninstalls
   const bin = path.join(home, '.local', 'share', 'multi-cli', 'bin');
   const cmd = await readFile(path.join(bin, 'claude-multi.cmd'), 'utf8');
   const ps = await readFile(path.join(bin, 'claude-multi.ps1'), 'utf8');
-  assert.match(cmd, /process\\.execPath|node/);
+  assert.match(cmd, /".*" ".*bootstrap\.ts"(?: --multi)? %\*/);
+  assert.match(cmd, /exit \/b %ERRORLEVEL%/);
   assert.match(ps, /''quotes''|quotes/);
   assert.match(state.block, /\$env:Path/);
   await installUninstall(path.dirname(bin));

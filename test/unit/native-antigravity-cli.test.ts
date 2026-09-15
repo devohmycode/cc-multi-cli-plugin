@@ -248,6 +248,7 @@ test('cleans an ignored-signal descendant when the CLI closes first', async (t) 
     t.skip(
       'Windows taskkill tree semantics do not provide a POSIX ignored-signal descendant equivalent',
     );
+    return;
   }
   const cli = await fakeCli(t);
   const pidFile = path.join(cli.cwd, 'descendant.pid');

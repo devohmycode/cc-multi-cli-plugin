@@ -116,9 +116,10 @@ async function main() {
   const agents = workerDefinitions(codexSignedIn, cursorModels, Boolean(zenKey), antigravityModels);
   const modBridge = new ModBridge();
   const settingsDir = await mkdtemp(path.join(os.tmpdir(), 'multi-native-settings-'));
+  const callerSettingsFile = path.join(settingsDir, 'caller-settings.json');
+  await writeFile(callerSettingsFile, JSON.stringify(callerSettings), { mode: 0o600 });
   const permissionModes = new PermissionModes(
-    (cwd) =>
-      loadWorkerPermissions(cwd, agents, [...args, '--settings', JSON.stringify(callerSettings)]),
+    (cwd) => loadWorkerPermissions(cwd, agents, [...args, '--settings', callerSettingsFile]),
     async (cwd) => {
       if (!cursor && !antigravity) {
         return {};
@@ -192,6 +193,7 @@ async function main() {
     stdio: 'inherit',
     env: childEnvironment,
     detached: process.platform !== 'win32',
+    ...childInvocation.options,
   });
   const shutdown = async () => {
     server.closeAllConnections();
@@ -344,6 +346,7 @@ async function assertFunctionHooksSupported(): Promise<void> {
     ({ stdout } = await promisify(execFile)(invocation.command, invocation.args, {
       timeout: 10000,
       maxBuffer: 65536,
+      ...invocation.options,
     }));
   } catch {
     throw new Error(
@@ -410,6 +413,7 @@ async function anthropicSignedIn(): Promise<boolean> {
     ({ stdout } = await promisify(execFile)(invocation.command, invocation.args, {
       timeout: 10000,
       maxBuffer: 65536,
+      ...invocation.options,
     }));
   } catch (error) {
     stdout = failedAuthProbeOutput(error);

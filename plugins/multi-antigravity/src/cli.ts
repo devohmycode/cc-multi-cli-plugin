@@ -167,6 +167,7 @@ export function runAntigravity(options: AntigravityRunOptions): Promise<Antigrav
         shell: false,
         stdio: [promptOnStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
         windowsHide: true,
+        ...invocation.options,
       });
     } catch (error) {
       reject(new AntigravityCliError(`Failed to start agy: ${String(error)}`, 'spawn'));

@@ -318,14 +318,29 @@ test('Antigravity launcher groups picker families, keeps workers and enables fun
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const bin = path.join(cwd, 'bin');
   await mkdir(bin);
-  await writeFile(
-    path.join(bin, 'agy'),
-    `#!/usr/bin/env node
-if(process.argv[2] !== 'models') process.exit(9);
-console.log('gemini-low\\tGemini Low\\ngemini-medium\\tGemini Medium\\ngemini-high\\tGemini High\\nsonnet-thinking\\tSonnet Thinking');
+  if (process.platform === 'win32') {
+    await writeFile(
+      path.join(bin, 'agy-fixture.js'),
+      `if(process.argv[2] !== 'models') process.exit(9);
+const rows=[['gemini-low','Gemini Low'],['gemini-medium','Gemini Medium'],['gemini-high','Gemini High'],['sonnet-thinking','Sonnet Thinking']];
+console.log(rows.map(row=>row.join(String.fromCharCode(9))).join(String.fromCharCode(10)));
 `,
-    { mode: 0o755 },
-  );
+    );
+    await writeFile(
+      path.join(bin, 'agy.cmd'),
+      `@"${process.execPath}" "%~dp0agy-fixture.js" %*\r\n`,
+    );
+  } else {
+    await writeFile(
+      path.join(bin, 'agy'),
+      `#!/usr/bin/env node
+if(process.argv[2] !== 'models') process.exit(9);
+const rows=[['gemini-low','Gemini Low'],['gemini-medium','Gemini Medium'],['gemini-high','Gemini High'],['sonnet-thinking','Sonnet Thinking']];
+console.log(rows.map(row=>row.join(String.fromCharCode(9))).join(String.fromCharCode(10)));
+`,
+      { mode: 0o755 },
+    );
+  }
   await writeClaudeFixture(
     bin,
     `#!/usr/bin/env node

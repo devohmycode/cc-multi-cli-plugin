@@ -199,7 +199,7 @@ export async function pluginPermissions(
     childProcess.execFile(
       invocation.command,
       invocation.args,
-      { cwd, timeout: 10000, maxBuffer: MAX_AGENT_BYTES, env: environment },
+      { cwd, timeout: 10000, maxBuffer: MAX_AGENT_BYTES, env: environment, ...invocation.options },
       (error, output) => {
         if (error) {
           reject(error);

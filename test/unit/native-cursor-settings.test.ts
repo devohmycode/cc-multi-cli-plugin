@@ -18,6 +18,8 @@ async function checkSettings(
   options: CursorSettingsOptions = {},
 ) {
   return checkCursorSettings(cwd, args, inlineSettings, {
+    platform: 'linux',
+    osRelease: 'test-linux',
     runCommand: absentManagedPolicy,
     ...options,
   });

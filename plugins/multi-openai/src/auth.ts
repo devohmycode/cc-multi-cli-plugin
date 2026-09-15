@@ -173,6 +173,7 @@ async function refreshIfUnchanged(
     timeout: 30000,
     detached: (options.platform ?? process.platform) !== 'win32',
     windowsHide: true,
+    ...invocation.options,
   });
   const lines = createInterface({ input: child.stdout });
   child.on('error', () => lines.close());

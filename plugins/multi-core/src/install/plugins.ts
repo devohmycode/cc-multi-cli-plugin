@@ -14,7 +14,12 @@ function executableInvocation(
   const command = env.ComSpec ?? process.env.ComSpec ?? 'cmd.exe';
   const quote = (value: string) =>
     `"${value.replaceAll(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`;
-  return { command, args: ['/d', '/s', '/c', [quote(executable), ...args.map(quote)].join(' ')] };
+  const commandLine = [quote(executable), ...args.map(quote)].join(' ');
+  return {
+    command,
+    args: ['/d', '/s', '/c', `"${commandLine}"`],
+    options: { windowsVerbatimArguments: true },
+  };
 }
 
 const MARKETPLACE = 'cc-multi-cli-plugin';
@@ -57,6 +62,8 @@ export async function installedPlugins(
   const { stdout } = await promisify(execFile)(invocation.command, invocation.args, {
     timeout: 15000,
     maxBuffer: 4 * 1024 * 1024,
+    encoding: 'utf8',
+    ...invocation.options,
   });
   const parsed: unknown = JSON.parse(stdout);
   if (!Array.isArray(parsed)) {

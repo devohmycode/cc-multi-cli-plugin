@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 export interface ExecutableOptions {
@@ -11,6 +11,7 @@ export interface ExecutableOptions {
 export interface ExecutableInvocation {
   command: string;
   args: string[];
+  options?: { windowsVerbatimArguments?: boolean };
 }
 
 /** Find a configured executable or a platform-appropriate PATH entry. */
@@ -55,17 +56,12 @@ export function executableInvocation(
   if (platform !== 'win32' || !/\.(?:cmd|bat)$/i.test(executable)) {
     return { command: executable, args: [...args] };
   }
-  const commandLine = [executable, ...args].join(' ');
-  if (commandLine.length > 7600) {
-    const direct = directWindowsShimInvocation(executable, args);
-    if (direct) {
-      return direct;
-    }
-  }
   const command = env.ComSpec ?? process.env.ComSpec ?? 'cmd.exe';
+  const commandLine = [quoteWindows(executable), ...args.map(quoteWindows)].join(' ');
   return {
     command,
-    args: ['/d', '/s', '/c', [quoteWindows(executable), ...args.map(quoteWindows)].join(' ')],
+    args: ['/d', '/s', '/c', `"${commandLine}"`],
+    options: { windowsVerbatimArguments: true },
   };
 }
 
@@ -100,25 +96,4 @@ function quoteWindows(value: string): string {
     return value;
   }
   return `"${value.replaceAll(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`;
-}
-
-/** Avoid cmd.exe's 8191-character limit for npm shims with large JSON arguments. */
-function directWindowsShimInvocation(
-  executable: string,
-  args: readonly string[],
-): ExecutableInvocation | undefined {
-  let source: string;
-  try {
-    source = readFileSync(executable, 'utf8');
-  } catch {
-    return undefined;
-  }
-  const match = source.match(/"[^"]+"\s+"([^"]+\.js)"\s+%\*/i);
-  if (!match) {
-    return undefined;
-  }
-  const script = match[1].startsWith('%~dp0')
-    ? path.win32.resolve(path.win32.dirname(executable), match[1].slice(5).replace(/^[/\\]/, ''))
-    : path.win32.resolve(path.win32.dirname(executable), match[1]);
-  return { command: process.execPath, args: [script, ...args] };
 }

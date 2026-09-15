@@ -15,9 +15,19 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { executableInvocation } from '../../plugins/multi-core/src/gateway/executable.ts';
 
 const execute = promisify(execFile);
+
+function windowsInvocation(pathname: string, args: string[], env: NodeJS.ProcessEnv) {
+  const quote = (value: string) => `"${value.replaceAll('"', '\\"')}"`;
+  const commandLine = [pathname, ...args].map(quote).join(' ');
+  return {
+    command: env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
+    args: ['/d', '/s', '/c', `"${commandLine}"`],
+    windowsVerbatimArguments: true,
+  };
+}
+
 const repository = fileURLToPath(new URL('../../', import.meta.url));
 const directory = await mkdtemp(path.join(os.tmpdir(), 'multi-installed-'));
 const source = path.join(directory, 'marketplace');
@@ -139,29 +149,40 @@ if (platform === 'win32') {
   // Setup must never write a bin/claude that would shadow the real claude command.
   await assert.rejects(access(path.join(bin, 'claude'), fsConstants.X_OK));
 }
-const statusInvocation = executableInvocation(multi, ['status'], platform, env);
+const statusInvocation =
+  platform === 'win32'
+    ? windowsInvocation(multi, ['status'], env)
+    : { command: multi, args: ['status'], windowsVerbatimArguments: false };
 const status = await execute(statusInvocation.command, statusInvocation.args, {
   env,
   cwd: directory,
+  windowsVerbatimArguments: statusInvocation.windowsVerbatimArguments,
 });
 assert.deepEqual(JSON.parse(status.stdout).providers, ['zen']);
-const disabledInvocation = executableInvocation(
-  multi,
-  [
-    'status',
-    '--settings',
-    JSON.stringify({ enabledPlugins: { 'multi-zen@cc-multi-cli-plugin': false } }),
-  ],
-  platform,
-  env,
-);
+const disabledArgs = [
+  'status',
+  '--settings',
+  JSON.stringify({ enabledPlugins: { 'multi-zen@cc-multi-cli-plugin': false } }),
+];
+const disabledInvocation =
+  platform === 'win32'
+    ? windowsInvocation(multi, disabledArgs, env)
+    : { command: multi, args: disabledArgs, windowsVerbatimArguments: false };
 const disabled = await execute(disabledInvocation.command, disabledInvocation.args, {
   env,
   cwd: directory,
+  windowsVerbatimArguments: disabledInvocation.windowsVerbatimArguments,
 });
 assert.deepEqual(JSON.parse(disabled.stdout).providers, []);
-const uninstallInvocation = executableInvocation(multi, ['uninstall'], platform, env);
-await execute(uninstallInvocation.command, uninstallInvocation.args, { env, cwd: directory });
+const uninstallInvocation =
+  platform === 'win32'
+    ? windowsInvocation(multi, ['uninstall'], env)
+    : { command: multi, args: ['uninstall'], windowsVerbatimArguments: false };
+await execute(uninstallInvocation.command, uninstallInvocation.args, {
+  env,
+  cwd: directory,
+  windowsVerbatimArguments: uninstallInvocation.windowsVerbatimArguments,
+});
 assert.equal(await readFile(profile, 'utf8'), '');
 console.log(
   'PASS: core dependency, isolated cache, gateway picker, native enablement, claude-multi without shadowing claude, setup and uninstall. No inference requests.',
