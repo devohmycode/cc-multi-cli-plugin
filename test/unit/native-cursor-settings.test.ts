@@ -4,10 +4,23 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test, { mock } from 'node:test';
-import { checkCursorSettings } from '../../plugins/multi-core/src/gateway/cursor-settings.ts';
+import {
+  type CursorSettingsOptions,
+  checkCursorSettings,
+} from '../../plugins/multi-core/src/gateway/cursor-settings.ts';
 
-async function temporaryDirectory(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'cursor-settings-'));
+const absentManagedPolicy = async (): Promise<string> => '';
+
+async function checkSettings(
+  cwd: string,
+  args: readonly string[],
+  inlineSettings: Record<string, unknown>,
+  options: CursorSettingsOptions = {},
+) {
+  return checkCursorSettings(cwd, args, inlineSettings, {
+    runCommand: absentManagedPolicy,
+    ...options,
+  });
 }
 
 let inventory: unknown[] = [];
@@ -22,6 +35,10 @@ test.beforeEach(() => {
   });
 });
 
+async function temporaryDirectory(): Promise<string> {
+  return fs.mkdtemp(path.join(os.tmpdir(), 'cursor-settings-'));
+}
+
 test('native settings admission respects source selection and rechecks changed ancestor policies', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cursor-settings-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -34,29 +51,25 @@ test('native settings admission respects source selection and rechecks changed a
     path.join(config, 'settings.json'),
     JSON.stringify({ permissions: { ask: ['Bash'] } }),
   );
-  await assert.rejects(checkCursorSettings(cwd, [], {}), /permissions.ask/);
-  await checkCursorSettings(cwd, ['--setting-sources=project,local'], {});
+  await assert.rejects(checkSettings(cwd, [], {}), /permissions.ask/);
+  await checkSettings(cwd, ['--setting-sources=project,local'], {});
   const project = path.join(root, 'project', '.claude');
   await fs.mkdir(project);
   await fs.writeFile(
     path.join(project, 'settings.local.json'),
     JSON.stringify({ permissions: { deny: ['Read'] } }),
   );
-  assert.deepEqual(
-    (await checkCursorSettings(cwd, ['--setting-sources', 'local'], {})).disallowedTools,
-    ['Read'],
-  );
-  await checkCursorSettings(cwd, ['--setting-sources', 'project'], {});
+  assert.deepEqual((await checkSettings(cwd, ['--setting-sources', 'local'], {})).disallowedTools, [
+    'Read',
+  ]);
+  await checkSettings(cwd, ['--setting-sources', 'project'], {});
   await fs.writeFile(path.join(project, 'settings.json'), '{invalid');
-  await assert.rejects(
-    checkCursorSettings(cwd, ['--setting-sources=project'], {}),
-    /admission failed/,
-  );
-  await checkCursorSettings(cwd, ['--setting-sources='], {});
+  await assert.rejects(checkSettings(cwd, ['--setting-sources=project'], {}), /admission failed/);
+  await checkSettings(cwd, ['--setting-sources='], {});
 });
 
 test('native settings admission refuses CLI restrictions and caller hooks but accepts grants', async () => {
-  const policy = await checkCursorSettings(
+  const policy = await checkSettings(
     '/tmp',
     ['--setting-sources=', '--tools=Read,Bash', '--tools=Read,Edit', '--disallowedTools=Bash'],
     { permissions: { deny: ['Write'] } },
@@ -64,20 +77,13 @@ test('native settings admission refuses CLI restrictions and caller hooks but ac
   assert.deepEqual(policy.tools, ['Read']);
   assert.deepEqual(policy.disallowedTools, ['Bash', 'Write']);
   await assert.rejects(
-    checkCursorSettings(
-      await temporaryDirectory(),
-      ['--setting-sources=', '--tools=Bash(git:*)'],
-      {},
-    ),
+    checkSettings(await temporaryDirectory(), ['--setting-sources=', '--tools=Bash(git:*)'], {}),
     /unsupported policy/,
   );
   for (const args of [['--setting-sources'], ['--setting-sources=managed']]) {
-    await assert.rejects(
-      checkCursorSettings(await temporaryDirectory(), args, {}),
-      /setting-sources/,
-    );
+    await assert.rejects(checkSettings(await temporaryDirectory(), args, {}), /setting-sources/);
   }
-  await checkCursorSettings(
+  await checkSettings(
     await temporaryDirectory(),
     ['--setting-sources=', '--allowedTools', 'Bash'],
     {
@@ -85,7 +91,7 @@ test('native settings admission refuses CLI restrictions and caller hooks but ac
     },
   );
   // Claude hooks never run for native tools, so they must not block admission.
-  await checkCursorSettings(await temporaryDirectory(), ['--setting-sources='], {
+  await checkSettings(await temporaryDirectory(), ['--setting-sources='], {
     hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'log' }] }] },
   });
 });
@@ -100,31 +106,25 @@ test('native settings admission translates managed deny and refuses unknown cont
     return original(...args);
   });
   assert.deepEqual(
-    (await checkCursorSettings(await temporaryDirectory(), ['--setting-sources='], {}))
-      .disallowedTools,
+    (await checkSettings(await temporaryDirectory(), ['--setting-sources='], {})).disallowedTools,
     ['Bash'],
   );
   policy = JSON.stringify({ policyHelper: '/tmp/policy' });
   await assert.rejects(
-    checkCursorSettings(await temporaryDirectory(), ['--setting-sources='], {}),
+    checkSettings(await temporaryDirectory(), ['--setting-sources='], {}),
     /cannot enforce managed policy/,
   );
 });
 
 test('native CLI tool policy accepts empty/default lists and variadic names', async () => {
   assert.deepEqual(
-    (
-      await checkCursorSettings(
-        await temporaryDirectory(),
-        ['--setting-sources', '', '--tools', ''],
-        {},
-      )
-    ).tools,
+    (await checkSettings(await temporaryDirectory(), ['--setting-sources', '', '--tools', ''], {}))
+      .tools,
     [],
   );
   assert.equal(
     (
-      await checkCursorSettings(
+      await checkSettings(
         await temporaryDirectory(),
         ['--setting-sources=', '--tools', 'default'],
         {},
@@ -134,7 +134,7 @@ test('native CLI tool policy accepts empty/default lists and variadic names', as
   );
   assert.deepEqual(
     (
-      await checkCursorSettings(
+      await checkSettings(
         await temporaryDirectory(),
         ['--setting-sources=', '--tools', 'Read', 'Grep'],
         {},
@@ -144,9 +144,83 @@ test('native CLI tool policy accepts empty/default lists and variadic names', as
   );
 });
 
+function commandError(
+  code: string | number,
+  stderr: string,
+): NodeJS.ErrnoException & { stderr: string } {
+  const error = new Error(stderr) as NodeJS.ErrnoException & { stderr: string };
+  error.code = code as NodeJS.ErrnoException['code'];
+  error.stderr = stderr;
+  return error;
+}
+
+function absentManagedFiles(): Pick<CursorSettingsOptions, 'readDir' | 'readFile'> {
+  return {
+    readDir: async () => {
+      throw commandError('ENOENT', 'missing');
+    },
+    readFile: (async () => {
+      throw commandError('ENOENT', 'missing');
+    }) as unknown as typeof fs.readFile,
+  };
+}
+
+for (const platform of ['darwin', 'win32'] as const) {
+  test(`native ${platform} managed policy command distinguishes absent, invalid, and unavailable`, async () => {
+    const absentMessage =
+      platform === 'darwin'
+        ? 'The domain/default pair of (com.anthropic.claudecode, ...) does not exist'
+        : 'ERROR: The system was unable to find the specified registry key or value.';
+    const command = platform === 'darwin' ? 'defaults' : 'reg';
+    const absent = await checkSettings(
+      '/workspace',
+      ['--setting-sources='],
+      {},
+      {
+        platform,
+        ...absentManagedFiles(),
+        runCommand: async () => {
+          throw commandError(1, absentMessage);
+        },
+      },
+    );
+    assert.deepEqual(absent.disallowedTools, []);
+
+    await assert.rejects(
+      checkSettings(
+        '/workspace',
+        ['--setting-sources='],
+        {},
+        {
+          platform,
+          ...absentManagedFiles(),
+          runCommand: async () => 'unparsable policy output',
+        },
+      ),
+      /cannot parse managed policy output as JSON/,
+    );
+
+    await assert.rejects(
+      checkSettings(
+        '/workspace',
+        ['--setting-sources='],
+        {},
+        {
+          platform,
+          ...absentManagedFiles(),
+          runCommand: async () => {
+            throw commandError('ENOENT', `${command} is unavailable`);
+          },
+        },
+      ),
+      new RegExp(`cannot observe managed policy via ${command}`),
+    );
+  });
+}
+
 test('native settings admission discovers macOS managed preferences', async () => {
   const commands: string[][] = [];
-  const policy = await checkCursorSettings(
+  const policy = await checkSettings(
     '/workspace',
     ['--setting-sources='],
     {},
@@ -174,7 +248,7 @@ test('native settings admission discovers macOS managed preferences', async () =
 
 test('native settings admission discovers Windows HKLM and HKCU registry policies', async () => {
   const commands: string[][] = [];
-  const policy = await checkCursorSettings(
+  const policy = await checkSettings(
     'C:\\workspace',
     ['--setting-sources='],
     {},
@@ -209,7 +283,7 @@ test('native settings admission treats WSL as Linux managed file discovery', asy
   const files = new Map([
     ['/etc/claude-code/managed-settings.json', '{"permissions":{"deny":["Read"]}}'],
   ]);
-  const policy = await checkCursorSettings(
+  const policy = await checkSettings(
     '/workspace',
     ['--setting-sources='],
     {},

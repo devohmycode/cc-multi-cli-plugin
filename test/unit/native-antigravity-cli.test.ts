@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { promisify } from 'node:util';
+import vm from 'node:vm';
 import {
   AntigravityCliError,
   type AntigravityStreamEvent,
@@ -36,7 +39,7 @@ printf '%s\n' diagnostic >&2
 exit "$code"
 `;
 
-const windowsScript = `const fs = require('node:fs');
+const windowsScript = String.raw`const fs = require('node:fs');
 const promptIndex = process.argv.indexOf('-p');
 let prompt = promptIndex >= 0 ? process.argv[promptIndex + 1] : '';
 if (!prompt) {
@@ -68,8 +71,15 @@ async function fakeCli(t: test.TestContext) {
     process.platform === 'win32' ? path.join(directory, 'agy.cmd') : path.join(directory, 'agy');
   if (process.platform === 'win32') {
     const fixture = path.join(directory, 'agy-fixture.cjs');
-    await writeFile(fixture, windowsScript, 'utf8');
-    await writeFile(executable, `@echo off\r\n"${process.execPath}" "${fixture}" %*\r\n`, 'utf8');
+    const source = windowsScript.replaceAll('\n', '\r\n');
+    await writeFile(fixture, source, 'utf8');
+    const emittedSource = await readFile(fixture, 'utf8');
+    assert.doesNotThrow(() => new vm.Script(emittedSource));
+    assert.match(emittedSource, /join\('\\n'\)/);
+    assert.doesNotMatch(emittedSource, /(?<!\r)\n/);
+    const shim = `@echo off\r\n"${process.execPath}" "${fixture}" %*\r\n`;
+    await writeFile(executable, shim, 'utf8');
+    assert.equal(await readFile(executable, 'utf8'), shim);
   } else {
     await writeFile(executable, script, 'utf8');
     await chmod(executable, 0o700);
@@ -78,9 +88,37 @@ async function fakeCli(t: test.TestContext) {
   return { cwd: directory, executable };
 }
 
+const execFileAsync = promisify(execFile);
+
 function isCliError(error: unknown): error is AntigravityCliError {
   return error instanceof AntigravityCliError;
 }
+
+test('Windows fixture emits the same NDJSON stream as the POSIX fixture', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('POSIX fixture requires Bash');
+    return;
+  }
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'antigravity-fixture-'));
+  const posixFixture = path.join(directory, 'agy');
+  const windowsFixture = path.join(directory, 'agy-fixture.cjs');
+  await writeFile(posixFixture, script, 'utf8');
+  await chmod(posixFixture, 0o700);
+  const windowsSource = windowsScript.replaceAll(/\r?\n/g, '\r\n');
+  await writeFile(windowsFixture, windowsSource, 'utf8');
+  const emittedSource = await readFile(windowsFixture, 'utf8');
+  assert.doesNotThrow(() => new vm.Script(emittedSource));
+  assert.match(emittedSource, /join\('\\n'\)/);
+  assert.doesNotMatch(emittedSource, /(?<!\r)\n/);
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const [posix, windows] = await Promise.all([
+    execFileAsync(posixFixture, ['-p', 'hello']),
+    execFileAsync(process.execPath, [windowsFixture, '-p', 'hello']),
+  ]);
+  assert.equal(windows.stdout, posix.stdout);
+  assert.equal(windows.stderr, posix.stderr);
+  await rm(directory, { recursive: true, force: true });
+});
 
 test('runs agy with explicit flags and parses typed NDJSON events', async (t) => {
   const cli = await fakeCli(t);

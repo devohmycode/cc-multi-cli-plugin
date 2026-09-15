@@ -20,7 +20,7 @@ import { fromChat } from '../../../multi-zen/src/chat.ts';
 import { zenRequest } from '../../../multi-zen/src/request.ts';
 import type { AgentCatalog } from './agent-catalog.ts';
 import type { ApprovalContext, NativeApprovalBridge } from './approval.ts';
-import { isApprovalRequest, parseApprovalRequest } from './approval.ts';
+import { approvalCwdForComparison, isApprovalRequest, parseApprovalRequest } from './approval.ts';
 import type { GatewayFetch } from './fetch.ts';
 import type { Emit, MessagesRequest, MessagesResponse, StopReason } from './messages.ts';
 import { ModBridge } from './mod-bridge.ts';
@@ -200,10 +200,13 @@ export function createNativeGateway({
       return true;
     }
     // Claude's classifier omits its redundant current-workspace `cd` prefix.
+    const cwd =
+      typeof candidate.context.cwd === 'string'
+        ? approvalCwdForComparison(candidate.context.cwd)
+        : undefined;
     return (
-      typeof candidate.context.cwd === 'string' &&
-      /^[A-Za-z0-9_./-]+$/.test(candidate.context.cwd) &&
-      candidate.tool.input.command === `cd ${candidate.context.cwd} && ${action}`
+      cwd !== undefined &&
+      candidate.tool.input.command.replaceAll('\\', '/') === `cd ${cwd} && ${action}`
     );
   };
   function permissionHook(parsed: Record<string, unknown>) {

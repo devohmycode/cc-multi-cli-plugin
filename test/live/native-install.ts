@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { executableInvocation } from '../../plugins/multi-core/src/gateway/executable.ts';
 
 const execute = promisify(execFile);
 const repository = fileURLToPath(new URL('../../', import.meta.url));
@@ -138,19 +139,29 @@ if (platform === 'win32') {
   // Setup must never write a bin/claude that would shadow the real claude command.
   await assert.rejects(access(path.join(bin, 'claude'), fsConstants.X_OK));
 }
-const status = await execute(multi, ['status'], { env, cwd: directory });
+const statusInvocation = executableInvocation(multi, ['status'], platform, env);
+const status = await execute(statusInvocation.command, statusInvocation.args, {
+  env,
+  cwd: directory,
+});
 assert.deepEqual(JSON.parse(status.stdout).providers, ['zen']);
-const disabled = await execute(
+const disabledInvocation = executableInvocation(
   multi,
   [
     'status',
     '--settings',
     JSON.stringify({ enabledPlugins: { 'multi-zen@cc-multi-cli-plugin': false } }),
   ],
-  { env, cwd: directory },
+  platform,
+  env,
 );
+const disabled = await execute(disabledInvocation.command, disabledInvocation.args, {
+  env,
+  cwd: directory,
+});
 assert.deepEqual(JSON.parse(disabled.stdout).providers, []);
-await execute(multi, ['uninstall'], { env, cwd: directory });
+const uninstallInvocation = executableInvocation(multi, ['uninstall'], platform, env);
+await execute(uninstallInvocation.command, uninstallInvocation.args, { env, cwd: directory });
 assert.equal(await readFile(profile, 'utf8'), '');
 console.log(
   'PASS: core dependency, isolated cache, gateway picker, native enablement, claude-multi without shadowing claude, setup and uninstall. No inference requests.',

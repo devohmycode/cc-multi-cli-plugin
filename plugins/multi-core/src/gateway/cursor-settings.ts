@@ -237,17 +237,7 @@ async function managedCommandPolicy(
   try {
     source = await options.runCommand(command, args);
   } catch (error) {
-    if (missing(error) || (error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
-      return [];
-    }
-    if (
-      command === 'defaults' &&
-      error instanceof Error &&
-      'code' in error &&
-      error.code === 1 &&
-      'stderr' in error &&
-      /does not exist|not found/i.test(String(error.stderr))
-    ) {
+    if (managedPolicyCommandAbsent(command, error)) {
       return [];
     }
     throw new Error(`Native Cursor cannot observe managed policy via ${command}: ${String(error)}`);
@@ -256,6 +246,17 @@ async function managedCommandPolicy(
     return [];
   }
   return [managedPolicy(parsePolicyValue(source), `${command} ${args.join(' ')}`)];
+}
+
+function managedPolicyCommandAbsent(command: string, error: unknown): boolean {
+  if (!(error instanceof Error) || !('code' in error) || error.code !== 1 || !('stderr' in error)) {
+    return false;
+  }
+  const stderr = String(error.stderr);
+  if (command === 'defaults') {
+    return /does not exist/i.test(stderr);
+  }
+  return command === 'reg' && /unable to find the specified registry key or value/i.test(stderr);
 }
 
 async function managedRegistryPolicies(

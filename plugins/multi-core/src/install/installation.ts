@@ -207,10 +207,16 @@ async function writeRuntime(directory: string, bin: string, node: string, platfo
     const bootstrap = path.join(directory, 'bootstrap.ts');
     if (platform === 'win32') {
       const suffix = name === 'multi' ? ' --multi' : '';
-      await writeFile(path.join(bin, `${name}.cmd`), `@"${node}" "${bootstrap}"${suffix} %*\r\n`);
+      const cmd = [
+        '@echo off',
+        `"${node}" "${bootstrap}"${suffix} %*`,
+        'exit /b %ERRORLEVEL%',
+        '',
+      ].join('\r\n');
+      await writeFile(path.join(bin, `${name}.cmd`), `${cmd}\r\n`);
       await writeFile(
         path.join(bin, `${name}.ps1`),
-        `& ${powershellQuote(node)} ${powershellQuote(bootstrap)}${suffix} @args\r\n`,
+        `& ${powershellQuote(node)} ${powershellQuote(bootstrap)}${suffix} @args\r\nexit $LASTEXITCODE\r\n`,
       );
     } else {
       const suffix = name === 'multi' ? ' --multi' : '';

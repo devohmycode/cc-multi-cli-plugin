@@ -2,6 +2,21 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+function executableInvocation(
+  executable: string,
+  args: readonly string[],
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  if (platform !== 'win32' || !/(?:\.cmd|\.bat)$/i.test(executable)) {
+    return { command: executable, args: [...args] };
+  }
+  const command = env.ComSpec ?? process.env.ComSpec ?? 'cmd.exe';
+  const quote = (value: string) =>
+    `"${value.replaceAll(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`;
+  return { command, args: ['/d', '/s', '/c', [quote(executable), ...args.map(quote)].join(' ')] };
+}
+
 const MARKETPLACE = 'cc-multi-cli-plugin';
 const PROVIDERS = ['openai', 'cursor', 'zen', 'antigravity'] as const;
 export type Provider = (typeof PROVIDERS)[number];
@@ -34,15 +49,15 @@ export async function installedPlugins(
   options: { platform?: NodeJS.Platform } = {},
 ) {
   const platform = options.platform ?? process.platform;
-  const { stdout } = await promisify(execFile)(
+  const invocation = executableInvocation(
     claude,
     [...settingsArgs, 'plugin', 'list', '--json'],
-    {
-      timeout: 15000,
-      maxBuffer: 4 * 1024 * 1024,
-      ...(platform === 'win32' ? { shell: true } : {}),
-    },
+    platform,
   );
+  const { stdout } = await promisify(execFile)(invocation.command, invocation.args, {
+    timeout: 15000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
   const parsed: unknown = JSON.parse(stdout);
   if (!Array.isArray(parsed)) {
     throw new Error('Claude returned an invalid plugin list. Update Claude Code and retry.');

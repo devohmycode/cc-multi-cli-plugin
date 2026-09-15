@@ -15,6 +15,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function pathForPlatform(platform: NodeJS.Platform) {
+  return platform === 'win32' ? path.win32 : path.posix;
+}
+
 export interface ZenAuthPathOptions {
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
@@ -30,7 +34,7 @@ export function zenAuthFile({
   if (explicit) {
     return explicit;
   }
-  const pathApi = platform === 'win32' ? path.win32 : path;
+  const pathApi = pathForPlatform(platform);
   const dataHome =
     platform === 'win32'
       ? env.LOCALAPPDATA || pathApi.join(homedir, 'AppData', 'Local')
@@ -79,6 +83,8 @@ export async function readZenKey(options: ZenAuthPathOptions = {}): Promise<stri
 /** Persist local key entry in OpenCode's existing auth store, preserving other providers. */
 export async function saveZenKey(key: string, options: ZenAuthPathOptions = {}): Promise<void> {
   const validated = validateZenKey(key);
+  const platform = options.platform ?? process.platform;
+  const pathApi = pathForPlatform(platform);
   const file = zenAuthFile(options);
   let entries: Record<string, unknown> = {};
   try {
@@ -94,8 +100,11 @@ export async function saveZenKey(key: string, options: ZenAuthPathOptions = {}):
       );
     }
   }
-  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  const temporary = `${file}.multi-${process.pid}.tmp`;
+  await mkdir(pathApi.dirname(file), { recursive: true, mode: 0o700 });
+  const temporary = pathApi.join(
+    pathApi.dirname(file),
+    `${pathApi.basename(file)}.multi-${process.pid}.tmp`,
+  );
   await writeFile(
     temporary,
     `${JSON.stringify({ ...entries, opencode: { type: 'api', key: validated } }, null, 2)}\n`,

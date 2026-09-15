@@ -783,12 +783,23 @@ function traceEvent(event: GatewayEvent) {
 }
 
 async function discoverAntigravity() {
-  const antigravityModels =
-    providerEnabled('antigravity') && process.env.MULTI_ANTIGRAVITY === '1'
-      ? await discoverAntigravityModels()
-      : [];
+  let antigravityModels: AntigravityModel[] = [];
+  if (providerEnabled('antigravity') && process.env.MULTI_ANTIGRAVITY === '1') {
+    try {
+      resolveExecutable('agy');
+      antigravityModels = await discoverAntigravityModels();
+    } catch (error) {
+      if (!isMissingExecutable(error)) {
+        throw error;
+      }
+    }
+  }
   if (enabledProviders?.includes('antigravity') && antigravityModels.length) {
     await installAntigravityHook();
   }
   return antigravityModels;
+}
+
+function isMissingExecutable(error: unknown): boolean {
+  return recordValue(error)?.code === 'ENOENT';
 }

@@ -17,6 +17,16 @@ import {
   zenPickerOptions,
 } from '../../plugins/multi-zen/src/models.ts';
 
+function hostAuthOptions(dataHome: string) {
+  const env: NodeJS.ProcessEnv = { OPENCODE_API_KEY: undefined };
+  if (process.platform === 'win32') {
+    env.LOCALAPPDATA = dataHome;
+  } else {
+    env.XDG_DATA_HOME = dataHome;
+  }
+  return { platform: process.platform, env };
+}
+
 async function withEnvironment(
   values: Record<string, string | undefined>,
   run: () => Promise<void>,
@@ -120,19 +130,22 @@ test('Zen auth reads only the official OpenCode API entry', async (t) => {
     path.join(directory, 'auth.json'),
     JSON.stringify({ opencode: { type: 'api', key: 'saved-fixture-key' } }),
   );
-  await withEnvironment({ OPENCODE_API_KEY: undefined, XDG_DATA_HOME: dataHome }, async () => {
-    assert.equal(await readZenKey(), 'saved-fixture-key');
+  const options = hostAuthOptions(dataHome);
+  await withEnvironment(options.env, async () => {
+    assert.equal(await readZenKey(options), 'saved-fixture-key');
   });
 });
 
 test('Zen auth treats missing credentials as optional and rejects malformed explicit config', async (t) => {
   const dataHome = await mkdtemp(path.join(os.tmpdir(), 'zen-auth-test-'));
   t.after(() => rm(dataHome, { recursive: true, force: true }));
-  await withEnvironment({ OPENCODE_API_KEY: undefined, XDG_DATA_HOME: dataHome }, async () => {
-    assert.equal(await readZenKey(), undefined);
+  const options = hostAuthOptions(dataHome);
+  await withEnvironment(options.env, async () => {
+    const environmentOptions = { platform: options.platform, env: process.env };
+    assert.equal(await readZenKey(environmentOptions), undefined);
     for (const value of [' ', 'fixture key', 'fixture\nkey']) {
       process.env.OPENCODE_API_KEY = value;
-      await assert.rejects(readZenKey(), (error: unknown) => {
+      await assert.rejects(readZenKey(environmentOptions), (error: unknown) => {
         assert(error instanceof ZenAuthError);
         return true;
       });
@@ -146,9 +159,10 @@ test('Zen auth rejects malformed saved credentials without including secrets', a
   const directory = path.join(dataHome, 'opencode');
   await mkdir(directory);
   await writeFile(path.join(directory, 'auth.json'), '{"opencode":{"type":"api"}}');
-  await withEnvironment({ OPENCODE_API_KEY: undefined, XDG_DATA_HOME: dataHome }, async () => {
+  const options = hostAuthOptions(dataHome);
+  await withEnvironment(options.env, async () => {
     await assert.rejects(
-      readZenKey(),
+      readZenKey(options),
       (error: unknown) => error instanceof ZenAuthError && !error.message.includes('SECRET'),
     );
   });
@@ -213,13 +227,16 @@ test('Zen local key entry preserves other accounts and writes a private auth fil
   await mkdir(directory);
   const file = path.join(directory, 'auth.json');
   await writeFile(file, JSON.stringify({ other: { type: 'api', key: 'other-fixture' } }));
-  await withEnvironment({ OPENCODE_API_KEY: undefined, XDG_DATA_HOME: dataHome }, async () => {
-    await saveZenKey('new-fixture');
-    assert.equal(await readZenKey(), 'new-fixture');
+  const options = hostAuthOptions(dataHome);
+  await withEnvironment(options.env, async () => {
+    await saveZenKey('new-fixture', options);
+    assert.equal(await readZenKey(options), 'new-fixture');
     assert.equal(JSON.parse(await readFile(file, 'utf8')).other.key, 'other-fixture');
-    assert.equal((await stat(file)).mode & 0o777, 0o600);
+    if (process.platform !== 'win32') {
+      assert.equal((await stat(file)).mode & 0o777, 0o600);
+    }
     await writeFile(file, 'invalid-json');
-    await assert.rejects(saveZenKey('next-fixture'), /preserved/);
+    await assert.rejects(saveZenKey('next-fixture', options), /preserved/);
     assert.equal(await readFile(file, 'utf8'), 'invalid-json');
   });
 });

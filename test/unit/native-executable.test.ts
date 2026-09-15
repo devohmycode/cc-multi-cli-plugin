@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import {
   executableInvocation,
@@ -54,4 +57,14 @@ test('invokes cmd shims through ComSpec without shell mode', () => {
       args: ['/d', '/s', '/c', '"C:\\Program Files\\agy.cmd" --prompt "hello world"'],
     },
   );
+});
+
+test('bypasses cmd.exe for long npm shim arguments', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'executable-test-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const shim = path.join(directory, 'claude.cmd');
+  await writeFile(shim, `@"${process.execPath}" "%~dp0claude-fixture.js" %*\r\n`);
+  const invocation = executableInvocation(shim, ['--agents', 'x'.repeat(8000)], 'win32');
+  assert.equal(invocation.command, process.execPath);
+  assert.equal(invocation.args[0], path.win32.join(directory, 'claude-fixture.js'));
 });

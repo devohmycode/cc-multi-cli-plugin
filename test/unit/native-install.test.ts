@@ -16,6 +16,12 @@ import {
 } from '../../plugins/multi-core/src/install/plugins.ts';
 
 const execute = promisify(execFile);
+
+function windowsCommand(pathname: string, args: string[]) {
+  const quote = (value: string) =>
+    `"${value.replaceAll(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`;
+  return [quote(pathname), ...args.map(quote)].join(' ');
+}
 const setup = fileURLToPath(new URL('../../plugins/multi-core/src/setup.ts', import.meta.url));
 const marketplace = 'cc-multi-cli-plugin';
 
@@ -72,12 +78,15 @@ if (args.includes('plugin') && args.includes('list')) {
       };
   const install = () => execute(process.execPath, [setup, '--claude', real], { env });
   const bin = path.join(home, '.local/share/multi-cli/bin');
-  const invoke = (name: string, args: string[], extra: Record<string, string> = {}) =>
-    execute(path.join(bin, windows ? `${name}.cmd` : name), args, {
+  const invoke = (name: string, args: string[], extra: Record<string, string> = {}) => {
+    const executable = path.join(bin, windows ? `${name}.cmd` : name);
+    const command = windows ? (env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe') : executable;
+    const commandArgs = windows ? ['/d', '/s', '/c', windowsCommand(executable, args)] : args;
+    return execute(command, commandArgs, {
       env: { ...env, ...extra },
-      shell: windows,
       timeout: 20000,
     });
+  };
   return { directory, home, shell, listing, real, env, install, invoke, windows };
 }
 
