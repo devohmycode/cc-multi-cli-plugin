@@ -61,8 +61,25 @@ through authenticated loopback `/multi/mod/*` routes, with generation
 acknowledgements that fail closed when stale or unavailable. Compaction summary
 requests run with every mapped native tool denied and retain native history. The
 global native Antigravity `PreToolUse` hook remains the enforcement point for those
-denials. Whole-tool restrictions intersect the native capability list. Richer
-unsupported Claude policy rejects admission rather than being silently ignored. The
+denials. The classic `PreCompact` mode transport has been removed. Core fallback now
+requires generation-scoped tool-free authorization from `session.compact`.
+
+The mod's two-phase outer compaction path first authenticates a bounded transcript
+and policy generation, then starts a detached, tool-free summary in a separate
+native record. It never rewinds the originating native history. A later compaction
+uses that summary only if the same transcript prefix, instructions, worker and
+generation still match. New prompts, interruption and detach cancel speculative
+work; late results cannot be consumed. Summaries expire after two minutes. Payloads
+above 32 KiB and missing/stale summaries use core compaction only after a separate,
+small tool-free authorization is acknowledged. Unknown generations or unavailable
+authorization skip compaction. Offline tests cover prefix changes,
+cancellation and the all-tools-denied policy; no new live compaction fidelity is
+claimed.
+
+Settings and worker definitions are refreshed in detached gateway policy jobs and
+admitted by generation. Workers require catalog validation and a child-start
+acknowledgement before native dispatch. Whole-tool restrictions intersect the native
+capability list. Richer unsupported Claude policy rejects admission rather than being silently ignored. The
 bridge currently reuses the conservative Cursor-side Claude settings admission
 checks; this does not invoke Cursor or its reviewer.
 

@@ -6,7 +6,7 @@ export type NativeObservation =
   | { type: 'started'; id: string; kind: NativeRowKind; description: string }
   | { type: 'completed'; id: string; text: string; error: boolean };
 
-const MAX_EVENTS = 2048;
+const MAX_EVENTS = 128;
 const MAX_TEXT = 4096;
 const MAX_KEYS = 128;
 
@@ -46,15 +46,15 @@ function bounded(value: string, limit = MAX_TEXT) {
 export class ModBridge {
   private generation = 0;
   private readonly snapshots = new Map<string, Snapshot>();
-  private readonly events = new Map<string, ModDisplayEvent[]>();
+  private sequence = 0;
+  private readonly lifecycle = new Map<
+    string,
+    { model: string; startedAt: number; state: string; detail: string }
+  >();
+  private readonly telemetry = new Map<string, { model: string; effort?: string | number }>();
   private readonly pending = new Map<string, Map<string, PendingObservation>>();
-  private readonly active = new Set<string>();
 
   recordSession(key: string, value: { effective: Effective; cwd?: string; generation?: number }) {
-    return this.record(key, value);
-  }
-
-  recordWorker(key: string, value: { effective: Effective; cwd?: string }) {
     return this.record(key, value);
   }
 
@@ -76,6 +76,9 @@ export class ModBridge {
     ) {
       return undefined;
     }
+    if (!this.snapshots.has(key) && this.snapshots.size >= MAX_KEYS) {
+      throw new Error('Mod session capacity reached; restart the gateway');
+    }
     const snapshot = {
       generation: ++this.generation,
       effective: {
@@ -94,6 +97,9 @@ export class ModBridge {
       return undefined;
     }
     if (observation.type === 'started') {
+      if (!this.pending.has(key) && this.pending.size >= MAX_KEYS) {
+        return undefined;
+      }
       let actions = this.pending.get(key);
       if (!actions) {
         actions = new Map();
@@ -101,12 +107,15 @@ export class ModBridge {
       }
       actions.set(observation.id, {
         kind: observation.kind,
-        description: bounded(observation.description),
+        description: bounded(observation.description, 160),
       });
       while (actions.size > MAX_EVENTS) {
         actions.delete(actions.keys().next().value as string);
       }
-      this.active.add(key);
+      const lifecycle = this.lifecycle.get(key);
+      if (lifecycle) {
+        lifecycle.detail = bounded(observation.description, 160);
+      }
       return undefined;
     }
     const action = this.pending.get(key)?.get(observation.id);
@@ -116,7 +125,7 @@ export class ModBridge {
     this.pending.get(key)?.delete(observation.id);
     const output = bounded(observation.text);
     const event: ModDisplayEvent = {
-      sequence: (this.events.get(key)?.at(-1)?.sequence ?? 0) + 1,
+      sequence: ++this.sequence,
       toolUseId: observation.id,
       tool: `mcp__multi-core__cursor_${action.kind}`,
       input: {
@@ -126,36 +135,51 @@ export class ModBridge {
         toolUseId: observation.id,
       },
     };
-    const list = this.events.get(key) ?? [];
-    list.push(event);
-    while (list.length > MAX_EVENTS) {
-      list.shift();
-    }
-    this.events.set(key, list);
-    this.trimKeys();
     return event;
   }
 
-  display(key: string, cursor: number, limit: number) {
-    const list = this.events.get(key) ?? [];
-    const events = list.filter((event) => event.sequence > cursor).slice(0, limit);
-    return { events, nextCursor: events.at(-1)?.sequence ?? cursor, done: !this.active.has(key) };
+  begin(key: string, model: string) {
+    if (!this.lifecycle.has(key) && this.lifecycle.size >= MAX_KEYS) {
+      const completed = [...this.lifecycle].find(([, value]) => value.state !== 'running');
+      if (!completed) {
+        throw new Error('Native lifecycle capacity reached; restart the gateway');
+      }
+      this.lifecycle.delete(completed[0]);
+    }
+    this.lifecycle.set(key, { model, startedAt: Date.now(), state: 'running', detail: '' });
   }
 
-  complete(key: string) {
-    this.active.delete(key);
+  status(key: string) {
+    const value = this.lifecycle.get(key);
+    return value ? { ...value, elapsedMs: Date.now() - value.startedAt } : undefined;
+  }
+
+  step(key: string) {
+    return this.telemetry.get(key);
+  }
+
+  observeStep(key: string, value: { model: string; effort?: string | number }) {
+    if (!this.telemetry.has(key) && this.telemetry.size >= MAX_KEYS) {
+      this.telemetry.delete(this.telemetry.keys().next().value as string);
+    }
+    this.telemetry.set(key, value);
+  }
+
+  complete(key: string, state = 'completed') {
+    const value = this.lifecycle.get(key);
+    if (value) {
+      value.state = state;
+    }
     this.pending.delete(key);
   }
 
-  private trimKeys() {
-    while (this.events.size > MAX_KEYS) {
-      const oldest = this.events.keys().next();
-      if (oldest.done) {
-        return;
+  forgetSession(session: string) {
+    for (const entries of [this.snapshots, this.pending, this.lifecycle, this.telemetry]) {
+      for (const key of entries.keys()) {
+        if (JSON.parse(key)[0] === session) {
+          entries.delete(key);
+        }
       }
-      this.events.delete(oldest.value);
-      this.pending.delete(oldest.value);
-      this.active.delete(oldest.value);
     }
   }
 }

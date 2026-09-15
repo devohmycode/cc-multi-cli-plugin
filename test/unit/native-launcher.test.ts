@@ -18,6 +18,7 @@ test('launcher preserves native auth, disables unavailable auto mode, and merges
     path.join(cwd, 'bin', 'claude'),
     `#!/usr/bin/env node
 const fs=require('node:fs');const args=process.argv.slice(2);
+if(args.includes('plugin')&&args.includes('list')){console.log('[]');process.exit(0)}
 if(args[0]==='--version'){console.log(process.env.TEST_CLAUDE_VERSION??'2.1.272');process.exit(0)}
 const result=(value)=>{const base=process.env.MULTI_MOD_GATEWAY_URL;if(!base){console.log(value);return}const url=new URL(base+'/multi/mod/session');const req=require('node:http').request(url,{method:'POST',headers:{'content-type':'application/json','x-multi-gateway-token':process.env.MULTI_GATEWAY_TOKEN}},()=>console.log(value));req.on('error',()=>console.log(value));req.end(JSON.stringify({sessionId:'fixture',event:'start'}));};
 if(args[0]==='auth'){if(process.env.TEST_AUTH==='malformed'){console.log('not-json');process.exit(0)}if(process.env.TEST_AUTH==='error'){process.exit(2)}if(process.env.TEST_AUTH==='missing'){console.log('{}');process.exit(0)}process.stdout.write(JSON.stringify({loggedIn:process.env.TEST_AUTH==='yes'}));process.exitCode=process.env.TEST_AUTH==='yes'?0:1}else{
@@ -141,6 +142,7 @@ test('Zen credentials add picker models and named workers without leaking the ke
     path.join(bin, 'claude'),
     `#!/usr/bin/env node
 const fs=require('node:fs');const args=process.argv.slice(2);
+if(args.includes('plugin')&&args.includes('list')){console.log('[]');process.exit(0)}
 if(args[0]==='--version'){console.log(process.env.TEST_CLAUDE_VERSION??'2.1.272');process.exit(0)}
 const result=(value)=>{const base=process.env.MULTI_MOD_GATEWAY_URL;if(!base){console.log(value);return}const url=new URL(base+'/multi/mod/session');const req=require('node:http').request(url,{method:'POST',headers:{'content-type':'application/json','x-multi-gateway-token':process.env.MULTI_GATEWAY_TOKEN}},()=>console.log(value));req.on('error',()=>console.log(value));req.end(JSON.stringify({sessionId:'fixture',event:'start'}));};
 if(args[0]==='auth'){process.stdout.write(JSON.stringify({loggedIn:false}));process.exitCode=1}else{
@@ -269,6 +271,7 @@ test('Zen saved auth supplies the no-login fallback without exposing credentials
     path.join(bin, 'claude'),
     `#!/usr/bin/env node
 const fs=require('node:fs');const args=process.argv.slice(2);
+if(args.includes('plugin')&&args.includes('list')){console.log('[]');process.exit(0)}
 if(args[0]==='--version'){console.log(process.env.TEST_CLAUDE_VERSION??'2.1.272');process.exit(0)}
 const result=(value)=>{const base=process.env.MULTI_MOD_GATEWAY_URL;if(!base){console.log(value);return}const url=new URL(base+'/multi/mod/session');const req=require('node:http').request(url,{method:'POST',headers:{'content-type':'application/json','x-multi-gateway-token':process.env.MULTI_GATEWAY_TOKEN}},()=>console.log(value));req.on('error',()=>console.log(value));req.end(JSON.stringify({sessionId:'fixture',event:'start'}));};
 if(args[0]==='auth'){process.stdout.write(JSON.stringify({loggedIn:false}));process.exitCode=1}else{
@@ -318,6 +321,7 @@ console.log('gemini-low\\tGemini Low\\ngemini-medium\\tGemini Medium\\ngemini-hi
     path.join(bin, 'claude'),
     `#!/usr/bin/env node
 const fs=require('node:fs'); const {execFileSync}=require('node:child_process'); const args=process.argv.slice(2);
+if(args.includes('plugin')&&args.includes('list')){console.log('[]');process.exit(0)}
 if(args[0]==='--version'){console.log(process.env.TEST_CLAUDE_VERSION??'2.1.272');process.exit(0)}
 const result=(value)=>{const base=process.env.MULTI_MOD_GATEWAY_URL;if(!base){console.log(value);return}const url=new URL(base+'/multi/mod/session');const req=require('node:http').request(url,{method:'POST',headers:{'content-type':'application/json','x-multi-gateway-token':process.env.MULTI_GATEWAY_TOKEN}},()=>console.log(value));req.on('error',()=>console.log(value));req.end(JSON.stringify({sessionId:'fixture',event:'start'}));};
 if(args[0]==='auth'){console.log('{"loggedIn":false}');process.exit(1)}

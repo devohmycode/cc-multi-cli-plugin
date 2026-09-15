@@ -580,7 +580,7 @@ export class CursorHarness {
         if (update.type === 'text-delta') {
           appendText(update.text);
           stream.text(update.text);
-        } else {
+        } else if (!rowObserver) {
           const progress = formatCursorProgress(update);
           if (progress) {
             stream.text(`\n${progress}\n`);

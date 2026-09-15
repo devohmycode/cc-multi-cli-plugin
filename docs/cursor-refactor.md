@@ -33,18 +33,34 @@ and row store are gone.
 The launcher requires Claude Code 2.1.272 or newer, always sets
 `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`, and fails explicitly when function hooks are
 unavailable. The bundled Multi core mod is the only Cursor display and permission
-synchronization path. It registers display-only tools, polls bounded per-run gateway
-events through detached `$.http.fetch` work, raises `$.tool.call` for observed
-actions, wraps `tool_use` rows, and invalidates the UI when state changes. Cursor
-and Antigravity remain the only executors; observed external actions are never
-replayed as executable Claude tools and the mod never grants native permission.
+synchronization path. The gateway streams display-only `tool_use` blocks whose
+bounded results are answered locally by the mod. `ui.render` wraps their rows;
+detached `ui.status` polling shows model, worker, elapsed time and lifecycle.
+Programmatic `$.tool.call` is not used to create transcript rows. Cursor and
+Antigravity remain the executors, and display tools never grant native permissions.
 
-Mode, worker and compaction snapshots carry the effective permission context and a
-generation. Authenticated loopback `/multi/mod/*` routes update `PermissionModes`,
-reject stale acknowledgements, and fail closed when the gateway is unavailable.
-Provider credentials remain isolated and every mod request carries
-`x-multi-gateway-token`. The wrapped row form is supported; rewriting rows as native
-Read/Edit rows remains unproven pending a TTY probe.
+The launcher precomputes worker definitions. At each prompt, detached gateway jobs
+refresh settings admission and the catalog; short hook requests poll the job and
+acknowledge its generation. Discovery that outlasts the bounded wait blocks the
+prompt. Native dispatch still rechecks settings. Worker offers hide unknown or
+unsupported entries, and spawns validate parent, model, cwd and generation against
+the prepared catalog. The child-start boundary must acknowledge the engine's ID
+before a native request. Ambiguous concurrent starts of the same type/cwd fail
+closed. Generated `--agents` and classic direct-tool permission review remain.
+
+`turn.step` sends model/effort telemetry and forwards core chunks unchanged. It
+never runs inference itself. Native summary precompute runs detached with zero
+tool capabilities and a two-minute deadline. A summary may replace only its exact
+leading transcript under the same instructions, worker and generation; stale or
+missing summaries fall through to core only after tool-free authorization. The
+classic Antigravity `PreCompact` transport is removed; the native global pre-tool
+hook stays. Precompute is limited to the 32 KiB control
+payload and native harness models. Native state is never rewound.
+
+All routes retain token/origin checks and use a 32 KiB request limit. Session,
+pending-action and summary state is bounded and cleared on detach. Provider
+credentials remain isolated. Wrapped rows are supported; native Read/Edit row
+rewrites and the new lifecycle appearance still need an interactive TTY check.
 
 ## Code ownership
 

@@ -548,10 +548,32 @@ the mod answers each row through `tool.call`. It never executes observed externa
 actions or grants native permission. Rewriting these rows as native Read/Edit rows
 remains unproven pending a TTY probe.
 
-The mod posts mode, worker and compaction snapshots through authenticated loopback
-`/multi/mod/*` routes. Each snapshot uses a generation acknowledgement; stale or
-unreachable acknowledgements fail closed. Bounded detached polling and UI
-invalidation keep display progress current.
+The mod uses authenticated loopback `/multi/mod/*` routes with a 32 KiB request
+limit. Settings and worker catalogs are prepared by the gateway outside the hook
+budget, then acknowledged by generation at the prompt boundary. If discovery is
+not ready within the bounded wait, the prompt is blocked; submit it again. Worker
+offers hide unknown or unsupported definitions, while generated `--agents` keeps
+the named catalog. Spawns validate parent mode/model, worker model and workspace;
+native dispatch requires a child-start acknowledgement. Concurrent starts of the
+same worker type in the same workspace are rejected when their identities cannot
+be correlated uniquely. A new worker workspace needs an acknowledged prompt policy.
+
+Detached native status polling shows the provider model, worker, elapsed time and
+lifecycle. Cursor tool progress uses the wrapped display rows without duplicate
+text when those tools are available; text remains a fallback for clients without
+the mod tools. `turn.step` observes model and effort and forwards the engine stream
+unchanged. The mod never serves a provider's model loop.
+
+Compaction precompute posts a bounded transcript, then starts detached native
+summary work with all tools disabled in a separate native record. A summary is
+consumed only when its original transcript still leads the current transcript and
+its instructions, scope and generation match. Summaries expire after two minutes;
+cancellation and a new prompt invalidate them. Oversized transcripts, unsupported
+direct providers and unavailable summaries use core compaction. The
+`session.compact` hook requires a separate tool-free gateway authorization before
+core fallback; an unknown generation or missing acknowledgement skips
+compaction. The Antigravity `classic.PreCompact` mode transport has been removed.
+This is outer-transcript summarization, not native-history compaction or rewind.
 
 Worker tool lists, whole-tool deny rules and supported CLI restrictions intersect
 native capabilities. Settings and plugin policies are rechecked before dispatch.

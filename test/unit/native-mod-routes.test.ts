@@ -1,13 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { setImmediate } from 'node:timers/promises';
 import { ModBridge } from '../../plugins/multi-core/src/gateway/mod-bridge.ts';
 import { PermissionModes } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
 import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 
-async function start(t: test.TestContext) {
+async function start(
+  t: test.TestContext,
+  permissionModes?: PermissionModes,
+  antigravity?: Parameters<typeof createNativeGateway>[0]['antigravity'],
+) {
   const server = createNativeGateway({
     token: 'mod-token',
     authFile: 'unused',
+    permissionModes,
+    antigravity,
     modBridge: new ModBridge(),
   });
   t.after(() => {
@@ -68,8 +75,9 @@ test('PermissionModes retains a tool-free compaction boundary and acknowledges w
       disallowedTools: ['Bash'],
     },
   }));
+  await modes.precompute('/workspace');
   modes.recordModSession('session', { permissionMode: 'auto', cwd: '/workspace' });
-  modes.recordModCompaction('session', { trigger: 'manual', cwd: '/workspace' });
+  modes.authorizeModCompaction('session');
   const compact = modes.resolve('session');
   assert.equal(compact.permissionMode, 'auto');
   assert.equal(typeof compact.compaction, 'string');
@@ -83,5 +91,204 @@ test('PermissionModes retains a tool-free compaction boundary and acknowledges w
   assert.throws(
     () => modes.recordPreparedModWorker('session', 'other', workerToken),
     /Worker policy acknowledgement is unavailable/,
+  );
+});
+
+test('mod requests have a control-plane byte limit and reject malformed restrictions', async (t) => {
+  const base = await start(t);
+  const oversized = await fetch(`${base}/multi/mod/session`, {
+    method: 'POST',
+    headers: { 'x-multi-gateway-token': 'mod-token' },
+    body: JSON.stringify({ sessionId: 's', text: 'x'.repeat(33000) }),
+  });
+  assert.equal(oversized.status, 413);
+  for (const tools of [['Read', 1], ['x'.repeat(513)], 'Read']) {
+    const result = await request(base, '/multi/mod/session', {
+      sessionId: 's',
+      permissionMode: 'plan',
+      tools,
+    });
+    assert.equal(result.status, 400);
+  }
+});
+
+test('mod routes reject browser origins, invalid methods and invalid worker identities', async (t) => {
+  const base = await start(t);
+  const browser = await fetch(`${base}/multi/mod/mode?sessionId=s`, {
+    headers: { origin: 'https://example.com', 'x-multi-gateway-token': 'mod-token' },
+  });
+  assert.equal(browser.status, 401);
+  assert.equal((await request(base, '/multi/mod/session', undefined, 'GET')).status, 400);
+  assert.equal(
+    (await request(base, '/multi/mod/session', { sessionId: 's', agentId: 3 })).status,
+    400,
+  );
+});
+
+test('display observations retain only bounded pending actions and lifecycle state', () => {
+  const bridge = new ModBridge();
+  const key = JSON.stringify(['s', 'worker']);
+  bridge.begin(key, 'multi/cursor/auto');
+  bridge.observe(key, { type: 'started', id: 'row', kind: 'read', description: 'file' });
+  assert.equal(bridge.status(key)?.detail, 'file');
+  const row = bridge.observe(key, { type: 'completed', id: 'row', text: 'result', error: false });
+  assert.equal(row?.input.output, 'result');
+  assert.equal(
+    bridge.observe(key, { type: 'completed', id: 'row', text: 'replay', error: false }),
+    undefined,
+  );
+  bridge.complete(key, 'cancelled');
+  assert.equal(bridge.status(key)?.state, 'cancelled');
+  bridge.forgetSession('s');
+  assert.equal(bridge.status(key), undefined);
+});
+
+async function admit(base: string) {
+  const initial = await request(base, '/multi/mod/session', {
+    sessionId: 's',
+    event: 'start',
+    cwd: '/workspace',
+  });
+  const policy = await request(base, '/multi/mod/policy', {
+    sessionId: 's',
+    cwd: '/workspace',
+    sourceGeneration: initial.body.generation,
+  });
+  await setImmediate();
+  const prompt = await request(base, '/multi/mod/session', {
+    sessionId: 's',
+    event: 'prompt',
+    cwd: '/workspace',
+    permissionMode: 'bypassPermissions',
+    model: 'multi/antigravity/model',
+    generation: initial.body.generation,
+    policyGeneration: policy.body.generation,
+  });
+  assert.equal(prompt.status, 200);
+  return prompt.body.generation;
+}
+
+test('compaction core fallback authenticates generation and removes all native capabilities', async (t) => {
+  const modes = new PermissionModes(async () => ({}));
+  const base = await start(t, modes);
+  const generation = await admit(base);
+  const stale = await request(base, '/multi/mod/compact/authorize', {
+    sessionId: 's',
+    generation: -1,
+  });
+  assert.equal(stale.status, 400);
+  assert.equal(modes.resolve('s').compaction, undefined);
+  const accepted = await request(base, '/multi/mod/compact/authorize', {
+    sessionId: 's',
+    generation,
+  });
+  assert.equal(accepted.body.allow, true);
+  assert.deepEqual(modes.resolve('s').tools, []);
+  assert.equal(typeof modes.resolve('s').compaction, 'string');
+});
+
+test('worker route authenticates catalog and generation before child-start acknowledgement', async (t) => {
+  const modes = new PermissionModes(async () => ({
+    worker: { model: 'multi/cursor/auto', tools: ['Read'] },
+  }));
+  const base = await start(t, modes);
+  const generation = await admit(base);
+  const spawn = {
+    sessionId: 's',
+    cwd: '/workspace',
+    generation,
+    parentModel: 'multi/antigravity/model',
+    permissionMode: 'bypassPermissions',
+    subagentType: 'worker',
+  };
+  assert.equal(
+    (await request(base, '/multi/mod/worker', { ...spawn, generation: -1 })).status,
+    400,
+  );
+  assert.equal(
+    (await request(base, '/multi/mod/worker', { ...spawn, model: 'wrong' })).status,
+    400,
+  );
+  assert.equal((await request(base, '/multi/mod/worker', spawn)).body.accepted, true);
+  assert.throws(() => modes.resolve('s', 'child'), /unavailable/);
+  assert.equal(
+    (
+      await request(base, '/multi/mod/worker', {
+        sessionId: 's',
+        agentId: 'child',
+        cwd: '/workspace',
+        subagentType: 'worker',
+      })
+    ).body.accepted,
+    true,
+  );
+  assert.deepEqual(modes.resolve('s', 'child').tools, ['Read']);
+});
+
+test('model effort telemetry is scoped observation and cannot change policy', async (t) => {
+  const modes = new PermissionModes(async () => ({}));
+  const base = await start(t, modes);
+  await admit(base);
+  const before = modes.resolve('s');
+  await request(base, '/multi/mod/telemetry', {
+    sessionId: 's',
+    agentId: 'worker',
+    model: 'multi/openai/gpt-6-astra',
+    effort: 'high',
+    permissionMode: 'plan',
+  });
+  const telemetry = await request(
+    base,
+    '/multi/mod/telemetry?sessionId=s&agentId=worker',
+    undefined,
+    'GET',
+  );
+  assert.deepEqual(telemetry.body, { model: 'multi/openai/gpt-6-astra', effort: 'high' });
+  assert.deepEqual(modes.resolve('s'), before);
+});
+
+test('two-phase compaction invokes the native fixture once without tools or origin-state mutation', async (t) => {
+  const modes = new PermissionModes(async () => ({}));
+  let calls = 0;
+  const base = await start(t, modes, {
+    validate: () => 1,
+    handle: async (_body, scope, _signal, _emit, context) => {
+      calls++;
+      assert.deepEqual(context?.tools, []);
+      assert.equal(typeof context?.compaction, 'string');
+      assert.match(scope, /compact-/);
+      return {
+        id: 'summary',
+        type: 'message',
+        role: 'assistant',
+        model: 'multi/antigravity/model',
+        content: [{ type: 'text', text: 'fixture summary' }],
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      };
+    },
+  });
+  const generation = await admit(base);
+  const payload = {
+    sessionId: 's',
+    generation,
+    messages: [{ role: 'user', text: 'task', toolUses: [], handle: 'one' }],
+  };
+  const prepared = await request(base, '/multi/mod/compact/precompute', payload);
+  assert.equal(calls, 0);
+  const run = { sessionId: 's', generation, precomputeId: prepared.body.precomputeId };
+  assert.equal((await request(base, '/multi/mod/compact/run', run)).body.accepted, true);
+  await setImmediate();
+  await request(base, '/multi/mod/compact/run', run);
+  const result = await request(base, '/multi/mod/compact/authorize', payload);
+  assert.deepEqual(result.body.messages, [
+    { role: 'user', text: 'Conversation summary:\nfixture summary', toolUses: [] },
+  ]);
+  assert.equal(calls, 1);
+  assert.equal(
+    modes.resolve('s').compaction,
+    undefined,
+    'ready summary does not poison normal dispatch',
   );
 });

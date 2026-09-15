@@ -6,6 +6,7 @@ import path from 'node:path';
 import { parseDocument } from 'yaml';
 
 export interface WorkerPermissions {
+  model?: string;
   permissionMode?: string;
   tools?: string[];
   disallowedTools?: string[];
@@ -147,6 +148,7 @@ async function readDefinition(file: string): Promise<[string, WorkerPermissions]
   return [
     name,
     {
+      ...(typeof definition.model === 'string' ? { model: definition.model } : {}),
       permissionMode,
       tools: toolList(definition.tools, file, 'tools'),
       disallowedTools: toolList(definition.disallowedTools, file, 'disallowedTools'),

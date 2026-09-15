@@ -24,6 +24,7 @@ import { isApprovalRequest, parseApprovalRequest } from './approval.ts';
 import type { GatewayFetch } from './fetch.ts';
 import type { Emit, MessagesRequest, MessagesResponse, StopReason } from './messages.ts';
 import { ModBridge } from './mod-bridge.ts';
+import { ModCompactions } from './mod-compaction.ts';
 import { handleModRoute } from './mod-routes.ts';
 import type { PermissionContext, PermissionModes } from './mode-hook.ts';
 import type { PendingApprovalTool } from './permission-hook.ts';
@@ -266,6 +267,39 @@ export function createNativeGateway({
     }
     return candidates[0].context;
   }
+  const compactions = new ModCompactions(async (request) => {
+    const model = request.context.model;
+    const provider = model?.split('/')[1];
+    const harness = provider === 'cursor' ? cursor : undefined;
+    const native = provider === 'antigravity' ? antigravity : harness;
+    if (!native || !model) {
+      throw new Error('Precomputed summaries require a native harness model');
+    }
+    assertProviderEnabled(model, enabledProviders);
+    // Use a separate native record. A speculative summary never advances or rewinds
+    // the originating run and never receives native tool capabilities.
+    const result = await native.handle(
+      {
+        model,
+        max_tokens: 3000,
+        messages: [
+          {
+            role: 'user',
+            content: `Summarize this conversation for continuation. Preserve tasks, constraints, decisions and unresolved work. Do not execute tools. Instructions: ${request.instructions ?? ''}\n${JSON.stringify(request.messages)}`,
+          },
+        ],
+      },
+      JSON.stringify([request.session, `compact-${request.id}`]),
+      request.signal,
+      undefined,
+      request.context,
+    );
+    return result.content
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('\n');
+  });
+
   async function handleHarness(exchange: ProviderRequest, provider: 'cursor' | 'antigravity') {
     const { res, body, url, signal, agentId, emit, identity } = exchange;
     const bridge = { cursor, antigravity }[provider];
@@ -289,13 +323,24 @@ export function createNativeGateway({
     }
     exchange.startStream();
     const displayRows = provider === 'cursor' && modBridge.available(nativeBody);
-    const result = await bridge.handle(
-      nativeBody,
-      scope,
-      signal,
-      body.stream ? emit : undefined,
-      exchange.permissionContext,
-      displayRows ? (observation) => modBridge.observe(scope, observation) : undefined,
+    modBridge.begin(scope, body.model ?? provider);
+    const result = await bridge
+      .handle(
+        nativeBody,
+        scope,
+        signal,
+        body.stream ? emit : undefined,
+        exchange.permissionContext,
+        displayRows ? (observation) => modBridge.observe(scope, observation) : undefined,
+      )
+      .catch((error: unknown) => {
+        modBridge.complete(scope, signal.aborted ? 'cancelled' : 'failed');
+        throw error;
+      });
+    permissionModes?.finishModCompaction(
+      identity.session,
+      agentId,
+      exchange.permissionContext?.compaction,
     );
     rememberResult(exchange, result);
     onEvent({
@@ -626,7 +671,7 @@ export function createNativeGateway({
       const url = new URL(req.url ?? '', 'http://localhost');
       const { raw, parsed, body } = await readRequest(req, agentCatalog);
       if (url.pathname.startsWith('/multi/mod/')) {
-        return handleModRoute(req, res, url, parsed, modBridge, permissionModes);
+        return handleModRoute(req, res, url, parsed, modBridge, permissionModes, compactions);
       }
       const external = externalModel(body.model);
       assertProviderEnabled(external, enabledProviders);
@@ -696,7 +741,7 @@ async function readRequest(req: http.IncomingMessage, catalog?: AgentCatalog) {
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > MAX_BODY) {
+    if (size > (req.url?.startsWith('/multi/mod/') ? 32 * 1024 : MAX_BODY)) {
       throw new RequestTooLarge();
     }
     chunks.push(chunk);
@@ -884,6 +929,15 @@ function authorizeRequest(
       '/multi/mod/session',
       '/multi/mod/worker',
       '/multi/mod/mode',
+      '/multi/mod/policy',
+      '/multi/mod/offer',
+      '/multi/mod/telemetry',
+      '/multi/mod/lifecycle',
+      '/multi/mod/detach',
+      '/multi/mod/compact/precompute',
+      '/multi/mod/compact/run',
+      '/multi/mod/compact/authorize',
+      '/multi/mod/compact/cancel',
       ...(guardAuto ? ['/multi/permission'] : []),
     ].includes(url.pathname) ||
     !['POST', 'GET', 'HEAD'].includes(req.method ?? '')

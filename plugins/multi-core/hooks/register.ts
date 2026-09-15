@@ -1,5 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code';
 import { register as registerCompaction } from './compact.ts';
+import { register as registerLifecycle } from './lifecycle.ts';
 import { register as registerWorkers } from './workers.ts';
 
 const displayTools = [
@@ -25,6 +26,8 @@ type GatewayResponse = {
   isError?: boolean;
   terminal?: boolean;
   accepted?: boolean;
+  generation?: number | string;
+  status?: string;
   stale?: boolean;
   events?: Array<{
     sequence: number;
@@ -40,10 +43,12 @@ type GatewayResponse = {
 
 // Claude Code 2.1.272 loads exactly one entry from hooks.json `modules`; compose here.
 export const register: Register = (on, options) => {
+  let generation: number | undefined;
+  registerLifecycle(on, options);
   registerCompaction(on, options);
   registerWorkers(on, options);
   for (const [name, _description] of displayTools) {
-    const tool = `${prefix}${name}`;
+    const tool = `${prefix}${name}` as const;
     on('tool.call', { tool }, async (_$, event) => {
       // The tool's own arguments sit beside the reserved keys on the envelope.
       const input = event as unknown as DisplayInput;
@@ -91,33 +96,40 @@ export const register: Register = (on, options) => {
         inputSchema: {
           type: 'object',
           properties: {
-            description: { type: 'string' },
-            output: { type: 'string' },
+            description: { type: 'string', maxLength: 160 },
+            output: { type: 'string', maxLength: 4096 },
             isError: { type: 'boolean' },
-            toolUseId: { type: 'string' },
+            toolUseId: { type: 'string', maxLength: 512 },
           },
           required: ['description', 'output', 'isError', 'toolUseId'],
           additionalProperties: false,
         },
       });
     }
-    await request($, '/multi/mod/session', {
+    const response = await request($, '/multi/mod/session', {
       sessionId: await $.session.id(),
       cwd: await $.session.cwd(),
       model: await $.session.model(),
       event: 'start',
     });
+    generation = typeof response?.generation === 'number' ? response.generation : undefined;
     return next(event);
   });
   on('classic.UserPromptSubmit', async ($, event, next) => {
     if (!(await active($))) {
       return next(event);
     }
+    const policyGeneration = await preparePolicy($, event.session_id, event.cwd, generation);
+    if (!policyGeneration) {
+      return { block: 'Multi policy is not ready; submit the prompt again.' };
+    }
     const response = await request($, '/multi/mod/session', {
+      policyGeneration,
       sessionId: event.session_id,
       cwd: event.cwd,
       model: await $.session.model(),
       event: 'prompt',
+      generation,
       permissionMode: event.permission_mode,
     });
     if (!response?.accepted) {
@@ -125,10 +137,7 @@ export const register: Register = (on, options) => {
         block: 'Multi permission snapshot was not acknowledged; native execution is unavailable.',
       };
     }
-    return next(event);
-  });
-  on('turn.complete', async ($, event, next) => {
-    await $.ui.status(undefined);
+    generation = typeof response.generation === 'number' ? response.generation : undefined;
     return next(event);
   });
 };
@@ -145,7 +154,10 @@ async function request($: EngineInterface, route: string, payload: Record<string
   if (!base || !token) {
     return undefined;
   }
-  const body = JSON.stringify(payload).slice(0, maxBody);
+  const body = JSON.stringify(payload);
+  if (encodeURIComponent(body).replace(/%[A-F\d]{2}/gi, 'x').length > maxBody) {
+    return undefined;
+  }
   const isGet = route.startsWith('/multi/mod/display?');
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -166,4 +178,31 @@ async function request($: EngineInterface, route: string, payload: Record<string
       clearTimeout(timer);
     }
   }
+}
+
+async function preparePolicy(
+  $: EngineInterface,
+  sessionId: string,
+  cwd: string,
+  sourceGeneration: number | undefined,
+) {
+  const started = await request($, '/multi/mod/policy', { sessionId, cwd, sourceGeneration });
+  if (typeof started?.generation !== 'string') {
+    return undefined;
+  }
+  const deadline = Date.now() + 4000;
+  while (Date.now() < deadline) {
+    const result = await request($, '/multi/mod/policy', {
+      sessionId,
+      generation: started.generation,
+    });
+    if (result?.status === 'ready') {
+      return started.generation;
+    }
+    if (!result || result.status === 'failed') {
+      return undefined;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return undefined;
 }

@@ -115,11 +115,21 @@ async function main() {
   const agents = workerDefinitions(codexSignedIn, cursorModels, Boolean(zenKey), antigravityModels);
   const modBridge = new ModBridge();
   const settingsDir = await mkdtemp(path.join(os.tmpdir(), 'multi-native-settings-'));
-  const permissionModes = [cursor, antigravity].some(Boolean)
-    ? new PermissionModes((cwd) =>
-        loadWorkerPermissions(cwd, agents, [...args, '--settings', JSON.stringify(callerSettings)]),
-      )
-    : undefined;
+  const permissionModes = new PermissionModes(
+    (cwd) =>
+      loadWorkerPermissions(cwd, agents, [...args, '--settings', JSON.stringify(callerSettings)]),
+    async (cwd) => {
+      if (!cursor && !antigravity) {
+        return {};
+      }
+      try {
+        return await checkCursorSettings(cwd, args, callerSettings);
+      } catch (error) {
+        return { nativePermissionError: String(error) };
+      }
+    },
+  );
+  await permissionModes.precompute(process.cwd());
   const { approvalBridge, approvalProviders } = await discoverApprovals(
     authFile,
     cursorModels.length > 0,

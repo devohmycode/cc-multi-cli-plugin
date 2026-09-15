@@ -24,6 +24,7 @@ test('launcher discovers GPT review with Claude subscription, API credentials, o
     `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2);
+if (args.includes('plugin') && args.includes('list')) { console.log('[]'); process.exit(0); }
 if (args[0] === '--version') { console.log('2.1.272'); process.exit(0); }
 const emit = (value) => {
   const base = process.env.MULTI_MOD_GATEWAY_URL;

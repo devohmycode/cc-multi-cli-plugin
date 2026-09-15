@@ -8,6 +8,21 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ### Claude Mods runtime
 
+- Precompute worker catalogs at launch and refresh settings/catalog policy through
+  bounded gateway generation jobs. Worker offers hide unknown definitions; spawns
+  validate parent, model, workspace and generation, and native dispatch waits for
+  child-start acknowledgement. Generated `--agents` remains in use.
+- Show Cursor lifecycle, model, worker and elapsed time through native status output.
+  Gateway-streamed tool rows remain display-only. Model/effort telemetry forwards
+  the engine stream unchanged; provider execution stays in the gateway.
+- Prepare bounded native compaction summaries outside the hook budget and consume
+  them only for the same transcript prefix, instructions, scope and generation.
+  Cancellation discards late results. Replace `classic.PreCompact` with explicit
+  generation-scoped authorization for core fallback; all Antigravity summary tools
+  remain denied, and missing authorization skips compaction.
+- Bound mod requests to 32 KiB, remove unused retained row results, bound session and
+  pending-action state, and preserve compaction restrictions for workers.
+
 - Make Claude Mods the only display-row and permission synchronization path, removing the MCP display server and row store. The launcher requires Claude Code 2.1.272 or newer and enables function hooks; wrapped rows and mode, worker and compaction snapshots use authenticated loopback routes with generation-based fail-closed acknowledgements.
 
 ### Session lifetime

@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import { mergeCursorPermissions } from '../../../multi-cursor/src/permissions.ts';
 import type { WorkerPermissions } from './agent-definitions.ts';
+import { ModPolicies } from './mod-policy.ts';
 
 const MODES = ['default', 'acceptEdits', 'auto', 'dontAsk', 'bypassPermissions', 'plan'] as const;
 type PermissionMode = (typeof MODES)[number];
 export interface PermissionContext extends WorkerPermissions {
   permissionMode: PermissionMode;
   cwd?: string;
+  model?: string;
   compaction?: string;
 }
 
@@ -25,27 +28,81 @@ function requiredString(value: unknown, name: string): string {
 
 /** Prompt-time snapshots: the existing selector takes effect at the next prompt. */
 export class PermissionModes {
+  readonly policies: ModPolicies;
+  private readonly compactions = new Map<string, { id: string; previous: PermissionContext }>();
   private readonly parents = new Map<string, PermissionContext>();
-  private readonly workers = new Map<string, WorkerPermissions & { cwd: string }>();
-  private readonly pendingWorkers = new Map<string, WorkerPermissions & { cwd: string }>();
+  private readonly workers = new Map<
+    string,
+    WorkerPermissions & { cwd: string; compaction?: string }
+  >();
+  private readonly pendingWorkers = new Map<
+    string,
+    WorkerPermissions & { cwd: string; type: string; expiresAt: number }
+  >();
+  private readonly catalogs = new Map<string, Record<string, WorkerPermissions>>();
   private readonly definitions: (cwd: string) => Promise<Record<string, WorkerPermissions>>;
 
-  constructor(definitions: (cwd: string) => Promise<Record<string, WorkerPermissions>>) {
+  constructor(
+    definitions: (cwd: string) => Promise<Record<string, WorkerPermissions>>,
+    restrictions: (cwd: string) => Promise<WorkerPermissions> = async () => ({}),
+  ) {
     this.definitions = definitions;
+    this.policies = new ModPolicies(async (cwd) => ({
+      cwd,
+      workers: await definitions(cwd),
+      restrictions: await restrictions(cwd),
+    }));
+  }
+
+  beginPolicy(session: string, cwd: string) {
+    this.parents.delete(session);
+    for (const key of this.compactions.keys()) {
+      if (JSON.parse(key)[0] === session) {
+        this.compactions.delete(key);
+      }
+    }
+    for (const key of this.pendingWorkers.keys()) {
+      if (JSON.parse(key)[0] === session) {
+        this.pendingWorkers.delete(key);
+      }
+    }
+    return this.policies.begin(session, cwd);
+  }
+
+  admitPolicy(session: string, generation: string, context: PermissionContext) {
+    const policy = this.policies.consume(session, generation, requiredString(context.cwd, 'cwd'));
+    remember(this.catalogs, policy.cwd, policy.workers);
+    this.recordModSession(session, {
+      ...mergeCursorPermissions(context, policy.restrictions),
+      nativePermissionError: policy.restrictions.nativePermissionError,
+    });
+  }
+
+  async precompute(cwd: string): Promise<void> {
+    const catalog = await this.definitions(cwd);
+    remember(this.catalogs, cwd, structuredClone(catalog));
+  }
+
+  offered(cwd: string, type: string): boolean {
+    const catalog = this.catalogs.get(cwd);
+    return Boolean(catalog && Object.hasOwn(catalog, type) && !catalog[type].nativePermissionError);
   }
 
   recordModSession(session: string, context: PermissionContext): void {
     this.parents.delete(session);
+    permissionMode(context.permissionMode);
     remember(this.parents, session, structuredClone(context));
   }
 
   recordModWorker(
     session: string,
     agent: string,
-    context: WorkerPermissions & { cwd?: string },
+    context: WorkerPermissions & { cwd?: string; compaction?: string },
   ): void {
     remember(this.workers, JSON.stringify([session, agent]), {
       cwd: context.cwd ?? process.cwd(),
+      model: context.model,
+      compaction: context.compaction,
       permissionMode: context.permissionMode,
       tools: context.tools?.slice(),
       disallowedTools: context.disallowedTools?.slice(),
@@ -58,15 +115,45 @@ export class PermissionModes {
   async prepareModWorker(session: string, input: Record<string, unknown>): Promise<string> {
     const type = requiredString(input.subagentType, 'subagentType');
     const cwd = requiredString(input.cwd, 'cwd');
-    permissionMode(input.permissionMode);
-    const definitions = await this.definitions(cwd);
+    const parent = this.resolve(
+      session,
+      typeof input.parentAgentId === 'string' ? input.parentAgentId : undefined,
+    );
+    if (permissionMode(input.permissionMode) !== parent.permissionMode) {
+      throw new Error('Worker parent permission mode is inconsistent');
+    }
+    if (parent.model && input.parentModel !== parent.model) {
+      throw new Error('Worker parent model is inconsistent');
+    }
+    if (parent.cwd && parent.cwd !== cwd) {
+      throw new Error('Worker workspace has no acknowledged policy');
+    }
+    const definitions = this.catalogs.get(cwd);
+    if (!definitions) {
+      throw new Error('Worker catalog has not been precomputed for this workspace');
+    }
     const definition = Object.hasOwn(definitions, type) ? definitions[type] : undefined;
     if (!definition) {
       throw new Error(`Cannot resolve permissions for Claude worker ${type}`);
     }
+    if (definition.nativePermissionError) {
+      throw new Error(definition.nativePermissionError);
+    }
+    if (
+      definition.model &&
+      definition.model !== 'inherit' &&
+      input.model !== undefined &&
+      input.model !== definition.model
+    ) {
+      throw new Error('Worker model is inconsistent with its catalog definition');
+    }
+    this.prunePendingWorkers();
     const token = randomUUID();
     remember(this.pendingWorkers, JSON.stringify([session, token]), {
       cwd,
+      type,
+      expiresAt: Date.now() + 15000,
+      model: definition.model === 'inherit' ? parent.model : (definition.model ?? parent.model),
       // A definition without a mode inherits the parent's at resolve time.
       permissionMode: definition.permissionMode,
       tools: definition.tools?.slice(),
@@ -78,33 +165,76 @@ export class PermissionModes {
     return token;
   }
 
+  private prunePendingWorkers() {
+    for (const [key, pending] of this.pendingWorkers) {
+      if (pending.expiresAt <= Date.now()) {
+        this.pendingWorkers.delete(key);
+      }
+    }
+  }
+
+  startPreparedModWorker(session: string, agent: string, type: string, cwd: string): void {
+    const candidates = [...this.pendingWorkers].filter(
+      ([key, value]) =>
+        JSON.parse(key)[0] === session &&
+        value.type === type &&
+        value.cwd === cwd &&
+        value.expiresAt > Date.now(),
+    );
+    if (candidates.length !== 1) {
+      throw new Error('Worker start has no unique acknowledged spawn');
+    }
+    const [key] = candidates[0];
+    this.recordPreparedModWorker(session, agent, JSON.parse(key)[1]);
+  }
+
   recordPreparedModWorker(session: string, agent: string, token: unknown): void {
+    requiredString(agent, 'agentId');
+    if (this.workers.has(JSON.stringify([session, agent]))) {
+      throw new Error('Worker identity is already registered');
+    }
     const workerToken = requiredString(token, 'workerToken');
     const key = JSON.stringify([session, workerToken]);
     const context = this.pendingWorkers.get(key);
     this.pendingWorkers.delete(key);
-    if (!context) {
+    if (!context || context.expiresAt <= Date.now()) {
       throw new Error('Worker policy acknowledgement is unavailable');
     }
     this.recordModWorker(session, agent, context);
   }
 
-  recordModCompaction(session: string, input: Record<string, unknown>): void {
-    this.recordCompaction(session, {
-      session_id: session,
-      hook_event_name: 'PreCompact',
-      trigger: input.trigger,
-      cwd: input.cwd,
-      permission_mode: input.permissionMode,
-    });
+  authorizeModCompaction(session: string, agent?: string): void {
+    const current = this.resolve(session, agent);
+    const key = JSON.stringify([session, agent ?? 'main']);
+    const previous = this.compactions.get(key)?.previous ?? current;
+    const context = { ...current, tools: [], compaction: randomUUID() };
+    remember(this.compactions, key, { id: context.compaction, previous });
+    if (agent) {
+      this.recordModWorker(session, agent, context);
+    } else {
+      this.recordModSession(session, context);
+    }
+  }
+
+  finishModCompaction(session: string, agent: string | undefined, id: string | undefined): void {
+    const key = JSON.stringify([session, agent ?? 'main']);
+    const saved = this.compactions.get(key);
+    if (!id || saved?.id !== id) {
+      return;
+    }
+    this.compactions.delete(key);
+    if (this.resolve(session, agent).compaction !== id) {
+      return;
+    }
+    if (agent) {
+      this.recordModWorker(session, agent, saved.previous);
+    } else {
+      this.recordModSession(session, saved.previous);
+    }
   }
 
   async record(input: Record<string, unknown>): Promise<void> {
     const session = requiredString(input.session_id, 'session_id');
-    if (input.hook_event_name === 'PreCompact') {
-      this.recordCompaction(session, input);
-      return;
-    }
     if (input.hook_event_name === 'UserPromptSubmit') {
       // Clear first: a malformed new snapshot must not retain earlier permissions.
       this.parents.delete(session);
@@ -136,22 +266,16 @@ export class PermissionModes {
     });
   }
 
-  private recordCompaction(session: string, input: Record<string, unknown>): void {
-    const previous = this.parents.get(session);
+  forgetSession(session: string): void {
     this.parents.delete(session);
-    if (input.trigger !== 'manual' && input.trigger !== 'auto') {
-      throw new Error('Unsupported compaction trigger');
+    this.policies.forget(session);
+    for (const entries of [this.workers, this.pendingWorkers, this.compactions]) {
+      for (const key of entries.keys()) {
+        if (JSON.parse(key)[0] === session) {
+          entries.delete(key);
+        }
+      }
     }
-    remember(this.parents, session, {
-      // Some Claude builds omit mode on PreCompact. Retain the authenticated
-      // snapshot, or use Plan for this tool-free summary after a gateway restart.
-      permissionMode:
-        input.permission_mode === undefined
-          ? (previous?.permissionMode ?? 'plan')
-          : permissionMode(input.permission_mode),
-      cwd: requiredString(input.cwd, 'cwd'),
-      compaction: randomUUID(),
-    });
   }
 
   resolve(session: string, agent?: string): PermissionContext {
@@ -167,12 +291,17 @@ export class PermissionModes {
       throw new Error('Claude worker permission context is unavailable');
     }
     const inherited = ['auto', 'acceptEdits', 'bypassPermissions'].includes(parent.permissionMode);
-    return {
-      ...worker,
-      permissionMode: inherited
-        ? parent.permissionMode
-        : permissionMode(worker.permissionMode ?? parent.permissionMode),
-    };
+    return mergeCursorPermissions(
+      {
+        ...worker,
+        nativePermissionError: worker.nativePermissionError ?? parent.nativePermissionError,
+        ...(parent.compaction ? { compaction: parent.compaction } : {}),
+        permissionMode: inherited
+          ? parent.permissionMode
+          : permissionMode(worker.permissionMode ?? parent.permissionMode),
+      },
+      parent,
+    );
   }
 }
 
