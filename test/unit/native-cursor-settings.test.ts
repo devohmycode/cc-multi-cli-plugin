@@ -6,6 +6,10 @@ import path from 'node:path';
 import test, { mock } from 'node:test';
 import { checkCursorSettings } from '../../plugins/multi-core/src/gateway/cursor-settings.ts';
 
+async function temporaryDirectory(): Promise<string> {
+  return fs.mkdtemp(path.join(os.tmpdir(), 'cursor-settings-'));
+}
+
 let inventory: unknown[] = [];
 test.beforeEach(() => {
   mock.restoreAll();
@@ -60,17 +64,28 @@ test('native settings admission refuses CLI restrictions and caller hooks but ac
   assert.deepEqual(policy.tools, ['Read']);
   assert.deepEqual(policy.disallowedTools, ['Bash', 'Write']);
   await assert.rejects(
-    checkCursorSettings('/tmp', ['--setting-sources=', '--tools=Bash(git:*)'], {}),
+    checkCursorSettings(
+      await temporaryDirectory(),
+      ['--setting-sources=', '--tools=Bash(git:*)'],
+      {},
+    ),
     /unsupported policy/,
   );
   for (const args of [['--setting-sources'], ['--setting-sources=managed']]) {
-    await assert.rejects(checkCursorSettings('/tmp', args, {}), /setting-sources/);
+    await assert.rejects(
+      checkCursorSettings(await temporaryDirectory(), args, {}),
+      /setting-sources/,
+    );
   }
-  await checkCursorSettings('/tmp', ['--setting-sources=', '--allowedTools', 'Bash'], {
-    permissions: { allow: ['Bash'] },
-  });
+  await checkCursorSettings(
+    await temporaryDirectory(),
+    ['--setting-sources=', '--allowedTools', 'Bash'],
+    {
+      permissions: { allow: ['Bash'] },
+    },
+  );
   // Claude hooks never run for native tools, so they must not block admission.
-  await checkCursorSettings('/tmp', ['--setting-sources='], {
+  await checkCursorSettings(await temporaryDirectory(), ['--setting-sources='], {
     hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'log' }] }] },
   });
 });
@@ -85,28 +100,137 @@ test('native settings admission translates managed deny and refuses unknown cont
     return original(...args);
   });
   assert.deepEqual(
-    (await checkCursorSettings('/tmp', ['--setting-sources='], {})).disallowedTools,
+    (await checkCursorSettings(await temporaryDirectory(), ['--setting-sources='], {}))
+      .disallowedTools,
     ['Bash'],
   );
   policy = JSON.stringify({ policyHelper: '/tmp/policy' });
   await assert.rejects(
-    checkCursorSettings('/tmp', ['--setting-sources='], {}),
+    checkCursorSettings(await temporaryDirectory(), ['--setting-sources='], {}),
     /cannot enforce managed policy/,
   );
 });
 
 test('native CLI tool policy accepts empty/default lists and variadic names', async () => {
   assert.deepEqual(
-    (await checkCursorSettings('/tmp', ['--setting-sources', '', '--tools', ''], {})).tools,
+    (
+      await checkCursorSettings(
+        await temporaryDirectory(),
+        ['--setting-sources', '', '--tools', ''],
+        {},
+      )
+    ).tools,
     [],
   );
   assert.equal(
-    (await checkCursorSettings('/tmp', ['--setting-sources=', '--tools', 'default'], {})).tools,
+    (
+      await checkCursorSettings(
+        await temporaryDirectory(),
+        ['--setting-sources=', '--tools', 'default'],
+        {},
+      )
+    ).tools,
     undefined,
   );
   assert.deepEqual(
-    (await checkCursorSettings('/tmp', ['--setting-sources=', '--tools', 'Read', 'Grep'], {}))
-      .tools,
+    (
+      await checkCursorSettings(
+        await temporaryDirectory(),
+        ['--setting-sources=', '--tools', 'Read', 'Grep'],
+        {},
+      )
+    ).tools,
     ['Read', 'Grep'],
   );
+});
+
+test('native settings admission discovers macOS managed preferences', async () => {
+  const commands: string[][] = [];
+  const policy = await checkCursorSettings(
+    '/workspace',
+    ['--setting-sources='],
+    {},
+    {
+      platform: 'darwin',
+      runCommand: async (command, args) => {
+        commands.push([command, ...args]);
+        return JSON.stringify({ permissions: { deny: ['Bash'] } });
+      },
+      readDir: async () => {
+        const error = new Error('missing') as NodeJS.ErrnoException;
+        error.code = 'ENOENT';
+        throw error;
+      },
+      readFile: (async () => {
+        const error = new Error('missing') as NodeJS.ErrnoException;
+        error.code = 'ENOENT';
+        throw error;
+      }) as unknown as typeof fs.readFile,
+    },
+  );
+  assert.deepEqual(policy.disallowedTools, ['Bash']);
+  assert.deepEqual(commands, [['defaults', 'read', 'com.anthropic.claudecode']]);
+});
+
+test('native settings admission discovers Windows HKLM and HKCU registry policies', async () => {
+  const commands: string[][] = [];
+  const policy = await checkCursorSettings(
+    'C:\\workspace',
+    ['--setting-sources='],
+    {},
+    {
+      platform: 'win32',
+      runCommand: async (command, args) => {
+        commands.push([command, ...args]);
+        if (args[0] === 'query' && args[1]?.startsWith('HKLM')) {
+          return 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Policies\\\\ClaudeCode\\n    Settings    REG_SZ    {"permissions":{"deny":["Write"]}}';
+        }
+        return '';
+      },
+      readDir: async () => {
+        const error = new Error('missing') as NodeJS.ErrnoException;
+        error.code = 'ENOENT';
+        throw error;
+      },
+      readFile: (async () => {
+        const error = new Error('missing') as NodeJS.ErrnoException;
+        error.code = 'ENOENT';
+        throw error;
+      }) as unknown as typeof fs.readFile,
+    },
+  );
+  assert.deepEqual(policy.disallowedTools, ['Write']);
+  assert.equal(commands.length, 2);
+  assert.match(commands[0].join(' '), /HKLM.*ClaudeCode/);
+  assert.match(commands[1].join(' '), /HKCU.*ClaudeCode/);
+});
+
+test('native settings admission treats WSL as Linux managed file discovery', async () => {
+  const files = new Map([
+    ['/etc/claude-code/managed-settings.json', '{"permissions":{"deny":["Read"]}}'],
+  ]);
+  const policy = await checkCursorSettings(
+    '/workspace',
+    ['--setting-sources='],
+    {},
+    {
+      platform: 'linux',
+      osRelease: '6.1.0-microsoft-standard-WSL2',
+      readDir: async () => {
+        const error = new Error('missing') as NodeJS.ErrnoException;
+        error.code = 'ENOENT';
+        throw error;
+      },
+      readFile: (async (file: Parameters<typeof fs.readFile>[0]) => {
+        const value = files.get(String(file));
+        if (value !== undefined) {
+          return value;
+        }
+        const error = new Error('missing') as NodeJS.ErrnoException;
+        error.code = 'ENOENT';
+        throw error;
+      }) as unknown as typeof fs.readFile,
+    },
+  );
+  assert.deepEqual(policy.disallowedTools, ['Read']);
 });

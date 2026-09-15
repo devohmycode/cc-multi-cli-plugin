@@ -7,6 +7,10 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import {
+  setup as installSetup,
+  uninstall as installUninstall,
+} from '../../plugins/multi-core/src/install/installation.ts';
+import {
   providerSelection,
   settingsArguments,
 } from '../../plugins/multi-core/src/install/plugins.ts';
@@ -130,6 +134,45 @@ test('edited shell blocks and project-only executable cores fail explicitly', as
   entries[0].scope = 'project';
   await writeFile(f.listing, JSON.stringify(entries));
   await assert.rejects(f.invoke('claude-multi', []), /user scope/);
+});
+
+test('Windows installation writes quoted PowerShell and cmd shims and uninstalls exactly', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'multi-win-install-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const home = path.join(directory, "home with spaces and 'quotes'");
+  await mkdir(home, { recursive: true });
+  const profile = path.join(home, 'profile.ps1');
+  await writeFile(profile, '# existing profile\r\n');
+  const state = await installSetup('powershell', process.execPath, {
+    platform: 'win32',
+    homedir: home,
+    env: { PATH: '', PATHEXT: '.COM;.EXE;.BAT;.CMD', PROFILE: profile },
+  });
+  const bin = path.join(home, '.local', 'share', 'multi-cli', 'bin');
+  const cmd = await readFile(path.join(bin, 'claude-multi.cmd'), 'utf8');
+  const ps = await readFile(path.join(bin, 'claude-multi.ps1'), 'utf8');
+  assert.match(cmd, /process\\.execPath|node/);
+  assert.match(ps, /''quotes''|quotes/);
+  assert.match(state.block, /\$env:Path/);
+  await installUninstall(path.dirname(bin));
+  assert.equal(await readFile(profile, 'utf8'), '# existing profile\r\n');
+  await assert.rejects(readFile(path.join(bin, 'claude-multi.cmd')), /ENOENT/);
+});
+
+test('Windows executable discovery uses PATHEXT and does not require mode bits', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'multi-win-resolution-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const home = path.join(directory, 'home');
+  const bin = path.join(home, 'npm global bin');
+  await mkdir(bin, { recursive: true });
+  const claude = path.join(bin, 'claude.CMD');
+  await writeFile(claude, 'shim');
+  const state = await installSetup('pwsh', claude, {
+    platform: 'win32',
+    homedir: home,
+    env: { PATH: bin, PATHEXT: '.CMD', PROFILE: path.join(home, 'profile.ps1') },
+  });
+  assert.equal(state.claude, claude);
 });
 
 test('provider selection and native settings arguments preserve explicit disablement', () => {

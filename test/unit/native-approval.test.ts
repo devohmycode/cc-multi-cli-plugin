@@ -265,7 +265,7 @@ test('gateway isolates review context by worker and blocks classifier fallback f
 
 test('headerless classifier uses pending worker context and rejects ambiguous actions', async (t) => {
   const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
-  const dir = await mkdtemp('/tmp/approval-scope-');
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'approval-scope-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   await writeFile(
     `${dir}/auth.json`,
@@ -372,8 +372,8 @@ test('headerless classifier uses pending worker context and rejects ambiguous ac
     'worker-b',
     'node b.js',
     'plan',
-    'cd /tmp/unsafe;pwd && node b.js',
-    '/tmp/unsafe;pwd',
+    `${process.execPath} -e ${JSON.stringify('process.stdout.write("unsafe")')}`,
+    path.join(os.tmpdir(), 'unsafe'),
   );
   assert.equal((await send(request(1, session, 'node b.js'))).status, 400);
   await prepare('worker-b', 'node b.js', 'plan', `cd ${dir} && node b.js`);

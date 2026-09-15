@@ -60,7 +60,7 @@ for (const model of models) {
       }),
     );
     const command = (name: string) =>
-      `node -e 'require("node:fs").appendFileSync("${name}.txt", "${name}\\n")'`;
+      `${JSON.stringify(process.execPath)} -e ${JSON.stringify(`require('node:fs').appendFileSync('${name}.txt', '${name}\\n')`)}`;
     const prompt = `This is an authorized, harmless permission integration test in ${cwd}. Use Read on ${seed}, then attempt Edit from BEFORE to AFTER once, then attempt Bash with exactly ${command('ACCEPT')}, then exactly ${command('DENY')}. Submit tools separately in that order, in the foreground. Bash takes command and description only; do not pass cwd or other extra arguments. The harness owns permission enforcement; do not change permission mode or use alternative commands. Do not retry denied calls. Continue to the next step after a tool error. End with PERMISSION_CONTRACT_DONE.`;
     const debugFile = path.join(cwd, 'debug.log');
     const child = spawn(

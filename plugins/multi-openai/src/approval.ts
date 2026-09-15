@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { open, readdir, readFile, realpath } from 'node:fs/promises';
+import { lstat, open, readdir, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type {
   ApprovalAction,
@@ -49,7 +49,11 @@ export async function discoverOpenAIReviewer(
 }
 
 /** No shell, network, symlink escapes, or writes in the reviewer's investigation. */
-export async function inspectApprovalPath(cwd: string, input: unknown): Promise<unknown> {
+export async function inspectApprovalPath(
+  cwd: string,
+  input: unknown,
+  { platform = process.platform }: { platform?: NodeJS.Platform } = {},
+): Promise<unknown> {
   if (
     !record(input) ||
     typeof input.path !== 'string' ||
@@ -58,12 +62,27 @@ export async function inspectApprovalPath(cwd: string, input: unknown): Promise<
     throw new Error('Expected a path');
   }
   const root = await realpath(cwd);
-  const target = await realpath(path.resolve(root, input.path));
+  const requested = path.resolve(root, input.path);
+  const requestedStat = await lstat(requested);
+  if (requestedStat.isSymbolicLink()) {
+    throw new Error('Inspection refuses symbolic links and reparse points');
+  }
+  const target = await realpath(requested);
   const relative = path.relative(root, target);
   if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error('Inspection is limited to the working directory');
   }
-  const file = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  // Windows does not support O_NOFOLLOW/O_NONBLOCK. lstat rejects symlinks
+  // before opening, including reparse-point links exposed as symbolic links.
+  const targetStat = await lstat(target);
+  if (targetStat.isSymbolicLink()) {
+    throw new Error('Inspection refuses symbolic links and reparse points');
+  }
+  const flags =
+    platform === 'win32'
+      ? constants.O_RDONLY
+      : constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+  const file = await open(target, flags);
   try {
     const stat = await file.stat();
     if (stat.isDirectory()) {

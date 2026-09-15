@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { AgentOptions, Run, SDKAgent } from '@cursor/sdk';
 import type { WorkerPermissions } from '../../multi-core/src/gateway/agent-definitions.ts';
+import { atomicWriteFile } from '../../multi-core/src/gateway/atomic-write.ts';
 import type {
   Emit,
   MessagesRequest,
@@ -83,6 +84,7 @@ export class CursorHarness {
   private readonly creating = new Set<string>();
   private cwd: string;
   private readonly stateDirectory: string;
+  private readonly platform: NodeJS.Platform;
   private readonly resumeAgent: (id: string, options: AgentOptions) => Promise<Agent>;
   private readonly createAgent: CreateCursorHarnessAgent;
   private readonly checkPermissions: () => Promise<WorkerPermissions>;
@@ -95,7 +97,10 @@ export class CursorHarness {
     {
       cwd = process.cwd(),
       checkPermissions = async () => ({}),
-      stateDirectory = path.join(homedir(), '.cursor', 'multi-harness'),
+      stateDirectory,
+      platform = process.platform,
+      env = process.env,
+      home = homedir(),
       resumeAgent = async (id: string, config: AgentOptions) =>
         (await import('@cursor/sdk')).Agent.resume(id, config),
       getRun = async (id: string, cwd: string) =>
@@ -107,15 +112,25 @@ export class CursorHarness {
       checkPermissions?: () => Promise<WorkerPermissions>;
       getRun?: (id: string, cwd: string) => Promise<Run>;
       stateDirectory?: string;
+      platform?: NodeJS.Platform;
+      env?: NodeJS.ProcessEnv;
+      home?: string;
       createAgent?: CreateCursorHarnessAgent;
       resumeAgent?: (id: string, config: AgentOptions) => Promise<Agent>;
     } = {},
   ) {
     this.options = new Map(options.map((option) => [option.model, option]));
+    this.platform = platform;
+    this.stateDirectory =
+      stateDirectory ??
+      path.join(
+        platform === 'win32' ? (env.LOCALAPPDATA ?? path.join(home, 'AppData', 'Local')) : home,
+        '.cursor',
+        'multi-harness',
+      );
     this.cwd = cwd;
     this.checkPermissions = checkPermissions;
     this.getRun = getRun;
-    this.stateDirectory = stateDirectory;
     this.resumeAgent = resumeAgent;
     this.createAgent = createAgent;
   }
@@ -293,7 +308,7 @@ export class CursorHarness {
         response: recovered.response,
         replay: { key: pending.key, events: recovered.events },
       };
-      await atomicJson(file, updated);
+      await atomicJson(file, updated, this.platform);
       return updated;
     } finally {
       await release();
@@ -418,23 +433,28 @@ export class CursorHarness {
   }
 
   private saveSession(session: Session) {
-    return atomicJson(session.file, {
-      version: 2,
-      agentId: session.agent.agentId,
-      response: session.response,
-      replay: session.replay,
-      interrupted: session.interrupted,
-      pendingRun: session.pendingRun,
-    });
+    return atomicJson(
+      session.file,
+      {
+        version: 2,
+        agentId: session.agent.agentId,
+        response: session.response,
+        replay: session.replay,
+        interrupted: session.interrupted,
+        pendingRun: session.pendingRun,
+      },
+      this.platform,
+    );
   }
 
   private async archiveReply(session: Session) {
     if (session.replay && session.response) {
       // Archive the previous reply before replacing the single atomic session commit.
-      await atomicJson(path.join(this.stateDirectory, `${session.replay.key}.response.json`), {
-        response: session.response,
-        events: session.replay.events,
-      });
+      await atomicJson(
+        path.join(this.stateDirectory, `${session.replay.key}.response.json`),
+        { response: session.response, events: session.replay.events },
+        this.platform,
+      );
     }
   }
 
@@ -860,10 +880,12 @@ async function readJson(file: string): Promise<unknown> {
   }
 }
 
-async function atomicJson(file: string, value: unknown) {
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  await writeFile(temporary, JSON.stringify(value), { mode: 0o600 });
-  await rename(temporary, file);
+async function atomicJson(
+  file: string,
+  value: unknown,
+  platform: NodeJS.Platform = process.platform,
+) {
+  await atomicWriteFile(file, JSON.stringify(value), { mode: 0o600, platform });
 }
 
 async function bounded(operation: Promise<unknown>) {

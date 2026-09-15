@@ -34,11 +34,24 @@ for (const entry of [
 ]) {
   await cp(path.join(repository, entry), path.join(source, entry), { recursive: true });
 }
+const platform = process.platform;
+let shell = 'bash';
+if (platform === 'darwin') {
+  shell = 'zsh';
+} else if (platform === 'win32') {
+  shell = 'powershell';
+}
+const profile =
+  platform === 'win32'
+    ? path.join(home, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1')
+    : path.join(home, shell === 'zsh' ? '.zshrc' : '.bashrc');
 const env = {
   PATH: process.env.PATH,
   HOME: home,
   CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
-  SHELL: '/bin/bash',
+  ...(platform === 'win32'
+    ? { PSModulePath: process.env.PSModulePath, PROFILE: profile }
+    : { SHELL: `/${shell}` }),
   npm_config_omit: 'dev',
 };
 async function native(args: string[]) {
@@ -98,15 +111,23 @@ const launched = await execute(process.execPath, [launcher], {
 const models: string[] = JSON.parse(launched.stdout);
 assert(models.length > 0 && models.every((model) => model.startsWith('multi/zen/')));
 
-await execute(process.execPath, [path.join(core.installPath, 'plugins/multi-core/src/setup.ts')], {
-  env,
-  cwd: directory,
-});
-const bin = path.join(home, '.local/share/multi-cli/bin');
-await access(path.join(bin, 'claude-multi'), fsConstants.X_OK);
-// Setup must never write a bin/claude that would shadow the real claude command.
-await assert.rejects(access(path.join(bin, 'claude'), fsConstants.X_OK));
-const multi = path.join(bin, 'multi');
+await execute(
+  process.execPath,
+  [path.join(core.installPath, 'plugins/multi-core/src/setup.ts'), '--shell', shell],
+  { env, cwd: directory },
+);
+const bin = path.join(home, '.local', 'share', 'multi-cli', 'bin');
+const multi = platform === 'win32' ? path.join(bin, 'multi.cmd') : path.join(bin, 'multi');
+if (platform === 'win32') {
+  await access(path.join(bin, 'claude-multi.cmd'));
+  await access(path.join(bin, 'claude-multi.ps1'));
+  // Setup must never write a bin/claude that would shadow the real claude command.
+  await assert.rejects(access(path.join(bin, 'claude.cmd')));
+} else {
+  await access(path.join(bin, 'claude-multi'), fsConstants.X_OK);
+  // Setup must never write a bin/claude that would shadow the real claude command.
+  await assert.rejects(access(path.join(bin, 'claude'), fsConstants.X_OK));
+}
 const status = await execute(multi, ['status'], { env, cwd: directory });
 assert.deepEqual(JSON.parse(status.stdout).providers, ['zen']);
 const disabled = await execute(
@@ -120,7 +141,7 @@ const disabled = await execute(
 );
 assert.deepEqual(JSON.parse(disabled.stdout).providers, []);
 await execute(multi, ['uninstall'], { env, cwd: directory });
-assert.equal(await readFile(path.join(home, '.bashrc'), 'utf8'), '');
+assert.equal(await readFile(profile, 'utf8'), '');
 console.log(
   'PASS: core dependency, isolated cache, gateway picker, native enablement, claude-multi without shadowing claude, setup and uninstall. No inference requests.',
 );

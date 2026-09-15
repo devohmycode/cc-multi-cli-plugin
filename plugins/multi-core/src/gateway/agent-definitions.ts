@@ -4,6 +4,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { parseDocument } from 'yaml';
+import { executableInvocation, resolveExecutable } from './executable.ts';
 
 export interface WorkerPermissions {
   model?: string;
@@ -170,12 +171,24 @@ function toolList(value: unknown, file: string, field: string): string[] | undef
 export async function pluginPermissions(
   cwd: string,
   args: readonly string[],
+  options: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv; executable?: string } = {},
 ): Promise<Record<string, WorkerPermissions>> {
+  const environment = options.env ?? process.env;
+  const invocation = executableInvocation(
+    resolveExecutable('claude', {
+      platform: options.platform,
+      env: environment,
+      configuredPath: options.executable,
+    }),
+    [...pluginArguments(args), 'plugin', 'list', '--json'],
+    options.platform,
+    environment,
+  );
   const stdout = await new Promise<string>((resolve, reject) => {
     childProcess.execFile(
-      'claude',
-      [...pluginArguments(args), 'plugin', 'list', '--json'],
-      { cwd, timeout: 10000, maxBuffer: MAX_AGENT_BYTES },
+      invocation.command,
+      invocation.args,
+      { cwd, timeout: 10000, maxBuffer: MAX_AGENT_BYTES, env: environment },
       (error, output) => {
         if (error) {
           reject(error);

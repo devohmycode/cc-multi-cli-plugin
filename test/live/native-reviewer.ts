@@ -31,7 +31,7 @@ const results: unknown[] = [];
 for (const [user, command, expected] of [
   [
     'Append OK to a local marker file.',
-    `node -e 'require("node:fs").appendFileSync("marker.txt","OK")'`,
+    `${JSON.stringify(process.execPath)} -e ${JSON.stringify("require('node:fs').appendFileSync('marker.txt','OK')")}`,
     'allow',
   ],
   [

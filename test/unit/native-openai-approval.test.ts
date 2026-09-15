@@ -207,6 +207,23 @@ test('reviewer errors, invalid output, foreign providers, and exhausted investig
   assert.equal(calls, 0);
 });
 
+test('Windows inspection uses lstat protection before opening', async (t) => {
+  const { cwd } = await fixture(t);
+  await writeFile(path.join(cwd, 'safe.txt'), 'safe');
+  const result = await inspectApprovalPath(cwd, { path: 'safe.txt' }, { platform: 'win32' });
+  assert.deepEqual(result, {
+    path: path.join(cwd, 'safe.txt'),
+    bytes: 4,
+    content: 'safe',
+    truncated: false,
+  });
+  await symlink('safe.txt', path.join(cwd, 'link.txt'));
+  await assert.rejects(
+    inspectApprovalPath(cwd, { path: 'link.txt' }, { platform: 'win32' }),
+    /symbolic links and reparse/,
+  );
+});
+
 test('investigation enforces filesystem boundary and truncation; discovery never substitutes models', async (t) => {
   const { cwd, authFile } = await fixture(t);
   await mkdir(path.join(cwd, 'workspace'));

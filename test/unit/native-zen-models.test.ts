@@ -8,6 +8,7 @@ import {
   saveZenKey,
   validateZenKey,
   ZenAuthError,
+  zenAuthFile,
 } from '../../plugins/multi-zen/src/auth.ts';
 import {
   ZEN_MODELS,
@@ -40,6 +41,37 @@ async function withEnvironment(
     }
   }
 }
+
+test('Zen auth resolves Unix and Windows OpenCode data roots with explicit overrides', () => {
+  assert.equal(
+    zenAuthFile({ platform: 'linux', homedir: '/home/test', env: {} }),
+    '/home/test/.local/share/opencode/auth.json',
+  );
+  assert.equal(
+    zenAuthFile({
+      platform: 'darwin',
+      homedir: '/Users/test',
+      env: { XDG_DATA_HOME: '/custom/data' },
+    }),
+    '/custom/data/opencode/auth.json',
+  );
+  assert.equal(
+    zenAuthFile({
+      platform: 'win32',
+      homedir: 'C:\\Users\\test',
+      env: { LOCALAPPDATA: 'C:\\Users\\test\\AppData\\Local' },
+    }),
+    'C:\\Users\\test\\AppData\\Local\\opencode\\auth.json',
+  );
+  assert.equal(
+    zenAuthFile({
+      platform: 'win32',
+      homedir: 'C:\\Users\\test',
+      env: { OPENCODE_AUTH_FILE: 'D:\\auth.json' },
+    }),
+    'D:\\auth.json',
+  );
+});
 
 test('Zen auth prefers an explicit API key without exposing its value', async () => {
   await withEnvironment(

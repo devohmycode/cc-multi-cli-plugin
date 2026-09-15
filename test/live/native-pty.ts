@@ -1,4 +1,7 @@
-// Python stdlib terminal shared by the native permission integration checks.
+// ConPTY support is deferred. Callers can still run their non-PTY checks on Windows.
+if (process.platform === 'win32') {
+  console.warn('SKIP: native PTY proof requires ConPTY, which is not implemented yet.');
+}
 export const pty = `import os,pty,select,sys,fcntl,termios,struct,signal
 pid,fd=pty.fork()
 if pid==0: os.execvp(sys.argv[1],sys.argv[1:])

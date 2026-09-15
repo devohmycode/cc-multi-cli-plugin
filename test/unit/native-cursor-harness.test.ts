@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import type { AgentOptions, Run, RunResult, SDKUserMessage, SendOptions } from '@cursor/sdk';
@@ -53,7 +54,7 @@ class AutoTestHarness extends CursorHarness {
 }
 
 async function fixture(t: test.TestContext) {
-  const directory = await mkdtemp('/tmp/cursor-harness-test-');
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'cursor-harness-test-'));
   const configurations: AgentOptions[] = [];
   const sends: { id: string; prompt: string | SDKUserMessage; options?: SendOptions }[] = [];
   const resumed: string[] = [];

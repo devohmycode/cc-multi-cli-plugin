@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { mkdir, readFile, realpath } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
+import { atomicWriteFile } from '../../multi-core/src/gateway/atomic-write.ts';
 import type {
   Emit,
   MessagesRequest,
@@ -19,6 +20,7 @@ import type {
   AntigravityUsage,
 } from './cli.ts';
 import { runAntigravity } from './cli.ts';
+import { antigravitySettingsFile } from './hooks.ts';
 import type { AntigravityModel } from './models.ts';
 import { selectAntigravityModel } from './models.ts';
 import { type AntigravityPolicy, antigravityCompactionDenyList } from './permissions.ts';
@@ -88,6 +90,7 @@ export class AntigravityHarness {
   private readonly stateDirectory: string;
   private readonly run: AntigravityRunner;
   private readonly checkPermissions: CheckAntigravityPermissions;
+  private readonly platform: NodeJS.Platform;
   private readonly sessions = new Map<string, Session>();
   private readonly exchanges = new Map<string, Exchange>();
   private readonly creating = new Set<string>();
@@ -98,19 +101,25 @@ export class AntigravityHarness {
     models: readonly AntigravityModel[],
     {
       cwd = process.cwd(),
-      stateDirectory = path.join(homedir(), '.gemini', 'antigravity-cli', 'multi-harness'),
+      stateDirectory = path.join(
+        path.dirname(antigravitySettingsFile({ homedir: os.homedir() })),
+        'multi-harness',
+      ),
       run = runAntigravity,
       checkPermissions,
+      platform = process.platform,
     }: {
       cwd?: string;
       stateDirectory?: string;
       run?: AntigravityRunner;
       checkPermissions?: CheckAntigravityPermissions;
+      platform?: NodeJS.Platform;
     } = {},
   ) {
     this.models = models;
     this.defaultCwd = cwd;
     this.stateDirectory = stateDirectory;
+    this.platform = platform;
     this.run = run;
     this.checkPermissions = checkPermissions ?? missingPermissions;
   }
@@ -339,10 +348,14 @@ export class AntigravityHarness {
         ],
       };
       await this.saveSession(session);
-      await atomicJson(path.join(this.stateDirectory, `${key}.response.json`), {
-        response: finished,
-        events: session.replay.events,
-      });
+      await atomicJson(
+        path.join(this.stateDirectory, `${key}.response.json`),
+        {
+          response: finished,
+          events: session.replay.events,
+        },
+        this.platform,
+      );
       for (const event of terminalEvents) {
         emit(...event);
       }
@@ -832,11 +845,14 @@ async function readJson(file: string): Promise<unknown> {
     throw error;
   }
 }
-async function atomicJson(file: string, value: unknown) {
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  await writeFile(temporary, JSON.stringify(value), { mode: 0o600 });
-  await rename(temporary, file);
+async function atomicJson(
+  file: string,
+  value: unknown,
+  platform: NodeJS.Platform = process.platform,
+) {
+  await atomicWriteFile(file, JSON.stringify(value), { mode: 0o600, platform });
 }
+
 const missingPermissions: CheckAntigravityPermissions = async () => {
   throw new Error('Antigravity native permission policy is not configured');
 };

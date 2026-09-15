@@ -30,6 +30,7 @@ import { ZEN_MODELS, ZEN_WORKERS, zenPickerOptions } from '../../multi-zen/src/m
 import { AgentCatalog } from './gateway/agent-catalog.ts';
 import { loadWorkerPermissions } from './gateway/agent-definitions.ts';
 import { checkCursorSettings } from './gateway/cursor-settings.ts';
+import { executableInvocation, resolveExecutable } from './gateway/executable.ts';
 import { ModBridge } from './gateway/mod-bridge.ts';
 import { PermissionModes } from './gateway/mode-hook.ts';
 import { hookCommand } from './gateway/permission-hook.ts';
@@ -41,7 +42,7 @@ import { providerSelection } from './install/plugins.ts';
 const enabledProviders = providerSelection(process.env.MULTI_ENABLED_PROVIDERS);
 const providerEnabled = (provider: string) =>
   enabledProviders?.some((name) => name === provider) ?? true;
-const claudeExecutable = process.env.MULTI_REAL_CLAUDE || 'claude';
+const claudeExecutable = process.env.MULTI_REAL_CLAUDE;
 
 /**
  * Claude Code requires a non-empty subagent prompt. Workers get no behavioral rules here;
@@ -180,14 +181,18 @@ async function main() {
     );
   }
   const ready = awaitModSessionStart();
-  const child = spawn(
-    claudeExecutable,
+  const childEnvironment = gatewayEnvironment(address.port, token, anthropic);
+  const childInvocation = executableInvocation(
+    resolveExecutable('claude', { configuredPath: claudeExecutable, env: childEnvironment }),
     ['--settings', settingsFile, '--agents', definitions, ...args],
-    {
-      stdio: 'inherit',
-      env: gatewayEnvironment(address.port, token, anthropic),
-    },
+    process.platform,
+    childEnvironment,
   );
+  const child = spawn(childInvocation.command, childInvocation.args, {
+    stdio: 'inherit',
+    env: childEnvironment,
+    detached: process.platform !== 'win32',
+  });
   const shutdown = async () => {
     server.closeAllConnections();
     server.close();
@@ -209,10 +214,17 @@ async function main() {
   child.once('exit', (code) => {
     void shutdown().finally(() => process.exit(code ?? 1));
   });
-  process.on('SIGTERM', () => child.kill('SIGTERM'));
-  // The foreground terminal delivers SIGINT to both processes; keep the gateway alive
-  // while Claude handles its normal interrupt UI.
-  process.on('SIGINT', () => {});
+  if (process.platform === 'win32') {
+    // Windows console control events do not provide POSIX process groups. Claude's
+    // child owns Ctrl+C handling; forward termination explicitly to its process tree.
+    process.on('SIGTERM', () => child.kill('SIGTERM'));
+    process.on('SIGINT', () => {});
+  } else {
+    process.on('SIGTERM', () => child.kill('SIGTERM'));
+    // Unix foreground terminals deliver SIGINT to both processes; Claude owns its
+    // interrupt UI, so the gateway deliberately remains alive.
+    process.on('SIGINT', () => {});
+  }
 }
 
 void main().catch((error) => {
@@ -328,7 +340,8 @@ function parseAuthProbeOutput(stdout: string): boolean {
 async function assertFunctionHooksSupported(): Promise<void> {
   let stdout: string;
   try {
-    ({ stdout } = await promisify(execFile)(claudeExecutable, ['--version'], {
+    const invocation = claudeCommand(['--version']);
+    ({ stdout } = await promisify(execFile)(invocation.command, invocation.args, {
       timeout: 10000,
       maxBuffer: 65536,
     }));
@@ -341,6 +354,20 @@ async function assertFunctionHooksSupported(): Promise<void> {
   if (!match || !atLeastVersion(match.slice(1).map(Number), [2, 1, 272])) {
     throw new Error('Claude Code 2.1.272 or newer with function hooks is required.');
   }
+}
+
+function claudeCommand(args: readonly string[]) {
+  const environment = process.env;
+  return executableInvocation(
+    resolveExecutable('claude', {
+      platform: process.platform,
+      env: environment,
+      configuredPath: claudeExecutable,
+    }),
+    args,
+    process.platform,
+    environment,
+  );
 }
 
 function atLeastVersion(actual: number[], required: number[]): boolean {
@@ -379,7 +406,8 @@ async function anthropicSignedIn(): Promise<boolean> {
   }
   let stdout: string;
   try {
-    ({ stdout } = await promisify(execFile)(claudeExecutable, ['auth', 'status', '--json'], {
+    const invocation = claudeCommand(['auth', 'status', '--json']);
+    ({ stdout } = await promisify(execFile)(invocation.command, invocation.args, {
       timeout: 10000,
       maxBuffer: 65536,
     }));

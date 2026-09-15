@@ -15,21 +15,39 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function authFile(): string {
-  const dataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
-  return path.join(dataHome, 'opencode', 'auth.json');
+export interface ZenAuthPathOptions {
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  homedir?: string;
+}
+
+export function zenAuthFile({
+  platform = process.platform,
+  env = process.env,
+  homedir = os.homedir(),
+}: ZenAuthPathOptions = {}): string {
+  const explicit = env.OPENCODE_AUTH_FILE;
+  if (explicit) {
+    return explicit;
+  }
+  const pathApi = platform === 'win32' ? path.win32 : path;
+  const dataHome =
+    platform === 'win32'
+      ? env.LOCALAPPDATA || pathApi.join(homedir, 'AppData', 'Local')
+      : env.XDG_DATA_HOME || pathApi.join(homedir, '.local', 'share');
+  return pathApi.join(dataHome, 'opencode', 'auth.json');
 }
 
 /** Read only the OpenCode Zen API key; credentials stay owned by OpenCode. */
-export async function readZenKey(): Promise<string | undefined> {
-  const configured = process.env.OPENCODE_API_KEY;
+export async function readZenKey(options: ZenAuthPathOptions = {}): Promise<string | undefined> {
+  const configured = (options.env ?? process.env).OPENCODE_API_KEY;
   if (configured !== undefined) {
     return validateZenKey(configured);
   }
 
   let source: string;
   try {
-    source = await readFile(authFile(), 'utf8');
+    source = await readFile(zenAuthFile(options), 'utf8');
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
       return undefined;
@@ -59,9 +77,9 @@ export async function readZenKey(): Promise<string | undefined> {
 }
 
 /** Persist local key entry in OpenCode's existing auth store, preserving other providers. */
-export async function saveZenKey(key: string): Promise<void> {
+export async function saveZenKey(key: string, options: ZenAuthPathOptions = {}): Promise<void> {
   const validated = validateZenKey(key);
-  const file = authFile();
+  const file = zenAuthFile(options);
   let entries: Record<string, unknown> = {};
   try {
     const parsed: unknown = JSON.parse(await readFile(file, 'utf8'));

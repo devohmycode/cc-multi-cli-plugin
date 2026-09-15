@@ -28,11 +28,20 @@ export function providerSelection(value: string | undefined): Provider[] | undef
 }
 
 /** Ask Claude for its enabled plugins rather than interpreting its cache layout. */
-export async function installedPlugins(claude: string, settingsArgs: string[] = []) {
+export async function installedPlugins(
+  claude: string,
+  settingsArgs: string[] = [],
+  options: { platform?: NodeJS.Platform } = {},
+) {
+  const platform = options.platform ?? process.platform;
   const { stdout } = await promisify(execFile)(
     claude,
     [...settingsArgs, 'plugin', 'list', '--json'],
-    { timeout: 15000, maxBuffer: 4 * 1024 * 1024 },
+    {
+      timeout: 15000,
+      maxBuffer: 4 * 1024 * 1024,
+      ...(platform === 'win32' ? { shell: true } : {}),
+    },
   );
   const parsed: unknown = JSON.parse(stdout);
   if (!Array.isArray(parsed)) {

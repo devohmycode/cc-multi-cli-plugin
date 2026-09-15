@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 test('launcher discovers GPT review with Claude subscription, API credentials, or no Claude login', async (t) => {
@@ -63,7 +63,14 @@ globalThis.fetch = async (url, init) => {
     for (const review of ['yes', 'no']) {
       const { stdout } = await promisify(execFile)(
         process.execPath,
-        ['--import', preload, launcher, '--', '--model', 'multi/openai/gpt-6-astra'],
+        [
+          '--import',
+          pathToFileURL(preload).href,
+          launcher,
+          '--',
+          '--model',
+          'multi/openai/gpt-6-astra',
+        ],
         {
           cwd,
           timeout: 20000,

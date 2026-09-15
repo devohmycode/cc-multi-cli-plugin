@@ -1,3 +1,4 @@
+import childProcess from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,27 +10,56 @@ import {
 import { pluginPermissions, type WorkerPermissions } from './agent-definitions.ts';
 import type { PermissionContext } from './mode-hook.ts';
 
+export interface CursorSettingsOptions {
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  osRelease?: string;
+  readFile?: typeof fs.readFile;
+  readDir?: typeof fs.readdir;
+  runCommand?: (command: string, args: readonly string[]) => Promise<string>;
+}
+
+const defaultRunCommand = (command: string, args: readonly string[]): Promise<string> =>
+  new Promise((resolve, reject) => {
+    childProcess.execFile(command, [...args], { encoding: 'utf8' }, (error, stdout, stderr) => {
+      if (error) {
+        Object.assign(error, { stderr });
+        reject(error);
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+
 /** Re-read on each native dispatch; Claude-side rules cannot constrain SDK tools. */
 export async function checkCursorSettings(
   cwd: string,
   args: readonly string[],
   inlineSettings: Record<string, unknown>,
+  options: CursorSettingsOptions = {},
 ): Promise<WorkerPermissions> {
   const { sources, restrictions } = settingSources(args);
   await pluginPermissions(cwd, [...args, '--settings', JSON.stringify(inlineSettings)]);
   let context = mergeCursorPermissions({ permissionMode: 'auto' }, restrictions);
-  for (const policy of await managedSettings()) {
-    context = mergeCursorPermissions(context, policy);
-  }
+  const settingsOptions = {
+    platform: options.platform ?? process.platform,
+    env: options.env ?? process.env,
+    osRelease: options.osRelease ?? os.release(),
+    readFile: options.readFile ?? fs.readFile,
+    readDir: options.readDir ?? fs.readdir,
+    runCommand: options.runCommand ?? defaultRunCommand,
+  };
+  context = mergePolicies(context, await managedSettings(settingsOptions));
   context = mergeCursorPermissions(context, assertCursorClaudeSettings(inlineSettings));
   if (sources.has('user')) {
     context = mergeCursorPermissions(
       context,
       await checkFile(
         path.join(
-          process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'),
+          settingsOptions.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'),
           'settings.json',
         ),
+        settingsOptions.readFile,
       ),
     );
   }
@@ -37,13 +67,16 @@ export async function checkCursorSettings(
     if (sources.has('project')) {
       context = mergeCursorPermissions(
         context,
-        await checkFile(path.join(directory, '.claude', 'settings.json')),
+        await checkFile(path.join(directory, '.claude', 'settings.json'), settingsOptions.readFile),
       );
     }
     if (sources.has('local')) {
       context = mergeCursorPermissions(
         context,
-        await checkFile(path.join(directory, '.claude', 'settings.local.json')),
+        await checkFile(
+          path.join(directory, '.claude', 'settings.local.json'),
+          settingsOptions.readFile,
+        ),
       );
     }
     if (directory === path.dirname(directory)) {
@@ -52,6 +85,17 @@ export async function checkCursorSettings(
   }
   cursorPermissionPolicy(context);
   return { tools: context.tools, disallowedTools: context.disallowedTools };
+}
+
+function mergePolicies(
+  initial: PermissionContext,
+  policies: readonly WorkerPermissions[],
+): PermissionContext {
+  let context = initial;
+  for (const policy of policies) {
+    context = mergeCursorPermissions(context, policy);
+  }
+  return context;
 }
 
 function settingSources(args: readonly string[]): {
@@ -94,10 +138,13 @@ function selectedSources(sources: string): Set<string> {
   return selected;
 }
 
-async function checkFile(file: string): Promise<WorkerPermissions> {
+async function checkFile(
+  file: string,
+  readFile: typeof fs.readFile = fs.readFile,
+): Promise<WorkerPermissions> {
   let text: string;
   try {
-    text = await fs.readFile(file, 'utf8');
+    text = await readFile(file, 'utf8');
   } catch (error) {
     if (missing(error)) {
       return {};
@@ -111,32 +158,36 @@ async function checkFile(file: string): Promise<WorkerPermissions> {
   }
 }
 
-async function managedSettings(): Promise<WorkerPermissions[]> {
-  if (process.platform !== 'linux' || /microsoft/i.test(os.release())) {
-    throw new Error(
-      'Native Cursor cannot observe MDM/registry policy on this platform; managed-policy admission requires Linux without WSL.',
-    );
+async function managedSettings(
+  options: Required<CursorSettingsOptions>,
+): Promise<WorkerPermissions[]> {
+  // Claude Code documents these file locations: macOS uses
+  // /Library/Application Support/ClaudeCode, Linux and WSL use /etc/claude-code,
+  // and Windows uses C:\Program Files\ClaudeCode (ProgramData is legacy and ignored).
+  // WSL is therefore admitted through the Linux file source; Claude only consults
+  // the Windows chain when its documented wslInheritsWindowsSettings controls are active.
+  if (!['linux', 'darwin', 'win32'].includes(options.platform)) {
+    throw new Error(`Native Cursor managed-policy admission does not support ${options.platform}`);
   }
-  const directory = '/etc/claude-code';
-  const files = [path.join(directory, 'managed-settings.json')];
-  try {
-    const names = await fs.readdir(path.join(directory, 'managed-settings.d'));
-    files.push(
-      ...names
-        .filter((name) => !name.startsWith('.') && name.endsWith('.json'))
-        .sort()
-        .map((name) => path.join(directory, 'managed-settings.d', name)),
-    );
-  } catch (error) {
-    if (!missing(error)) {
-      throw error;
-    }
+  const platformPath = options.platform === 'win32' ? path.win32 : path.posix;
+  const effectivePlatform =
+    options.platform === 'linux' && /microsoft/i.test(options.osRelease)
+      ? 'linux'
+      : options.platform;
+  let directory: string;
+  if (effectivePlatform === 'darwin') {
+    directory = '/Library/Application Support/ClaudeCode';
+  } else if (effectivePlatform === 'win32') {
+    directory = String.raw`C:\Program Files\ClaudeCode`;
+  } else {
+    directory = '/etc/claude-code';
   }
+  const files = await managedPolicyFiles(options, platformPath, directory);
   const policies: WorkerPermissions[] = [];
   for (const file of files) {
     let source: string;
     try {
-      source = await fs.readFile(file, 'utf8');
+      source = await options.readFile(file, 'utf8');
     } catch (error) {
       if (missing(error)) {
         continue;
@@ -145,7 +196,98 @@ async function managedSettings(): Promise<WorkerPermissions[]> {
     }
     policies.push(managedPolicy(source, file));
   }
+  if (effectivePlatform === 'darwin') {
+    policies.push(
+      ...(await managedCommandPolicy(options, 'defaults', ['read', 'com.anthropic.claudecode'])),
+    );
+  } else if (effectivePlatform === 'win32') {
+    policies.push(...(await managedRegistryPolicies(options)));
+  }
   return policies;
+}
+
+async function managedPolicyFiles(
+  options: Required<CursorSettingsOptions>,
+  platformPath: typeof path.posix,
+  directory: string,
+): Promise<string[]> {
+  const files = [platformPath.join(directory, 'managed-settings.json')];
+  try {
+    const names = await options.readDir(platformPath.join(directory, 'managed-settings.d'));
+    files.push(
+      ...names
+        .filter((name) => !name.startsWith('.') && name.endsWith('.json'))
+        .sort()
+        .map((name) => platformPath.join(directory, 'managed-settings.d', name)),
+    );
+  } catch (error) {
+    if (!missing(error)) {
+      throw error;
+    }
+  }
+  return files;
+}
+
+async function managedCommandPolicy(
+  options: Required<CursorSettingsOptions>,
+  command: string,
+  args: readonly string[],
+): Promise<WorkerPermissions[]> {
+  let source: string;
+  try {
+    source = await options.runCommand(command, args);
+  } catch (error) {
+    if (missing(error) || (error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+      return [];
+    }
+    if (
+      command === 'defaults' &&
+      error instanceof Error &&
+      'code' in error &&
+      error.code === 1 &&
+      'stderr' in error &&
+      /does not exist|not found/i.test(String(error.stderr))
+    ) {
+      return [];
+    }
+    throw new Error(`Native Cursor cannot observe managed policy via ${command}: ${String(error)}`);
+  }
+  if (!source.trim()) {
+    return [];
+  }
+  return [managedPolicy(parsePolicyValue(source), `${command} ${args.join(' ')}`)];
+}
+
+async function managedRegistryPolicies(
+  options: Required<CursorSettingsOptions>,
+): Promise<WorkerPermissions[]> {
+  const policies: WorkerPermissions[] = [];
+  for (const root of ['HKLM', 'HKCU']) {
+    const source = await managedCommandPolicy(options, 'reg', [
+      'query',
+      `${root}\\SOFTWARE\\Policies\\ClaudeCode`,
+      '/v',
+      'Settings',
+    ]);
+    policies.push(...source);
+  }
+  return policies;
+}
+
+function parsePolicyValue(source: string): string {
+  const trimmed = source.trim();
+  try {
+    JSON.parse(trimmed);
+    return trimmed;
+  } catch {
+    const match = trimmed.match(/(?:Settings\s+REG_(?:SZ|EXPAND_SZ)\s+)(.+)$/im);
+    if (!match) {
+      throw new Error('Native Cursor cannot parse managed policy output as JSON');
+    }
+    const value = match[1].trim();
+    JSON.parse(value);
+    return value;
+  }
 }
 
 function managedPolicy(source: string, file: string): WorkerPermissions {

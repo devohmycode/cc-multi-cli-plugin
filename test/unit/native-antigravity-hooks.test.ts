@@ -3,7 +3,12 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { installAntigravityHook } from '../../plugins/multi-antigravity/src/hooks.ts';
+import {
+  antigravityHookDefinition,
+  antigravityHookFile,
+  antigravitySettingsFile,
+  installAntigravityHook,
+} from '../../plugins/multi-antigravity/src/hooks.ts';
 
 interface InstalledPreToolUseHook {
   PreToolUse: Array<{
@@ -65,4 +70,35 @@ test('Antigravity hook installation coexists with another active PreToolUse hook
   await installAntigravityHook(file);
   const reinstalled = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
   assert.deepEqual(reinstalled, installed);
+});
+
+test('Antigravity resolves native config roots and direct Node hook commands per platform', async () => {
+  const env = { LOCALAPPDATA: 'C:\\Users\\tester\\AppData\\Local' };
+  assert.equal(
+    antigravityHookFile({ platform: 'win32', env, homedir: 'C:\\Users\\tester' }),
+    path.join('C:\\Users\\tester\\AppData\\Local', 'gemini', 'config', 'hooks.json'),
+  );
+  assert.equal(
+    antigravitySettingsFile({ platform: 'darwin', homedir: '/Users/tester' }),
+    '/Users/tester/.gemini/antigravity-cli/settings.json',
+  );
+  const posix = antigravityHookDefinition('linux').PreToolUse[0].hooks[0].command;
+  assert.match(
+    posix,
+    /^if \[ "\$\{MULTI_ANTIGRAVITY_DENY\+x}" = x ]; then .*permission-hook\.ts.*; fi$/,
+  );
+  const windows = antigravityHookDefinition('win32').PreToolUse[0].hooks[0].command;
+  assert.doesNotMatch(windows, /if \[/);
+  assert.match(windows, /permission-hook\.ts/);
+});
+
+test('Antigravity replaces an existing Windows destination', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'antigravity-win-hooks-'));
+  const file = path.join(directory, 'hooks.json');
+  await writeFile(file, JSON.stringify({ old: true }));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await installAntigravityHook(file, { platform: 'win32' });
+  const installed = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+  assert.equal(installed.old, true);
+  assert.ok(installed['multi-cli-antigravity']);
 });

@@ -7,6 +7,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { terminateProcessTree } from '../../plugins/multi-core/src/gateway/process-tree.ts';
 import { OPENAI_WORKERS } from '../../plugins/multi-openai/src/models.ts';
 
 interface Event {
@@ -140,17 +141,8 @@ async function turn(
   let diagnostics = '';
   let timedOut = false;
   const stop = () => {
-    if (!child.pid) {
-      return;
-    }
-    try {
-      if (process.platform === 'win32') {
-        execFileSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-      } else {
-        process.kill(-child.pid, 'SIGKILL');
-      }
-    } catch {
-      child.kill('SIGKILL');
+    if (child.pid) {
+      terminateProcessTree(child.pid, { platform: process.platform, signal: 'SIGKILL' });
     }
   };
   const timer = setTimeout(() => {
