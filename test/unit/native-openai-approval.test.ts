@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
@@ -42,7 +42,7 @@ const verdict = (outcome = 'allow') => [
 ];
 
 async function fixture(t: TestContext) {
-  const cwd = await mkdtemp(path.join(os.tmpdir(), 'approval-unit-'));
+  const cwd = await realpath(await mkdtemp(path.join(os.tmpdir(), 'approval-unit-')));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const authFile = path.join(cwd, 'auth.json');
   await writeFile(

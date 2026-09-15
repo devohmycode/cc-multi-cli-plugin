@@ -174,12 +174,23 @@ export async function pluginPermissions(
   options: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv; executable?: string } = {},
 ): Promise<Record<string, WorkerPermissions>> {
   const environment = options.env ?? process.env;
-  const invocation = executableInvocation(
-    resolveExecutable('claude', {
+  let executable: string;
+  try {
+    executable = resolveExecutable('claude', {
       platform: options.platform,
       env: environment,
       configuredPath: options.executable,
-    }),
+    });
+  } catch (error) {
+    // Preserve the old direct execFile contract for mocked probes and let the
+    // child process produce its normal ENOENT when Claude is genuinely absent.
+    if (!isMissingExecutable(error) || options.executable) {
+      throw error;
+    }
+    executable = 'claude';
+  }
+  const invocation = executableInvocation(
+    executable,
     [...pluginArguments(args), 'plugin', 'list', '--json'],
     options.platform,
     environment,
@@ -292,6 +303,10 @@ async function pluginDefinition(file: string): Promise<[string, WorkerPermission
       disallowedTools: toolList(value.disallowedTools, file, 'disallowedTools'),
     },
   ];
+}
+
+function isMissingExecutable(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 
 function withinProject(cwd: string, project: string): boolean {

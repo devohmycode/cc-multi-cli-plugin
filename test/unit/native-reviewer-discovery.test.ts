@@ -7,6 +7,18 @@ import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
+async function writeClaudeFixture(bin: string, source: string): Promise<void> {
+  if (process.platform === 'win32') {
+    await writeFile(path.join(bin, 'claude-fixture.js'), source);
+    await writeFile(
+      path.join(bin, 'claude.cmd'),
+      `@"${process.execPath}" "%~dp0claude-fixture.js" %*\r\n`,
+    );
+    return;
+  }
+  await writeFile(path.join(bin, 'claude'), source, { mode: 0o755 });
+}
+
 test('launcher discovers GPT review with Claude subscription, API credentials, or no Claude login', async (t) => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'reviewer-discovery-'));
   t.after(() => rm(cwd, { recursive: true, force: true }));
@@ -19,8 +31,8 @@ test('launcher discovers GPT review with Claude subscription, API credentials, o
       tokens: { access_token: 'codex-fixture', account_id: 'fixture' },
     }),
   );
-  await writeFile(
-    path.join(bin, 'claude'),
+  await writeClaudeFixture(
+    bin,
     `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2);
@@ -42,7 +54,6 @@ if (args[0] === 'auth') {
 }
 emit(fs.readFileSync(args[args.indexOf('--settings') + 1], 'utf8'));
 `,
-    { mode: 0o755 },
   );
   const preload = path.join(cwd, 'preload.mjs');
   const calls = path.join(cwd, 'calls.jsonl');

@@ -6,6 +6,13 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+### Cross-platform runtime
+
+- Replace the Linux-only `flock` state lock with a portable PID-aware state lock shared by native runs. Cross-platform process-tree cancellation now handles POSIX and Windows processes, and executable resolution honors `PATHEXT` and Windows `.cmd` shims.
+- Admit Cursor managed policy on macOS through managed preferences, on Windows through the registry, and in WSL through the Linux policy source. Unsupported policy controls continue to fail explicitly.
+- Extend wrapper installation to macOS Bash/Zsh/fish and Windows PowerShell plus `cmd` shims. Antigravity now uses platform-specific hook and config paths: the POSIX guard remains on Unix, while Windows invokes Node directly. Zen and Cursor state use `LOCALAPPDATA` on Windows.
+- Run `npm run check` in the GitHub Actions matrix on Ubuntu, macOS, and Windows, and enforce LF text checkouts with `.gitattributes`. Offline tests pass on all three operating systems once the CI matrix confirms them; live provider logins, hooks, TTY rendering, and native harness runs on macOS and Windows are still pending.
+
 ### Claude Mods runtime
 
 - Precompute worker catalogs at launch and refresh settings/catalog policy through

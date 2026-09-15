@@ -326,7 +326,7 @@ test('headerless classifier uses pending worker context and rejects ambiguous ac
     command: string,
     permissionMode = 'auto',
     pendingCommand = command,
-    cwd = dir,
+    cwd = dir.replaceAll('\\', '/'),
   ) => {
     next = { id: `tool-${worker}`, command: pendingCommand };
     const inference = await send(
@@ -360,7 +360,7 @@ test('headerless classifier uses pending worker context and rejects ambiguous ac
     assert.deepEqual(await guard.json(), {});
   };
   await prepare('worker-a', 'node a.js');
-  await prepare('worker-b', 'node b.js', 'plan', `cd ${dir} && node b.js`);
+  await prepare('worker-b', 'node b.js', 'plan', `cd ${dir.replaceAll('\\', '/')} && node b.js`);
   assert.equal(contexts.length, 0, 'Permission hooks must never invoke review');
   assert.equal((await send(request(1, session, 'node b.js'))).status, 200);
   assert(contexts[0].scope.includes('worker-b'));
@@ -373,10 +373,10 @@ test('headerless classifier uses pending worker context and rejects ambiguous ac
     'node b.js',
     'plan',
     `${process.execPath} -e ${JSON.stringify('process.stdout.write("unsafe")')}`,
-    path.join(os.tmpdir(), 'unsafe'),
+    path.join(os.tmpdir(), 'unsafe').replaceAll('\\', '/'),
   );
   assert.equal((await send(request(1, session, 'node b.js'))).status, 400);
-  await prepare('worker-b', 'node b.js', 'plan', `cd ${dir} && node b.js`);
+  await prepare('worker-b', 'node b.js', 'plan', `cd ${dir.replaceAll('\\', '/')} && node b.js`);
   assert.equal((await send(request(1, session, 'node b.js'))).status, 200);
   await prepare('worker-a', 'node b.js');
   assert.equal((await send(request(1, session, 'node b.js'))).status, 400);

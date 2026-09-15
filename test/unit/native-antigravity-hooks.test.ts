@@ -48,7 +48,9 @@ test('Antigravity hook installation preserves non-PreToolUse hooks', async (t) =
   assert.deepEqual(installed.audit, original.audit);
   assertNamespacedHook(installed);
   const mode = (await stat(file)).mode & 0o777;
-  assert.equal(mode, 0o600);
+  if (process.platform !== 'win32') {
+    assert.equal(mode, 0o600);
+  }
   await installAntigravityHook(file);
   const reinstalled = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
   assert.deepEqual(reinstalled, installed);
@@ -66,7 +68,9 @@ test('Antigravity hook installation coexists with another active PreToolUse hook
   assert.deepEqual(installed.other, original.other);
   assertNamespacedHook(installed);
   const mode = (await stat(file)).mode & 0o777;
-  assert.equal(mode, 0o600);
+  if (process.platform !== 'win32') {
+    assert.equal(mode, 0o600);
+  }
   await installAntigravityHook(file);
   const reinstalled = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
   assert.deepEqual(reinstalled, installed);
@@ -76,7 +80,7 @@ test('Antigravity resolves native config roots and direct Node hook commands per
   const env = { LOCALAPPDATA: 'C:\\Users\\tester\\AppData\\Local' };
   assert.equal(
     antigravityHookFile({ platform: 'win32', env, homedir: 'C:\\Users\\tester' }),
-    path.join('C:\\Users\\tester\\AppData\\Local', 'gemini', 'config', 'hooks.json'),
+    'C:\\Users\\tester\\AppData\\Local\\gemini\\config\\hooks.json',
   );
   assert.equal(
     antigravitySettingsFile({ platform: 'darwin', homedir: '/Users/tester' }),

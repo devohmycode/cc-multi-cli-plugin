@@ -36,7 +36,11 @@ test('honors explicit executable paths and fails clearly when absent', () => {
   );
   assert.throws(
     () => resolveExecutable('claude', { env: { PATH: '' }, exists: () => false }),
-    /Executable not found on PATH: claude/,
+    (error: unknown) =>
+      error instanceof Error &&
+      'code' in error &&
+      error.code === 'ENOENT' &&
+      /Executable not found on PATH: claude/.test(error.message),
   );
 });
 

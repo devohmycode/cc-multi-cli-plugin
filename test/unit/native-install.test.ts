@@ -22,17 +22,21 @@ const marketplace = 'cc-multi-cli-plugin';
 async function fixture(t: test.TestContext) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'multi-install-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
+  const platform = process.platform;
+  const windows = platform === 'win32';
   const home = path.join(directory, "home with spaces and 'quotes'");
   await mkdir(home);
-  const shell = path.join(home, '.bashrc');
-  await writeFile(shell, '# user settings\nexport EXISTING=retained\n');
+  const shell = windows
+    ? path.join(home, 'profile.ps1')
+    : path.join(home, process.platform === 'darwin' ? '.zshrc' : '.bashrc');
+  await writeFile(
+    shell,
+    windows ? '# user settings\r\n' : '# user settings\nexport EXISTING=retained\n',
+  );
   const listing = path.join(directory, 'plugins.json');
   await writeFile(listing, '[]');
-  const real = path.join(directory, 'real-claude');
-  await writeFile(
-    real,
-    `#!/usr/bin/env node
-const fs = require('node:fs');
+  const source = path.join(directory, 'real-claude.js');
+  const script = `const fs = require('node:fs');
 const args = process.argv.slice(2);
 if (args.includes('plugin') && args.includes('list')) {
   console.log(fs.readFileSync(process.env.TEST_PLUGIN_LIST, 'utf8'));
@@ -40,15 +44,41 @@ if (args.includes('plugin') && args.includes('list')) {
   console.log(JSON.stringify({native:true,args}));
   process.exitCode = Number(process.env.TEST_EXIT || 0);
 }
-`,
-    { mode: 0o755 },
-  );
-  const env = { PATH: process.env.PATH, HOME: home, SHELL: '/bin/bash', TEST_PLUGIN_LIST: listing };
+`;
+  await writeFile(source, script);
+  const real = windows
+    ? path.join(directory, 'real-claude.cmd')
+    : path.join(directory, 'real-claude');
+  if (windows) {
+    await writeFile(real, `@"${process.execPath}" "${source}" %*\r\n`);
+  } else {
+    await writeFile(real, `#!${process.execPath}\n${script}`, { mode: 0o755 });
+  }
+  const env = windows
+    ? {
+        PATH: process.env.PATH,
+        HOME: home,
+        USERPROFILE: home,
+        ComSpec: process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
+        PSModulePath: process.env.PSModulePath ?? path.join(home, 'PowerShell', 'Modules'),
+        PROFILE: shell,
+        TEST_PLUGIN_LIST: listing,
+      }
+    : {
+        PATH: process.env.PATH,
+        HOME: home,
+        SHELL: process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash',
+        TEST_PLUGIN_LIST: listing,
+      };
   const install = () => execute(process.execPath, [setup, '--claude', real], { env });
   const bin = path.join(home, '.local/share/multi-cli/bin');
   const invoke = (name: string, args: string[], extra: Record<string, string> = {}) =>
-    execute(path.join(bin, name), args, { env: { ...env, ...extra }, timeout: 20000 });
-  return { directory, home, shell, listing, real, env, install, invoke };
+    execute(path.join(bin, windows ? `${name}.cmd` : name), args, {
+      env: { ...env, ...extra },
+      shell: windows,
+      timeout: 20000,
+    });
+  return { directory, home, shell, listing, real, env, install, invoke, windows };
 }
 
 async function core(directory: string, name: string) {
@@ -91,14 +121,15 @@ test('setup preserves shell content, is repeatable, and uninstall survives plugi
   const once = await readFile(f.shell, 'utf8');
   await f.install();
   assert.equal(await readFile(f.shell, 'utf8'), once);
-  await writeFile(f.shell, `${once}# later user edit\n`);
+  const laterEdit = f.windows ? '# later user edit\r\n' : '# later user edit\n';
+  await writeFile(f.shell, `${once}${laterEdit}`);
   const reply = JSON.parse((await f.invoke('claude-multi', ['hello world'])).stdout);
   assert.deepEqual(reply, { native: true, args: ['hello world'] });
   await f.invoke('multi', ['uninstall']);
-  assert.equal(
-    await readFile(f.shell, 'utf8'),
-    '# user settings\nexport EXISTING=retained\n# later user edit\n',
-  );
+  const original = f.windows
+    ? '# user settings\r\n'
+    : '# user settings\nexport EXISTING=retained\n';
+  assert.equal(await readFile(f.shell, 'utf8'), `${original}${laterEdit}`);
   await assert.rejects(f.invoke('claude-multi', []), /ENOENT/);
   await f.install();
   assert.equal(JSON.parse((await f.invoke('claude-multi', [])).stdout).native, true);

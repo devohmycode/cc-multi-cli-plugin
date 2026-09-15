@@ -17,21 +17,23 @@ function configRoot(options: AntigravityPathOptions = {}): string {
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
   const home = options.homedir ?? os.homedir();
+  const join = platform === 'win32' ? path.win32.join : path.posix.join;
   if (platform === 'win32') {
-    return path.join(
-      env.LOCALAPPDATA ?? env.APPDATA ?? path.join(home, 'AppData', 'Local'),
-      'gemini',
-    );
+    return join(env.LOCALAPPDATA ?? env.APPDATA ?? join(home, 'AppData', 'Local'), 'gemini');
   }
-  return path.join(home, '.gemini');
+  return join(home, '.gemini');
 }
 
 export function antigravityHookFile(options: AntigravityPathOptions = {}): string {
-  return path.join(configRoot(options), 'config', 'hooks.json');
+  const join =
+    (options.platform ?? process.platform) === 'win32' ? path.win32.join : path.posix.join;
+  return join(configRoot(options), 'config', 'hooks.json');
 }
 
 export function antigravitySettingsFile(options: AntigravityPathOptions = {}): string {
-  return path.join(configRoot(options), 'antigravity-cli', 'settings.json');
+  const join =
+    (options.platform ?? process.platform) === 'win32' ? path.win32.join : path.posix.join;
+  return join(configRoot(options), 'antigravity-cli', 'settings.json');
 }
 
 /**
@@ -42,7 +44,7 @@ export function antigravitySettingsFile(options: AntigravityPathOptions = {}): s
  * without a policy.
  */
 export function antigravityHookDefinition(platform: NodeJS.Platform = process.platform) {
-  const command = hookCommand(new URL('./permission-hook.ts', import.meta.url));
+  const command = hookCommand(new URL('./permission-hook.ts', import.meta.url), platform);
   return {
     PreToolUse: [
       {

@@ -23,7 +23,7 @@ export function resolveExecutable(name: string, options: ExecutableOptions = {})
     if (exists(configured)) {
       return configured;
     }
-    throw new Error(`Configured executable does not exist: ${configured}`);
+    throw missingExecutable(`Configured executable does not exist: ${configured}`);
   }
   const candidates = platform === 'win32' ? windowsCandidates(name, env.PATHEXT) : [name];
   const found = findOnPath(
@@ -36,7 +36,13 @@ export function resolveExecutable(name: string, options: ExecutableOptions = {})
   if (found) {
     return found;
   }
-  throw new Error(`Executable not found on PATH: ${name}`);
+  throw missingExecutable(`Executable not found on PATH: ${name}`);
+}
+
+function missingExecutable(message: string): NodeJS.ErrnoException {
+  const error = new Error(message) as NodeJS.ErrnoException;
+  error.code = 'ENOENT';
+  return error;
 }
 
 /** Invoke Windows command shims without shell:true, preserving argument boundaries. */

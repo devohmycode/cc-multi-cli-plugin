@@ -50,7 +50,12 @@ const env = {
   HOME: home,
   CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
   ...(platform === 'win32'
-    ? { PSModulePath: process.env.PSModulePath, PROFILE: profile }
+    ? {
+        PSModulePath: process.env.PSModulePath ?? path.join(home, 'PowerShell', 'Modules'),
+        ComSpec: process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
+        USERPROFILE: home,
+        PROFILE: profile,
+      }
     : { SHELL: `/${shell}` }),
   npm_config_omit: 'dev',
 };
@@ -87,17 +92,22 @@ assert(JSON.parse(catalog.stdout).some((model: { id: string }) => model.id === '
 await rename(`${source}-removed`, source);
 
 // Exercise the real cached gateway and picker, replacing only the outer Claude UI.
-const fake = path.join(directory, 'claude-fixture');
-await writeFile(
-  fake,
-  `#!/usr/bin/env node
-const fs=require('node:fs');const args=process.argv.slice(2);
+const fakeSource = path.join(directory, 'claude-fixture.js');
+const fake =
+  platform === 'win32'
+    ? path.join(directory, 'claude-fixture.cmd')
+    : path.join(directory, 'claude-fixture');
+const fakeScript = `const fs=require('node:fs');const args=process.argv.slice(2);
 if(args[0]==='auth'){console.log(JSON.stringify({loggedIn:false}));process.exitCode=1}else{
 const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'utf8'));
 console.log(JSON.stringify(settings.modelPicker.options.map(x=>x.model)));}
-`,
-  { mode: 0o755 },
-);
+`;
+await writeFile(fakeSource, fakeScript);
+if (platform === 'win32') {
+  await writeFile(fake, `@"${process.execPath}" "${fakeSource}" %*\r\n`);
+} else {
+  await writeFile(fake, `#!${process.execPath}\n${fakeScript}`, { mode: 0o755 });
+}
 const launched = await execute(process.execPath, [launcher], {
   cwd: directory,
   timeout: 30000,
