@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { InteractionUpdate } from '@cursor/sdk';
-import { formatCursorProgress } from '../../plugins/multi-cursor/src/progress.ts';
+import {
+  cursorRowObservation,
+  formatCursorProgress,
+} from '../../plugins/multi-cursor/src/progress.ts';
 
 const shell = {
   type: 'shell',
@@ -157,4 +160,24 @@ test('omits unavailable edit details rather than inventing counts or diffs', () 
     }),
     '[Cursor] edit: notes.txt completed.',
   );
+});
+
+test('display outcomes distinguish nonzero shell exit from successful transport', () => {
+  const update = {
+    type: 'tool-call-completed',
+    callId: 'shell-1',
+    modelCallId: 'model-1',
+    toolCall: {
+      ...shell,
+      result: {
+        status: 'success',
+        value: { exitCode: 1, signal: '', stdout: '', stderr: 'failed', executionTime: 1 },
+      },
+    },
+  } satisfies InteractionUpdate;
+  const observed = cursorRowObservation(update);
+  assert.ok(observed?.type === 'completed');
+  assert.equal(observed.error, true);
+  assert.match(observed.text, /exit 1/);
+  assert.equal(cursorRowObservation({ type: 'thinking-delta', text: 'hidden' }), undefined);
 });

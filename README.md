@@ -173,6 +173,17 @@ row to switch for this session only. You can also type a model ID directly:
 
 Typed `/model` commands and Enter in the picker save Claude Code's default for
 future sessions; use **s** if you also launch ordinary Claude without this gateway.
+Generated external picker rows include `behavesAs` client compatibility metadata,
+without changing their `multi/...` request IDs, provider labels, user rows or Claude
+tier aliases. Adjustable-effort rows use the Sonnet 4.6 client profile; models without
+an exposed effort control use Haiku 4.5 and retain their native-reasoning descriptions.
+These are compatibility profiles, not claims of provider equivalence. Both retain
+Claude's default 200K context handling; no global context-window override is added.
+The installed Claude 2.1.267 catalog ties the newer `xhigh` UI profiles to native 1M
+context, so those profiles are deliberately not used. The extra-high UI choice is
+not advertised by this conservative profile; registered explicit effort workers
+and provider-side effort validation remain unchanged.
+
 GPT runs Claude Code's native tool loop and can delegate to the workers below.
 Switching back to Claude resumes subscription-backed Anthropic requests. Text
 and tool history survive switches; opaque reasoning state stays with its own
@@ -512,6 +523,23 @@ listing tools. Bypass selects native agent mode with Auto-review disabled, while
 retaining explicit tool restrictions and the SDK's sandbox configuration. Default,
 acceptEdits and dontAsk remain unsupported; there is no separate mode selector.
 
+Permission-sync command hooks use the launcher's bound loopback control endpoint,
+not a mutable `ANTHROPIC_BASE_URL` inherited by the hook. Their token stays in the
+environment, not command arguments. Redirects are rejected, requests time out after
+five seconds, and sync failures report a non-blocking warning (exit code 1) after
+marking the affected native permission snapshot unavailable. Prompts and worker
+completion notifications can still reach Claude/OpenAI/Zen; Cursor and Antigravity
+cannot reuse the stale snapshot. A successful sync clears the marker. If the hook
+cannot write that marker, it still blocks rather than leave old permissions usable.
+Markers live in the launcher's private temporary settings directory and are removed
+with it on shutdown. Diagnostics identify the safe endpoint,
+hook event and HTTP status or recognized transport cause (such as `ECONNREFUSED`),
+without prompt bodies, response bodies or credentials. Relaunch through the updated
+Multi launcher and submit a new prompt after a failure; check that its gateway is
+still running. This isolation is not proof of the cause of an earlier `fetch failed`
+report: the historical failure has not been reproduced against the reachable listener.
+Existing sessions keep their original generated hooks until relaunched.
+
 Worker tool lists, whole-tool deny rules and supported CLI restrictions intersect
 native capabilities. Settings and plugin policies are rechecked before dispatch.
 Linux managed settings and fragments support the same narrow policy translation;
@@ -585,6 +613,28 @@ See [Claude environment variables](https://code.claude.com/docs/en/env-vars).
 
 The SDK currently brings an `undici` 5.x dependency with unresolved `npm audit`
 advisories. No incompatible dependency override has been applied.
+
+### OpenAI instruction profile
+
+OpenAI main models and workers receive a bundled adaptation of Codex's Astra
+instruction template (`plugins/multi-openai/src/instructions.md`, source: the
+Codex model catalog fetched September 10, 2026). Claude Code tool names, terminal
+formatting and skill discovery replace Codex-specific interfaces. The profile
+asks models to work directly, enter Plan mode only on explicit request, and use
+agents only when the user or project/worker instructions authorize delegation.
+An already-active Plan mode remains read-only until the native approval flow exits it.
+
+Claude mixes built-in guidance with environment and custom policies in its system
+blocks, so those blocks are retained intact before the OpenAI profile. The profile
+supersedes generic workflow defaults while preserving explicit restrictions,
+worker scope and compaction requests. This is prompt guidance, not a tool ban.
+It applies only on the OpenAI inference/counting route, not Zen, Claude, native
+harnesses or the independent OpenAI reviewer. It does not change context limits.
+
+Run `node test/live/native-openai-instructions.ts` for the opt-in, three-request
+Astra check of direct work, active Plan restrictions and requested delegation.
+It inspects synthetic tool calls without executing them; passing is bounded
+behavioral evidence, not a guarantee for every prompt.
 
 ## OpenAI approval and permission checks
 

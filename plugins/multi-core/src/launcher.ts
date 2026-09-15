@@ -12,6 +12,7 @@ import {
 } from '../../multi-antigravity/src/hooks.ts';
 import {
   type AntigravityModel,
+  antigravityPickerOptions,
   discoverAntigravityModels,
 } from '../../multi-antigravity/src/models.ts';
 import { antigravityPermissionPolicy } from '../../multi-antigravity/src/permissions.ts';
@@ -30,6 +31,8 @@ import { AgentCatalog } from './gateway/agent-catalog.ts';
 import { loadWorkerPermissions } from './gateway/agent-definitions.ts';
 import { checkCursorSettings } from './gateway/cursor-settings.ts';
 import { PermissionModes } from './gateway/mode-hook.ts';
+import { NativeRows } from './gateway/native-rows.ts';
+import { nativeRowNames } from './gateway/native-rows-protocol.ts';
 import { hookCommand } from './gateway/permission-hook.ts';
 import type { GatewayEvent } from './gateway/server.ts';
 import { createNativeGateway } from './gateway/server.ts';
@@ -40,6 +43,12 @@ const enabledProviders = providerSelection(process.env.MULTI_ENABLED_PROVIDERS);
 const providerEnabled = (provider: string) =>
   enabledProviders?.some((name) => name === provider) ?? true;
 const claudeExecutable = process.env.MULTI_REAL_CLAUDE || 'claude';
+
+/**
+ * Claude Code requires a non-empty subagent prompt. Workers get no behavioral rules here;
+ * provider profiles and Claude's native subagent prompt govern them.
+ */
+const WORKER_PROMPT = 'Complete the delegated task.';
 
 /** One `--agents` entry: an external worker using Claude Code's native tools. */
 interface AgentDefinition {
@@ -52,6 +61,7 @@ interface AgentDefinition {
 
 /** One `/model` entry the launched session offers. */
 interface ModelOption {
+  behavesAs?: string;
   model: string;
   label: string;
   description: string;
@@ -106,9 +116,18 @@ async function main() {
     callerSettings,
   );
   const agents = workerDefinitions(codexSignedIn, cursorModels, Boolean(zenKey), antigravityModels);
+  const showNativeRows = process.env.MULTI_CURSOR_TOOL_ROWS === '1';
+  configureNativeRowWorkers(agents, showNativeRows);
+  const settingsDir = await mkdtemp(path.join(os.tmpdir(), 'multi-native-settings-'));
   const permissionModes = [cursor, antigravity].some(Boolean)
-    ? new PermissionModes((cwd) =>
-        loadWorkerPermissions(cwd, agents, [...args, '--settings', JSON.stringify(callerSettings)]),
+    ? new PermissionModes(
+        (cwd) =>
+          loadWorkerPermissions(cwd, agents, [
+            ...args,
+            '--settings',
+            JSON.stringify(callerSettings),
+          ]),
+        settingsDir,
       )
     : undefined;
   const { approvalBridge, approvalProviders } = await discoverApprovals(
@@ -120,6 +139,10 @@ async function main() {
     token,
     enabledProviders,
     authFile,
+    nativeRows: new NativeRows(
+      path.join(os.homedir(), '.cursor', 'multi-native-rows'),
+      showNativeRows,
+    ),
     cursor,
     antigravity,
     zen: zenKey ? { apiKey: zenKey } : undefined,
@@ -142,8 +165,8 @@ async function main() {
   if (address === null || typeof address === 'string') {
     throw new Error('Gateway did not bind a local port.');
   }
-  configureModeHooks(settings, permissionModes, Boolean(antigravity));
-  const settingsDir = await mkdtemp(path.join(os.tmpdir(), 'multi-native-settings-'));
+  configureModeHooks(settings, permissionModes, Boolean(antigravity), address.port, settingsDir);
+  await configureNativeRowMcp(settings, args, settingsDir, address.port, token, showNativeRows);
   const settingsFile = path.join(settingsDir, 'settings.json');
   const { initialModel, selectedModel } = await initialSelection(args, settings, anthropic);
   if (!initialModel && selectedModel) {
@@ -333,8 +356,7 @@ function workerDefinitions(
       name,
       {
         description: `${model}, ${effort} reasoning. Native coding, investigation, and review.`,
-        prompt:
-          'You are an OpenAI coding agent running inside Claude Code. Use the provided native tools to complete the delegated task. Follow its scope and permissions. Keep required shell commands in the foreground (run_in_background: false), with an appropriate timeout, and wait for their exit status before reporting completion. A background launch is not a completed task. Report the result, verification, and any unresolved issues. Do not invoke external coding CLIs.',
+        prompt: WORKER_PROMPT,
         model: `multi/openai/${model}`,
         tools: ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write'],
         effort,
@@ -344,8 +366,7 @@ function workerDefinitions(
   for (const option of cursorModels.filter((option) => option.nativeWorker)) {
     agents[option.worker] = {
       description: `${option.label}. Native Cursor coding worker with its own tools, conversation state, and review.`,
-      prompt:
-        'Complete the delegated task using Cursor’s native tools and persistent conversation. Respect the task scope and permissions. Verify changes and report results and unresolved issues. Native tool progress is displayed by Claude Code; do not request that Claude Code repeat those actions. Do not spawn further agents or invoke external coding CLIs.',
+      prompt: WORKER_PROMPT,
       model: option.model,
       tools: ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write'],
     };
@@ -353,19 +374,17 @@ function workerDefinitions(
   for (const [name, option] of Object.entries(zen ? ZEN_WORKERS : {})) {
     agents[name] = {
       description: `OpenCode Zen ${option.model}${option.effort ? `, ${option.effort} effort` : ''}. Uses native Claude Code tools.`,
-      prompt:
-        'Complete the delegated task using the provided native tools. Respect its scope and permissions. Keep shell commands in the foreground and wait for completion. Verify changes and report results and unresolved issues. Do not invoke external coding CLIs.',
+      prompt: WORKER_PROMPT,
       model: option.model,
       tools: ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write'],
       ...(option.effort ? { effort: option.effort } : {}),
     };
   }
-  for (const option of antigravityModels) {
+  for (const option of [...antigravityModels, ...antigravityPickerOptions(antigravityModels)]) {
     const effort = option.id.match(/-(low|medium|high)$/)?.[1] as Effort | undefined;
     agents[option.worker] = {
       description: `${option.label}. Experimental native CLI coding worker.`,
-      prompt:
-        'Complete the delegated task using Antigravity native tools. Follow its scope and permissions, verify changes and report results and denials. Observed actions are complete; do not ask Claude to repeat them. Do not spawn children or external coding CLIs.',
+      prompt: WORKER_PROMPT,
       model: option.model,
       tools: ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write'],
       ...(effort ? { effort } : {}),
@@ -586,6 +605,13 @@ function printCursorModels(cursorModels: CursorModelOption[], cursorSignedIn: bo
   );
 }
 
+/** Client compatibility only, not provider equivalence. Both profiles default to 200K
+ * in Claude 2.1.267; newer xhigh profiles imply native 1M and are deliberately not used.
+ * Provider validation remains authoritative for every requested effort value. */
+function pickerProfile(adjustableEffort: boolean): string {
+  return adjustableEffort ? 'claude-sonnet-4-6' : 'claude-haiku-4-5';
+}
+
 function pickerSettings(
   codexSignedIn: boolean,
   cursorPicker: CursorModelOption[],
@@ -599,17 +625,28 @@ function pickerSettings(
           model: `multi/openai/${model}`,
           label: model,
           description: 'OpenAI subscription · native Claude Code harness',
+          behavesAs: pickerProfile(true),
         })),
-        ...cursorPicker.map(({ model, label, description }) => ({ model, label, description })),
-        ...antigravityModels.map(({ model, label }) => ({
+        ...cursorPicker.map(({ model, label, description, catalog }) => ({
           model,
           label,
+          description,
+          behavesAs: pickerProfile(
+            catalog.parameters?.some(({ id }) => ['effort', 'reasoning_effort'].includes(id)) ??
+              false,
+          ),
+        })),
+        ...antigravityPickerOptions(antigravityModels).map(({ model, label }) => ({
+          model,
+          label,
+          behavesAs: pickerProfile(true),
           description: 'Experimental · native Antigravity CLI · cache reuse under validation',
         })),
         ...(zen ? zenPickerOptions(process.env.MULTI_ZEN_MODELS) : []).map(
           ({ model, label, efforts }) => ({
             model,
             label: `Zen · ${label}`,
+            behavesAs: pickerProfile(Boolean(efforts?.length)),
             description: `Zen API billing · Claude tools${efforts ? '' : ' · native reasoning; /effort not applicable'}`,
           }),
         ),
@@ -643,10 +680,13 @@ function configureModeHooks(
   settings: LaunchSettings,
   permissionModes: PermissionModes | undefined,
   antigravity: boolean,
+  port: number,
+  settingsDir: string,
 ) {
   if (permissionModes) {
     const hooks = settings.hooks as Record<string, unknown[]> | undefined;
-    const command = hookCommand(new URL('./gateway/mode-hook.ts', import.meta.url));
+    // Launcher-bound control address, independent of Claude settings/env API overrides.
+    const command = `${hookCommand(new URL('./gateway/mode-hook.ts', import.meta.url))} http://127.0.0.1:${port}/multi/mode '${settingsDir.replaceAll("'", "'\\''")}'`;
     settings.hooks = {
       ...hooks,
       ...Object.fromEntries(
@@ -676,4 +716,44 @@ async function discoverAntigravity() {
     await installAntigravityHook();
   }
   return antigravityModels;
+}
+
+function configureNativeRowWorkers(agents: Record<string, AgentDefinition>, enabled: boolean) {
+  if (enabled) {
+    for (const agent of Object.values(agents)) {
+      if (agent.model.startsWith('multi/cursor/')) {
+        agent.tools.push(...nativeRowNames);
+      }
+    }
+  }
+}
+
+async function configureNativeRowMcp(
+  settings: LaunchSettings,
+  args: string[],
+  settingsDir: string,
+  port: number,
+  token: string,
+  enabled: boolean,
+) {
+  if (enabled) {
+    const file = path.join(settingsDir, 'native-mcp.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        mcpServers: {
+          multi_cursor: {
+            type: 'http',
+            url: `http://127.0.0.1:${port}/multi/native-mcp`,
+            headers: { 'x-multi-gateway-token': token },
+          },
+        },
+      }),
+      { mode: 0o600 },
+    );
+    args.push('--mcp-config', file);
+    const permissions = settings.permissions ?? {};
+    const allow = Array.isArray(permissions.allow) ? permissions.allow : [];
+    settings.permissions = { ...permissions, allow: [...allow, ...nativeRowNames] };
+  }
 }

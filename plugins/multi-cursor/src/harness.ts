@@ -12,6 +12,7 @@ import type {
   StreamEventName,
 } from '../../multi-core/src/gateway/messages.ts';
 import type { PermissionContext } from '../../multi-core/src/gateway/mode-hook.ts';
+import type { NativeRowObserver } from '../../multi-core/src/gateway/native-rows-protocol.ts';
 import { lockStateFile } from '../../multi-core/src/gateway/state-lock.ts';
 import { estimateTextTokens } from '../../multi-core/src/gateway/tokens.ts';
 import { CursorProviderError, cursorRunError } from './errors.ts';
@@ -21,7 +22,7 @@ import {
   cursorPermissionPolicy,
   mergeCursorPermissions,
 } from './permissions.ts';
-import { formatCursorProgress } from './progress.ts';
+import { cursorRowObservation, formatCursorProgress } from './progress.ts';
 import { cursorHistoryHash, cursorTerminalSuffix, prepareCursorRequest } from './request.ts';
 
 type Agent = Pick<SDKAgent, 'agentId' | 'send' | 'close'>;
@@ -63,6 +64,7 @@ type Exchange = {
   settled: boolean;
   mayHaveRun: boolean;
   committed: boolean;
+  rowObserver?: NativeRowObserver;
 };
 const hash = (value: unknown) =>
   createHash('sha256')
@@ -142,6 +144,7 @@ export class CursorHarness {
     signal: AbortSignal,
     emit?: Emit,
     context?: PermissionContext,
+    rowObserver?: NativeRowObserver,
   ) {
     if (this.closed) {
       throw new Error('Cursor harness is closed');
@@ -169,7 +172,7 @@ export class CursorHarness {
         }
         this.exchanges.delete(completed[0]);
       }
-      exchange = this.startExchange(body, scope, key, permissions);
+      exchange = this.startExchange(body, scope, key, permissions, rowObserver);
       this.exchanges.set(key, exchange);
     }
     return observe(exchange, signal, emit);
@@ -180,6 +183,7 @@ export class CursorHarness {
     scope: string,
     key: string,
     context: PermissionContext,
+    rowObserver?: NativeRowObserver,
   ): Exchange {
     const controller = new AbortController();
     const events: Event[] = [];
@@ -198,6 +202,7 @@ export class CursorHarness {
       settled: false,
       mayHaveRun: false,
       committed: false,
+      rowObserver,
       result: Promise.resolve().then(() =>
         this.cachedExecute(body, scope, key, exchange, emit, context),
       ),
@@ -497,6 +502,7 @@ export class CursorHarness {
         (delta) => {
           text += delta;
         },
+        exchange.rowObserver,
       );
       dispatch.runId = session.run.id;
       await this.saveSession(session);
@@ -511,7 +517,11 @@ export class CursorHarness {
       if (result.status !== 'finished') {
         throw cursorRunError(result);
       }
-      stream.text(cursorTerminalSuffix(text, result.result ?? ''));
+      const suffix = cursorTerminalSuffix(text, result.result ?? '');
+      if (suffix) {
+        exchange.rowObserver?.({ type: 'text', text: suffix });
+      }
+      stream.text(suffix);
       const response = stream.finish();
       session.response = response;
       session.replay = replay;
@@ -555,11 +565,16 @@ export class CursorHarness {
     signal: AbortSignal,
     stream: HarnessResponse,
     appendText: (delta: string) => void,
+    rowObserver?: NativeRowObserver,
   ) {
     return session.agent.send(prompt, {
       ...options,
       onDelta: ({ update }) => {
         signal.throwIfAborted();
+        const observation = rowObserver ? cursorRowObservation(update) : undefined;
+        if (observation) {
+          rowObserver?.(observation);
+        }
         if (update.type === 'text-delta') {
           appendText(update.text);
           stream.text(update.text);

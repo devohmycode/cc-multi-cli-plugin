@@ -11,6 +11,7 @@ import {
 import { CursorProviderError } from '../../../multi-cursor/src/errors.ts';
 import type { CursorHarness } from '../../../multi-cursor/src/harness.ts';
 import { CodexAuthError, codexRequest } from '../../../multi-openai/src/auth.ts';
+import { openaiInstructions } from '../../../multi-openai/src/instructions.ts';
 import { MODELS } from '../../../multi-openai/src/models.ts';
 import type { Effort, ResponsesRequest } from '../../../multi-openai/src/responses.ts';
 import { forAnthropic, fromResponses, toResponses } from '../../../multi-openai/src/responses.ts';
@@ -23,6 +24,8 @@ import { isApprovalRequest, parseApprovalRequest } from './approval.ts';
 import type { GatewayFetch } from './fetch.ts';
 import type { Emit, MessagesRequest, MessagesResponse, StopReason } from './messages.ts';
 import type { PermissionContext, PermissionModes } from './mode-hook.ts';
+import { emitRowResponse, type NativeRows } from './native-rows.ts';
+import { isNativeRowTool } from './native-rows-protocol.ts';
 import type { PendingApprovalTool } from './permission-hook.ts';
 import { approvalCapabilityGuard } from './permission-hook.ts';
 import { estimateInputTokens } from './tokens.ts';
@@ -74,6 +77,7 @@ export interface GatewayEvent {
 
 export interface GatewayOptions {
   token: string;
+  nativeRows?: NativeRows;
   enabledProviders?: readonly string[];
   authFile: string;
   fetchImpl?: GatewayFetch;
@@ -140,6 +144,7 @@ interface ProviderRequest {
 
 export function createNativeGateway({
   token,
+  nativeRows,
   enabledProviders,
   authFile,
   fetchImpl = fetch,
@@ -168,6 +173,17 @@ export function createNativeGateway({
     string,
     { tool: PendingApprovalTool; context: ApprovalContext }
   >();
+  function nativeReviewSession(session: unknown) {
+    if (blockAnthropic || typeof session !== 'string' || !session) {
+      return false;
+    }
+    const contexts = [...approvalContexts.values()].filter(
+      (context) => JSON.parse(context.scope)[0] === session,
+    );
+    // Headerless worker reviews need origin matching only when this session has
+    // external execution. Native Claude owns its classifier format and retries.
+    return contexts.length > 0 && contexts.every((context) => !context.model.startsWith('multi/'));
+  }
   const matchesBashAction = (
     candidate: { tool: PendingApprovalTool; context: ApprovalContext },
     action: unknown,
@@ -194,6 +210,15 @@ export function createNativeGateway({
     const pending = pendingTools.get(id);
     pendingTools.delete(id);
     if (
+      nativeRows &&
+      pending?.model.startsWith('multi/cursor/') &&
+      pending.session === parsed.session_id &&
+      pending.name === parsed.tool_name &&
+      isNativeRowTool(pending.name)
+    ) {
+      return {};
+    }
+    if (
       pending?.scope &&
       pending.session === parsed.session_id &&
       pending.name === parsed.tool_name &&
@@ -205,6 +230,9 @@ export function createNativeGateway({
         evictOldest(reviewCandidates, 512);
         reviewCandidates.set(id, { tool: pending, context: { ...context, cwd: parsed.cwd } });
       }
+    }
+    if (nativeReviewSession(parsed.session_id)) {
+      return {};
     }
     return approvalCapabilityGuard(parsed, pending, approvalProviders, !blockAnthropic);
   }
@@ -248,7 +276,7 @@ export function createNativeGateway({
     return candidates[0].context;
   }
   async function handleHarness(exchange: ProviderRequest, provider: 'cursor' | 'antigravity') {
-    const { req, res, body, url, signal, agentId, emit, identity } = exchange;
+    const { res, body, url, signal, agentId, emit, identity } = exchange;
     const bridge = { cursor, antigravity }[provider];
     if (!bridge) {
       const unavailable = {
@@ -258,18 +286,16 @@ export function createNativeGateway({
       };
       throw new BadRequest(unavailable[provider]);
     }
-    let inputTokens: number;
-    try {
-      if (
-        !['/v1/messages', '/v1/messages/count_tokens'].includes(url.pathname) ||
-        req.method !== 'POST'
-      ) {
-        throw new Error(`${provider} requires POST /v1/messages or /v1/messages/count_tokens`);
-      }
-      inputTokens = bridge.validate(body, exchange.permissionContext);
-    } catch (error) {
-      throw new BadRequest(reason(error));
+    const scope = identity.scope ?? JSON.stringify([fallbackSession, agentId ?? 'main']);
+    const rowScope = JSON.stringify([
+      scope,
+      path.resolve(exchange.permissionContext?.cwd ?? process.cwd()),
+    ]);
+    if (provider === 'cursor' && (await prepareNativeRows(exchange, rowScope, nativeRows))) {
+      return;
     }
+    const nativeBody = exchange.body;
+    const inputTokens = validateHarness(exchange, provider, bridge);
     if (url.pathname === '/v1/messages/count_tokens') {
       res.writeHead(200, {
         'content-type': 'application/json',
@@ -278,9 +304,14 @@ export function createNativeGateway({
       return res.end(JSON.stringify({ input_tokens: inputTokens }));
     }
     exchange.startStream();
-    const scope = identity.scope ?? JSON.stringify([fallbackSession, agentId ?? 'main']);
+    if (
+      provider === 'cursor' &&
+      (await runNativeRows(exchange, scope, rowScope, nativeRows, cursor))
+    ) {
+      return;
+    }
     const result = await bridge.handle(
-      body,
+      nativeBody,
       scope,
       signal,
       body.stream ? emit : undefined,
@@ -519,6 +550,9 @@ export function createNativeGateway({
     const { parsed } = exchange;
     const classification = isApprovalRequest(parsed);
     if (classification) {
+      if (!external && nativeReviewSession(metadata.session)) {
+        return handleAnthropic(exchange);
+      }
       return dispatchReview(exchange, metadata, external);
     }
     retainRequestContext(exchange, metadata, String(exchange.body.model ?? ''));
@@ -622,8 +656,10 @@ export function createNativeGateway({
       }
       const url = new URL(req.url ?? '', 'http://localhost');
       const { raw, parsed, body } = await readRequest(req, agentCatalog);
-      const external =
-        typeof body.model === 'string' && body.model.startsWith('multi/') ? body.model : null;
+      if (url.pathname === '/multi/native-mcp') {
+        return await handleNativeMcp(req, res, parsed, abort.signal, nativeRows);
+      }
+      const external = externalModel(body.model);
       assertProviderEnabled(external, enabledProviders);
       const signal = providerSignal(abort.signal, external, timeoutMs);
       const agentId = header(req.headers['x-claude-code-agent-id']);
@@ -841,7 +877,8 @@ function openaiRequest(exchange: ProviderRequest, externalModel: string): Respon
     ) {
       throw new Error('External models require POST /v1/messages or /v1/messages/count_tokens');
     }
-    return toResponses(body, model);
+    const request = toResponses(body, model);
+    return { ...request, instructions: openaiInstructions(request.instructions) };
   } catch (error) {
     throw new BadRequest(reason(error));
   }
@@ -878,6 +915,7 @@ function authorizeRequest(
       '/v1/models',
       '/api/hello',
       '/multi/mode',
+      '/multi/native-mcp',
       ...(guardAuto ? ['/multi/permission'] : []),
     ].includes(url.pathname) ||
     !['POST', 'GET', 'HEAD'].includes(req.method ?? '')
@@ -929,5 +967,106 @@ function failResponse(res: http.ServerResponse, emit: Emit, error: unknown) {
 function assertProviderEnabled(model: string | null, enabled: readonly string[] | undefined) {
   if (model && enabled && !enabled.includes(model.split('/')[1])) {
     throw new BadRequest('This provider plugin is not enabled for this session.');
+  }
+}
+
+async function handleNativeMcp(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  parsed: Record<string, unknown>,
+  signal: AbortSignal,
+  nativeRows?: NativeRows,
+) {
+  if (!nativeRows || req.method !== 'POST') {
+    res.writeHead(405);
+    return res.end();
+  }
+  if (parsed.id === undefined) {
+    res.writeHead(202);
+    return res.end();
+  }
+  let result: unknown;
+  try {
+    result = {
+      jsonrpc: '2.0',
+      id: parsed.id,
+      result: await nativeRows.rpc(parsed, signal),
+    };
+  } catch (error) {
+    result = {
+      jsonrpc: '2.0',
+      id: parsed.id,
+      error: { code: -32602, message: reason(error) },
+    };
+  }
+  res.writeHead(200, { 'content-type': 'application/json' });
+  return res.end(JSON.stringify(result));
+}
+
+async function prepareNativeRows(exchange: ProviderRequest, scope: string, rows?: NativeRows) {
+  if (!rows) {
+    return false;
+  }
+  if (exchange.url.pathname === '/v1/messages') {
+    const reply = await rows.followup(exchange.body, scope);
+    if (reply) {
+      exchange.startStream();
+      if (exchange.body.stream) {
+        emitRowResponse(reply, exchange.emit);
+      }
+      sendResult(exchange, reply);
+      return true;
+    }
+  }
+  exchange.body = await rows.normalize(exchange.body, scope);
+  return false;
+}
+async function runNativeRows(
+  exchange: ProviderRequest,
+  scope: string,
+  rowScope: string,
+  rows: NativeRows | undefined,
+  cursor: GatewayOptions['cursor'],
+) {
+  if (!cursor || !rows?.available(exchange.body) || !exchange.body.stream) {
+    return false;
+  }
+  const result = await rows.run(
+    exchange.body,
+    rowScope,
+    exchange.emit,
+    exchange.abort,
+    (observer) =>
+      cursor.handle(
+        exchange.body,
+        scope,
+        exchange.signal,
+        undefined,
+        exchange.permissionContext,
+        observer,
+      ),
+  );
+  sendResult(exchange, result);
+  return true;
+}
+
+function externalModel(model: unknown) {
+  return typeof model === 'string' && model.startsWith('multi/') ? model : null;
+}
+function validateHarness(
+  exchange: ProviderRequest,
+  provider: string,
+  bridge: NonNullable<GatewayOptions['cursor'] | GatewayOptions['antigravity']>,
+) {
+  try {
+    if (
+      !['/v1/messages', '/v1/messages/count_tokens'].includes(exchange.url.pathname) ||
+      exchange.req.method !== 'POST'
+    ) {
+      throw new Error(`${provider} requires POST /v1/messages or /v1/messages/count_tokens`);
+    }
+    return bridge.validate(exchange.body, exchange.permissionContext);
+  } catch (error) {
+    throw new BadRequest(reason(error));
   }
 }

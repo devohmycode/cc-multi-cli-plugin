@@ -1,4 +1,8 @@
 import type { InteractionUpdate } from '@cursor/sdk';
+import type {
+  NativeObservation,
+  NativeRowKind,
+} from '../../multi-core/src/gateway/native-rows-protocol.ts';
 
 type ToolCall = Extract<InteractionUpdate, { type: 'tool-call-started' }>['toolCall'];
 const escapeCharacter = String.fromCharCode(27);
@@ -104,4 +108,44 @@ export function formatCursorProgress(update: InteractionUpdate): string | undefi
     default:
       return undefined;
   }
+}
+
+/** Structured observations never carry an executor or hidden reasoning. */
+export function cursorRowObservation(update: InteractionUpdate): NativeObservation | undefined {
+  if (update.type === 'text-delta') {
+    return { type: 'text', text: update.text };
+  }
+  if (update.type === 'tool-call-started') {
+    const categories: Record<string, NativeRowKind> = {
+      read: 'read',
+      ls: 'read',
+      grep: 'search',
+      glob: 'search',
+      edit: 'edit',
+      write: 'edit',
+      delete: 'edit',
+      shell: 'shell',
+    };
+    return {
+      type: 'started',
+      id: update.callId,
+      kind: categories[update.toolCall.type] ?? 'other',
+      description: toolSummary(update.toolCall),
+    };
+  }
+  if (update.type !== 'tool-call-completed') {
+    return undefined;
+  }
+  const tool = update.toolCall;
+  const error =
+    tool.result?.status === 'error' ||
+    (tool.type === 'shell' &&
+      tool.result?.status === 'success' &&
+      tool.result.value.exitCode !== 0);
+  return {
+    type: 'completed',
+    id: update.callId,
+    text: tool.result ? completion(tool) : 'Native action ended without a reported outcome.',
+    error,
+  };
 }

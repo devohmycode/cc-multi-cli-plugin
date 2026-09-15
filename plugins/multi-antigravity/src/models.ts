@@ -40,16 +40,48 @@ export async function discoverAntigravityModels(): Promise<AntigravityModel[]> {
   return parseAntigravityModels(stdout);
 }
 
+/** Group only suffix variants with no independently advertised base identity. */
+export function antigravityPickerOptions(models: readonly AntigravityModel[]): AntigravityModel[] {
+  const nativeIds = new Set(models.map(({ id }) => id));
+  const rows = new Map<string, AntigravityModel>();
+  for (const option of models) {
+    const base = option.id.replace(/-(low|medium|high)$/, '');
+    if (base === option.id || nativeIds.has(base)) {
+      rows.set(option.id, option);
+    } else if (!rows.has(base)) {
+      rows.set(base, {
+        id: base,
+        model: `multi/antigravity/${base}`,
+        worker: `antigravity-${base}`,
+        label: option.label.replace(/(?:\s*[-·]\s*|\s+|\s*\()(low|medium|high)\)?$/i, ''),
+      });
+    }
+  }
+  return [...rows.values()];
+}
+
+function defaultVariant(models: readonly AntigravityModel[], base: string) {
+  for (const effort of ['medium', 'high', 'low']) {
+    const variant = models.find(({ id }) => id === `${base}-${effort}`);
+    if (variant) {
+      return variant;
+    }
+  }
+  throw new Error('Antigravity base route has no advertised native variant.');
+}
+
 /** Resolve advertised variants; let agy validate effort for models without suffixes. */
 export function selectAntigravityModel(
   models: readonly AntigravityModel[],
   model: string | undefined,
   effort?: unknown,
 ): AntigravityModel {
-  const selected = models.find((option) => option.model === model);
-  if (!selected) {
+  const native = models.find((option) => option.model === model);
+  const row = native ?? antigravityPickerOptions(models).find((option) => option.model === model);
+  if (!row) {
     throw new Error('Unknown Antigravity model; run agy models for native selections.');
   }
+  const selected = native ?? defaultVariant(models, row.id);
   if (effort === undefined) {
     return selected;
   }

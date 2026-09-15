@@ -28,11 +28,21 @@ installations. Remove only this namespaced entry to uninstall it. Other active
 global PreToolUse hooks may coexist; a deny from any hook wins regardless of
 hook order (see Upstream evidence).
 
-Select `multi/antigravity/<advertised-model>` in `/model`, or delegate to a named
-`antigravity-<advertised-model>` worker. Effort selects a matching advertised native
-model variant. Models without effort suffixes receive the official `--effort`
-flag and retain native validation; unsupported combinations fail explicitly. Catalog
-listing is not a guarantee of subscription entitlement or quota availability.
+The picker groups advertised `-low`, `-medium` and `-high` variants into one base
+route, for example `multi/antigravity/gemini-3.8-flash`. Use native `/effort low`,
+`/effort medium` or `/effort high` without changing that route. The gateway resolves
+only an advertised native variant. With no request effort, it prefers medium, then
+high, then low; Claude can supply an inherited effort even when you have not set one.
+Unavailable effort fails explicitly rather than substituting another native model.
+
+Each base row has a matching `antigravity-<base>` worker. Explicit native variant
+routes and workers such as `antigravity-gemini-3.8-flash-low` remain callable, but
+are not separately advertised when their family is grouped. Distinct thinking
+identities stay separate. If the CLI advertises an independent unsuffixed model,
+it is preserved along with its suffixed routes rather than shadowed by a synthetic
+base. Unsuffixed native models receive the official `--effort` flag and retain
+native validation. Catalog listing is not a guarantee of subscription entitlement
+or quota availability.
 
 ## Permissions and execution
 

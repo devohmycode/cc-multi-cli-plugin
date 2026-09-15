@@ -149,6 +149,46 @@ test('Cursor picker defaults to Auto, Grok and Composer, excluding other provide
   assert.deepEqual(cursorPickerOptions([]), []);
 });
 
+test('Cursor extras expose only a base effort row while preserving parameters and explicit workers', () => {
+  const catalog = cursorModelOptions([
+    {
+      id: 'extra',
+      displayName: 'Extra',
+      parameters: [{ id: 'reasoning_effort', values: [{ value: 'low' }, { value: 'high' }] }],
+      variants: [
+        {
+          displayName: 'Low',
+          isDefault: true,
+          params: [
+            { id: 'reasoning_effort', value: 'low' },
+            { id: 'fast', value: 'false' },
+            { id: 'context', value: 'large' },
+          ],
+        },
+        {
+          displayName: 'High',
+          params: [
+            { id: 'reasoning_effort', value: 'high' },
+            { id: 'fast', value: 'false' },
+            { id: 'context', value: 'large' },
+          ],
+        },
+      ],
+    },
+  ]);
+  const picker = cursorPickerOptions(catalog, 'extra,extra');
+  assert.equal(picker.length, 1);
+  assert.equal(picker[0].model, 'multi/cursor/extra');
+  assert.deepEqual(cursorSelection(picker[0], 'high').params, [
+    { id: 'context', value: 'large' },
+    { id: 'fast', value: 'false' },
+    { id: 'reasoning_effort', value: 'high' },
+  ]);
+  const explicit = catalog.find(({ worker }) => worker === 'cursor-extra-reasoning-effort-high');
+  assert(explicit?.nativeWorker);
+  assert.equal(cursorSelection(explicit, 'low').params?.[0].value, 'high');
+});
+
 test('extra Cursor picker models are opt-in, deduplicated and checked against the account catalog', () => {
   const catalog = cursorModelOptions(
     ['default', 'grok-4.6', 'composer-2.5', 'gemini-3.8-flash', 'gpt-5.6-sol'].map((id) => ({

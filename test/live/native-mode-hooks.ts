@@ -2,6 +2,8 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { mkdtemp, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import type { MessagesResponse } from '../../plugins/multi-core/src/gateway/messages.ts';
 import { PermissionModes } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
@@ -9,7 +11,7 @@ import { hookCommand } from '../../plugins/multi-core/src/gateway/permission-hoo
 import type { GatewayEvent } from '../../plugins/multi-core/src/gateway/server.ts';
 import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 
-const root = await mkdtemp('/tmp/mode-hook-cli-');
+const root = await mkdtemp(path.join(os.tmpdir(), 'mode-hook-cli-'));
 const worktree = process.argv.includes('--worktree');
 if (worktree) {
   await promisify(execFile)('git', ['init', '--quiet', root]);
@@ -38,9 +40,10 @@ const definitions = {
     model: 'multi/cursor/worker',
   },
 };
-const modes = new PermissionModes(async () => definitions);
+const modes = new PermissionModes(async () => definitions, root);
 const events: GatewayEvent[] = [];
 let mainCalls = 0;
+const requests: { model: string | undefined; effort: unknown }[] = [];
 const server = createNativeGateway({
   token: 'proof-token',
   authFile: 'unused',
@@ -49,6 +52,7 @@ const server = createNativeGateway({
   cursor: {
     validate: () => 0,
     async handle(body, _scope, _signal, emit) {
+      requests.push({ model: body.model, effort: body.output_config?.effort });
       const worker = body.model?.endsWith('/worker');
       const delegate = !worker && mainCalls++ === 0;
       const result: MessagesResponse = {
@@ -103,12 +107,21 @@ const server = createNativeGateway({
   },
 });
 await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-const command = hookCommand(
+const address = server.address();
+assert(address && typeof address !== 'string');
+const endpoint = `http://127.0.0.1:${address.port}`;
+const command = `${hookCommand(
   new URL('../../plugins/multi-core/src/gateway/mode-hook.ts', import.meta.url),
-);
+)} ${endpoint}/multi/mode ${root}`;
 await writeFile(
   `${root}/settings.json`,
   JSON.stringify({
+    modelPicker: {
+      options: ['main', 'worker'].map((name) => ({
+        model: `multi/cursor/${name}`,
+        behavesAs: 'claude-sonnet-4-6',
+      })),
+    },
     hooks: Object.fromEntries(
       ['UserPromptSubmit', 'SubagentStart'].map((name) => [
         name,
@@ -117,60 +130,82 @@ await writeFile(
     ),
   }),
 );
-const address = server.address();
-assert(address && typeof address !== 'string');
-const child = spawn(
-  'claude',
-  [
-    '-p',
-    'Reply OFFLINE_MODE_OK',
-    '--model',
-    'multi/cursor/main',
-    '--permission-mode',
-    'default',
-    '--tools',
-    'Agent',
-    '--allowedTools',
-    'Agent',
-    '--agents',
-    JSON.stringify(definitions),
-    '--settings',
-    `${root}/settings.json`,
-    '--setting-sources',
-    '',
-    '--strict-mcp-config',
-  ],
-  {
-    cwd: root,
-    env: {
-      PATH: process.env.PATH,
-      HOME: root,
-      CLAUDE_CONFIG_DIR: root,
-      ANTHROPIC_AUTH_TOKEN: 'offline-proof',
-      ANTHROPIC_BASE_URL: `http://127.0.0.1:${address.port}`,
-      ANTHROPIC_CUSTOM_HEADERS: 'x-multi-gateway-token: proof-token',
-      MULTI_GATEWAY_TOKEN: 'proof-token',
-      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-      CLAUDE_CODE_MAX_RETRIES: '0',
+async function launch(effort: string, session?: string) {
+  const child = spawn(
+    'claude',
+    [
+      '-p',
+      'Reply OFFLINE_MODE_OK',
+      '--output-format',
+      'json',
+      '--effort',
+      effort,
+      ...(session ? ['--resume', session] : []),
+      '--model',
+      'multi/cursor/main',
+      '--permission-mode',
+      'default',
+      '--tools',
+      'Agent',
+      '--allowedTools',
+      'Agent',
+      '--agents',
+      JSON.stringify(definitions),
+      '--settings',
+      `${root}/settings.json`,
+      '--setting-sources',
+      '',
+      '--strict-mcp-config',
+    ],
+    {
+      cwd: root,
+      env: {
+        PATH: process.env.PATH,
+        HOME: root,
+        CLAUDE_CONFIG_DIR: root,
+        ANTHROPIC_AUTH_TOKEN: 'offline-proof',
+        ANTHROPIC_BASE_URL: endpoint,
+        ANTHROPIC_CUSTOM_HEADERS: 'x-multi-gateway-token: proof-token',
+        MULTI_GATEWAY_TOKEN: 'proof-token',
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+        CLAUDE_CODE_MAX_RETRIES: '0',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  },
-);
-let stdout = '';
-let stderr = '';
-child.stdout.on('data', (v) => (stdout += v));
-child.stderr.on('data', (v) => (stderr += v));
-const timer = setTimeout(() => child.kill('SIGTERM'), 30000);
-const code = await new Promise<number | null>((resolve, reject) => {
-  child.on('exit', resolve);
-  child.on('error', reject);
-});
-clearTimeout(timer);
-server.closeAllConnections();
-server.close();
-await writeFile(`${root}/report.json`, JSON.stringify({ code, stdout, stderr, events }, null, 2));
-console.log(`Offline hook proof: ${root}/report.json`);
-assert.equal(code, 0);
+  );
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (v) => (stdout += v));
+  child.stderr.on('data', (v) => (stderr += v));
+  const timer = setTimeout(() => child.kill('SIGTERM'), 30000);
+  const code = await new Promise<number | null>((resolve, reject) => {
+    child.on('exit', resolve);
+    child.on('error', reject);
+  });
+  clearTimeout(timer);
+  await writeFile(`${root}/${effort}.json`, JSON.stringify({ code, stdout, stderr }, null, 2));
+  assert.equal(code, 0, stderr);
+  assert.doesNotMatch(
+    stdout + stderr,
+    /isn't described by this version|Multi permission sync failed/,
+  );
+  const result = JSON.parse(stdout);
+  assert.equal(result.is_error, false);
+  assert.equal(result.modelUsage['multi/cursor/main'].contextWindow, 200000);
+  return String(result.session_id);
+}
+
+try {
+  const session = await launch('low');
+  await launch('high', session);
+} finally {
+  server.closeAllConnections();
+  server.close();
+  await writeFile(`${root}/report.json`, JSON.stringify({ events, requests }, null, 2));
+  console.log(`Offline hook proof: ${root}/report.json`);
+}
+assert(requests.some(({ model, effort }) => model === 'multi/cursor/main' && effort === 'low'));
+assert(requests.some(({ model, effort }) => model === 'multi/cursor/main' && effort === 'high'));
 assert(events.some((e) => e.agentId && e.permissionContext?.permissionMode === 'plan'));
 assert(events.some((e) => !e.agentId && e.permissionContext?.permissionMode === 'default'));
 if (worktree) {

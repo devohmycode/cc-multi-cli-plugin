@@ -21,6 +21,7 @@ import {
   callId as wireCallId,
 } from '../../plugins/multi-core/src/gateway/tools.ts';
 import { readCodexAuth } from '../../plugins/multi-openai/src/auth.ts';
+import { openaiInstructions } from '../../plugins/multi-openai/src/instructions.ts';
 import { OPENAI_WORKERS } from '../../plugins/multi-openai/src/models.ts';
 import type {
   ResponsesInputContent,
@@ -515,6 +516,71 @@ test('OpenAI cache keys survive history changes and restart, isolating sessions,
   assert.equal(keys[0], keys[2]);
   assert.equal(new Set([keys[0], ...keys.slice(3, 7), keys[8]]).size, 6);
   assert.equal(keys[6], keys[7]);
+});
+
+test('OpenAI main and worker requests adapt instructions without losing runtime policy or changing translation', async (t) => {
+  const runtime = 'Runtime policy: Plan is read-only. Never edit secrets. Custom worker scope.';
+  const payload = { ...body, system: runtime };
+  const seen: ResponsesRequest[] = [];
+  const call = await gateway(t, async (_url, options) => {
+    seen.push(JSON.parse(String(options.body)));
+    return new Response(sse(textEvents));
+  });
+  for (const name of ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
+    await (await call({ ...payload, model: `multi/openai/${name}` })).text();
+  }
+  await (await call(payload, { 'x-claude-code-agent-id': 'worker-a' })).text();
+  assert.equal(seen.length, 5);
+  for (const request of seen) {
+    assert.equal(request.instructions, openaiInstructions(runtime));
+    assert(request.instructions.startsWith(runtime));
+    assert.match(request.instructions, /Do not call EnterPlanMode unless the user explicitly asks/);
+    assert.match(
+      request.instructions,
+      /Use Agent only when the user or applicable project\/worker instructions explicitly authorize/,
+    );
+    const translated = toResponses(payload, request.model);
+    assert.deepEqual(request.input, translated.input);
+    assert.deepEqual(request.tools, translated.tools);
+    assert.equal(translated.instructions, runtime, 'Shared translation used by Zen is unchanged');
+  }
+  const response = await call(payload, {}, '/v1/messages/count_tokens');
+  assert.deepEqual(await response.json(), { input_tokens: estimateInputTokens(seen[0]) });
+  assert.equal(seen.length, 5, 'Counting must not call the provider');
+});
+
+test('Claude prompts remain unchanged after OpenAI main and worker requests, including token counts', async (t) => {
+  const runtime = 'Claude runtime policy: use agents when appropriate.';
+  const metadata = { user_id: JSON.stringify({ session_id: 'prompt-isolation' }) };
+  let openaiCalls = 0;
+  let claudeCalls = 0;
+  const call = await gateway(t, async (url, options) => {
+    const request = JSON.parse(String(options.body));
+    if (url.startsWith('https://api.anthropic.com/')) {
+      claudeCalls++;
+      assert.deepEqual(request.system, body.system);
+      assert.equal(request.instructions, undefined);
+      assert(!String(options.body).includes('# OpenAI provider instructions'));
+      return Response.json({ content: [], input_tokens: 10 });
+    }
+    openaiCalls++;
+    assert.equal(request.instructions, openaiInstructions(runtime));
+    return new Response(sse(textEvents));
+  });
+  const scopes: Record<string, string>[] = [{}, { 'x-claude-code-agent-id': 'worker-a' }];
+  for (const headers of scopes) {
+    await (await call({ ...body, metadata, system: runtime }, headers)).text();
+    for (const claudeModel of ['claude-opus-4-6', 'claude-sonnet-5']) {
+      const payload = { ...body, metadata, model: claudeModel };
+      for (const endpoint of ['/v1/messages', '/v1/messages/count_tokens']) {
+        const response = await call(payload, headers, endpoint);
+        assert.equal(response.status, 200);
+        await response.text();
+      }
+    }
+  }
+  assert.equal(openaiCalls, 2);
+  assert.equal(claudeCalls, 8);
 });
 
 test('catalog filtering reaches Claude and OpenAI without changing user text or native registration', async (t) => {

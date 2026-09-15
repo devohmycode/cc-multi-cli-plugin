@@ -6,6 +6,80 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+### Opt-in Cursor live display rows
+
+- Set `MULTI_CURSOR_TOOL_ROWS=1` when launching to show Cursor action and model-text
+  rows in main sessions and named foreground/background workers. The gateway streams
+  display-only MCP waiters within one open Messages response; Cursor alone executes
+  tools. Existing text progress remains the default and the fallback for missing tools.
+- Persist completed display exchanges for local terminal acknowledgements and replay.
+  Disconnecting a pending waiter cancels its originating run; interrupted display
+  retries do not execute native work again. Claude permission policy still applies at
+  prompt boundaries. Antigravity retains its existing text progress.
+
+### Neutral worker prompts
+
+- Replace the per-provider worker system prompts with one neutral sentence. Claude
+  Code rejects an empty subagent prompt, so workers now carry no behavioral rules
+  of their own; provider instruction profiles and Claude's native subagent prompt
+  govern them. The old text barred "external coding CLIs", which blocked a worker
+  from driving `claude -p` as an experiment target.
+
+### Native Claude Auto passthrough
+
+- Forward Claude-only sessions' Auto classifier requests directly to Anthropic,
+  preserving native model selection, retry behavior and request formats. Native
+  Auto no longer depends on the external-review parser or pending-action match.
+- Keep originating-provider review checks for sessions with external models or
+  workers; OpenAI reviews never fall back to Anthropic.
+
+### Non-blocking permission-sync failures
+
+- Report hook transport, authentication and snapshot failures without rejecting
+  user prompts or worker completion notifications once native permissions have
+  been marked unavailable. Preserve native admission checks: a failed sync cannot
+  reuse an older parent/worker permission snapshot; successful sync restores it.
+- Identify the hook event before endpoint validation so configuration failures no
+  longer misleadingly say `event=unknown`. Keep endpoint authentication, redirect
+  rejection and bounded transport. No legacy hook-command fallback is added;
+  relaunch the updated launcher to load the current hook arguments.
+- Verify real Claude delivers a synthetic completion notification through an HTTP
+  503 sync failure, plus normal worker/resume hooks and stale-snapshot regressions.
+
+### OpenAI workflow instructions
+
+- Adapt the Codex Astra instruction template for OpenAI main models and workers:
+  act directly by default, enter Plan mode only on explicit request, and delegate
+  only with user or project/worker authorization. Respect an already-active Plan mode.
+- Preserve Claude runtime policies, custom instructions, tools and compaction
+  requests. The OpenAI workflow profile supersedes generic behavioral defaults;
+  other providers and the independent reviewer retain their existing instructions.
+- Count the adapted prompt in the local token estimate. This changes workflow
+  guidance, not model context limits, tool availability or permission enforcement.
+- Add regression coverage confirming Claude system prompts remain unchanged for
+  main sessions, workers and token counting after OpenAI requests in the same session.
+- Verify direct work, active Plan restrictions and explicitly requested delegation
+  with three bounded live Astra requests; synthetic tool calls are inspected only.
+
+### Picker compatibility, native effort and hook diagnostics
+
+- Add `behavesAs` to generated external picker rows while preserving provider IDs,
+  labels, user settings and ordinary Claude tiers. Use conservative 200K client
+  profiles, not newer profiles that imply native 1M context; their extra-high UI
+  capability remains a documented limitation. Explicit effort workers stay registered.
+- Group Antigravity's advertised low/medium/high suffix variants behind base picker
+  routes and native `/effort`, with matching base workers and no fabricated variants.
+  Preserve native variant workers, independent unsuffixed models and thinking identities.
+- Bind permission-sync hooks to the launcher's explicit local control endpoint,
+  independent of hook API URL overrides. Validate address/token, reject redirects,
+  retain bounded authenticated requests and blocking failure exit codes, and report
+  sanitized endpoint/event/status/transport diagnostics with relaunch guidance.
+  The historical `fetch failed` cause is not established by this change.
+- Add catalog, launcher and hook subprocess regressions; extend the local-only real
+  Claude fixture for low/high native effort, 200K context and saved-session hook
+  continuation without provider inference. Cursor extras still select base rows,
+  retain non-effort parameters and explicit presets, and keep advertised Fast disabled.
+
 ### Smaller worker announcements and OpenAI cache affinity
 
 - Advertise one provider worker per finalized `/model` picker model, without

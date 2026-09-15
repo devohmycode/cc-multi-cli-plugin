@@ -451,6 +451,7 @@ async function mixedReviewGateway(t: TestContext, reviewer = true, blockAnthropi
   );
   const reviews: ApprovalContext[] = [];
   const nativeReviews: string[] = [];
+  const nativeRequests: unknown[] = [];
   let outcome: 'allow' | 'deny' = 'allow';
   let next = { id: '', command: '', stream: false };
   const bridge = new NativeApprovalBridge(async (_input, _signal, context) => {
@@ -470,6 +471,7 @@ async function mixedReviewGateway(t: TestContext, reviewer = true, blockAnthropi
       if (body.messages?.[0]?.content?.[0]?.text === '<transcript>\n') {
         assert(url.includes('api.anthropic.com'));
         nativeReviews.push(body.model);
+        nativeRequests.push(body);
         return Response.json({
           model: body.model,
           content: [{ type: 'text', text: '<severity>0</severity>' }],
@@ -538,10 +540,12 @@ async function mixedReviewGateway(t: TestContext, reviewer = true, blockAnthropi
   const classify = (command: string, stage = 1, model = 'claude-sonnet-5', session = 'mixed') =>
     send({ ...request(stage, JSON.stringify({ session_id: session }), command), model });
   return {
+    send,
     prepare,
     classify,
     reviews,
     nativeReviews,
+    nativeRequests,
     deny: () => {
       outcome = 'deny';
     },
@@ -582,6 +586,28 @@ test('authenticated mixed-provider review follows main and headerless worker ori
     (await gateway.classify('node main.js')).status,
     400,
     'A provider switch invalidates stale main actions',
+  );
+});
+
+test('Claude-only Auto passes native classifier formats and fallback models through unchanged', async (t) => {
+  const gateway = await mixedReviewGateway(t);
+  await gateway.prepare('claude-fable-5-1', 'node original.js');
+  const body = request(1, JSON.stringify({ session_id: 'mixed' }), 'native normalized command');
+  body.model = 'claude-opus-5[1m]';
+  body.messages[0].content.push({ type: 'text', text: 'A newer native classifier format.' });
+  assert.equal((await gateway.send(body)).status, 200);
+  assert.deepEqual(gateway.nativeReviews, ['claude-opus-5[1m]']);
+  assert.deepEqual(gateway.nativeRequests, [body]);
+  assert.deepEqual(gateway.reviews, []);
+  assert.deepEqual(
+    await (
+      await gateway.send(
+        { session_id: 'mixed', permission_mode: 'auto', tool_name: 'Bash' },
+        '/multi/permission',
+      )
+    ).json(),
+    {},
+    'Native Auto does not depend on our pending-tool correlation',
   );
 });
 
