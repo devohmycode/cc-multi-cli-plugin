@@ -122,10 +122,22 @@ async function findClaude(
 }
 
 function removeBlock(source: string, block: string) {
-  if (!source.includes(block)) {
+  const start = source.indexOf(begin);
+  const finish = source.indexOf(end, start + begin.length);
+  const recorded = start >= 0 && finish >= 0 ? source.slice(start, finish + end.length) : '';
+  if (recorded !== block.trim()) {
     throw new Error('Multi shell configuration was edited; refusing to overwrite it.');
   }
   return source.replace(block, '');
+}
+
+function moveOutOfDirectory(directory: string) {
+  const current = path.resolve(process.cwd());
+  const target = path.resolve(directory);
+  const relative = path.relative(target, current);
+  if (relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..')) {
+    process.chdir(path.dirname(target));
+  }
 }
 
 function validateRuntime(shell: string, platform: Platform) {
@@ -277,6 +289,7 @@ export async function uninstall(directory = installationDirectory()) {
   const state = await readInstallation(directory);
   const source = await readFile(state.shellFile, 'utf8');
   await writeFile(state.shellFile, removeBlock(source, state.block));
+  moveOutOfDirectory(directory);
   const shimFiles = state.shims ?? ['claude-multi', 'multi'];
   for (const file of [
     ...files,

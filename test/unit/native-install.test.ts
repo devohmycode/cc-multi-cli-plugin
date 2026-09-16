@@ -88,6 +88,7 @@ if (args.includes('plugin') && args.includes('list')) {
       ? windowsInvocation(executable, args, env)
       : { command: executable, args, windowsVerbatimArguments: false };
     return execute(invocation.command, invocation.args, {
+      cwd: directory,
       env: { ...env, ...extra },
       timeout: 20000,
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
@@ -173,7 +174,8 @@ test('edited shell blocks and project-only executable cores fail explicitly', as
   const f = await fixture(t);
   await f.install();
   const current = await readFile(f.shell, 'utf8');
-  const pathMarker = f.windows ? '$env:Path =' : 'export PATH=';
+  const pathMarker = f.windows ? '$env:Path = ' : 'export PATH=';
+  assert(current.includes(pathMarker), 'fixture must contain the recorded Multi PATH block');
   await writeFile(f.shell, current.replace(pathMarker, '# changed PATH='));
   await assert.rejects(f.invoke('multi', ['uninstall']), /was edited/);
   await assert.rejects(f.install(), /was edited/);
