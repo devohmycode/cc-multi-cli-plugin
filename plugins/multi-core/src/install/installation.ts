@@ -1,3 +1,4 @@
+import { type SpawnOptions, spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 import {
   access,
@@ -34,6 +35,14 @@ export interface InstallationOptions {
   env?: NodeJS.ProcessEnv;
   homedir?: string;
   shell?: string;
+}
+
+type DeferDeletion = (command: string, args: string[], options: SpawnOptions) => void;
+
+export interface UninstallOptions {
+  platform?: Platform;
+  env?: NodeJS.ProcessEnv;
+  deferDeletion?: DeferDeletion;
 }
 
 function optionsFor(options: InstallationOptions = {}) {
@@ -121,23 +130,23 @@ async function findClaude(
   );
 }
 
+function normalizeLineEndings(source: string) {
+  return source.replaceAll('\r\n', '\n');
+}
+
 function removeBlock(source: string, block: string) {
   const start = source.indexOf(begin);
   const finish = source.indexOf(end, start + begin.length);
   const recorded = start >= 0 && finish >= 0 ? source.slice(start, finish + end.length) : '';
-  if (recorded !== block.trim()) {
+  if (normalizeLineEndings(recorded) !== normalizeLineEndings(block.trim())) {
     throw new Error('Multi shell configuration was edited; refusing to overwrite it.');
   }
-  return source.replace(block, '');
-}
-
-function moveOutOfDirectory(directory: string) {
-  const current = path.resolve(process.cwd());
-  const target = path.resolve(directory);
-  const relative = path.relative(target, current);
-  if (relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..')) {
-    process.chdir(path.dirname(target));
-  }
+  const blockStart = start > 0 && source[start - 1] === '\n' ? start - 1 : start;
+  const blockEnd =
+    finish + end.length < source.length && source[finish + end.length] === '\n'
+      ? finish + end.length + 1
+      : finish + end.length;
+  return `${source.slice(0, blockStart)}${source.slice(blockEnd)}`;
 }
 
 function validateRuntime(shell: string, platform: Platform) {
@@ -285,20 +294,48 @@ export async function setup(
   return state;
 }
 
-export async function uninstall(directory = installationDirectory()) {
+export async function uninstall(
+  directory = installationDirectory(),
+  options: UninstallOptions = {},
+) {
+  const platform = options.platform ?? process.platform;
   const state = await readInstallation(directory);
   const source = await readFile(state.shellFile, 'utf8');
   await writeFile(state.shellFile, removeBlock(source, state.block));
-  moveOutOfDirectory(directory);
   const shimFiles = state.shims ?? ['claude-multi', 'multi'];
+  const shimPaths = shimFiles.map((file) => path.join(directory, 'bin', file));
+  const deferred = platform === 'win32' ? shimPaths.filter((file) => /\.cmd$/i.test(file)) : [];
+  const immediate = shimPaths.filter((file) => !deferred.includes(file));
   for (const file of [
     ...files,
     'state.json',
     '../gateway/executable.ts',
     '../gateway/process-tree.ts',
-    ...shimFiles.map((name) => path.join('bin', name)),
+    ...immediate.map((file) => path.relative(directory, file)),
   ]) {
     await rm(path.join(directory, file), { force: true });
+  }
+  if (deferred.length) {
+    const bin = path.join(directory, 'bin');
+    const command = `"ping -n 2 127.0.0.1 >nul & del /f /q ${deferred.map((file) => `"${file}"`).join(' ')} & rmdir "${bin}" & rmdir "${directory}""`;
+    const deferDeletion =
+      options.deferDeletion ??
+      ((commandLine, args, spawnOptions) => {
+        spawn(commandLine, args, spawnOptions).unref();
+      });
+    // cmd.exe reopens a running batch file for each line and on exit, so its
+    // shims must be removed by a detached process after the parent exits.
+    deferDeletion(
+      options.env?.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
+      ['/d', '/s', '/c', command],
+      {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+        windowsVerbatimArguments: true,
+      },
+    );
+    return;
   }
   for (const empty of [path.join(directory, 'bin'), directory]) {
     try {

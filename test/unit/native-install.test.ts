@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -97,6 +97,22 @@ if (args.includes('plugin') && args.includes('list')) {
   return { directory, home, shell, listing, real, env, install, invoke, windows };
 }
 
+async function waitForMissing(file: string) {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    try {
+      await access(file);
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        return;
+      }
+      throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for ${file} to disappear`);
+}
+
 async function core(directory: string, name: string) {
   const root = path.join(directory, name);
   await mkdir(path.join(root, '.claude-plugin'), { recursive: true });
@@ -146,7 +162,11 @@ test('setup preserves shell content, is repeatable, and uninstall survives plugi
     ? '# user settings\r\n'
     : '# user settings\nexport EXISTING=retained\n';
   assert.equal(await readFile(f.shell, 'utf8'), `${original}${laterEdit}`);
-  await assert.rejects(f.invoke('claude-multi', []), /ENOENT/);
+  if (f.windows) {
+    await waitForMissing(path.join(f.home, '.local/share/multi-cli/bin/claude-multi.cmd'));
+  } else {
+    await assert.rejects(f.invoke('claude-multi', []), /ENOENT/);
+  }
   await f.install();
   assert.equal(JSON.parse((await f.invoke('claude-multi', [])).stdout).native, true);
 });
@@ -205,9 +225,33 @@ test('Windows installation writes quoted PowerShell and cmd shims and uninstalls
   assert.match(cmd, / & exit \/b\r\n$/);
   assert.match(ps, /''quotes''|quotes/);
   assert.match(state.block, /\$env:Path/);
-  await installUninstall(path.dirname(bin));
+  let deferredCommand = '';
+  let deferredArgs: string[] = [];
+  let deferredOptions: object = {};
+  await installUninstall(path.dirname(bin), {
+    platform: 'win32',
+    env: { ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+    deferDeletion: (command, args, options) => {
+      deferredCommand = command;
+      deferredArgs = args;
+      deferredOptions = options;
+    },
+  });
   assert.equal(await readFile(profile, 'utf8'), '# existing profile\r\n');
-  await assert.rejects(readFile(path.join(bin, 'claude-multi.cmd')), /ENOENT/);
+  assert.deepEqual(deferredArgs, [
+    '/d',
+    '/s',
+    '/c',
+    `"ping -n 2 127.0.0.1 >nul & del /f /q "${path.join(bin, 'claude-multi.cmd')}" "${path.join(bin, 'multi.cmd')}" & rmdir "${bin}" & rmdir "${path.dirname(bin)}""`,
+  ]);
+  assert.equal(deferredCommand, 'C:\\Windows\\System32\\cmd.exe');
+  assert.deepEqual(deferredOptions, {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+    windowsVerbatimArguments: true,
+  });
+  await rm(directory, { recursive: true, force: true });
 });
 
 test('Windows executable discovery uses PATHEXT and does not require mode bits', async (t) => {
