@@ -173,7 +173,8 @@ try {
   }
 } finally {
   await harness.close();
-  await rm(cwd, { recursive: true, force: true });
+  // The SDK child can still hold the directory open on Windows for a moment.
+  await rm(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
 }
 
 async function emulateInterruptedCommit(directory: string, runId: string) {

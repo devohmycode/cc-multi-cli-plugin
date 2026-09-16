@@ -138,3 +138,12 @@ test('leaves non-shim executables untouched', () => {
     viaComSpec: false,
   });
 });
+
+test('Windows resolution reads Path and PathExt regardless of spelling', () => {
+  const found = resolveExecutable('claude', {
+    platform: 'win32',
+    env: { Path: 'C:\\bin', PathExt: '.CMD' },
+    exists: (candidate) => candidate === 'C:\\bin\\claude.cmd',
+  });
+  assert.equal(found, 'C:\\bin\\claude.cmd');
+});

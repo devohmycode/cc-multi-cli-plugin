@@ -21,6 +21,24 @@ export interface ExecutableInvocationOptions {
 }
 
 /** Find a configured executable or a platform-appropriate PATH entry. */
+/**
+ * Windows environment names are case-insensitive and the real variable is
+ * usually spelled `Path`. A plain object built by spreading `process.env`
+ * keeps that spelling, so look the name up without regard to case.
+ */
+export function environmentValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  if (env[name] !== undefined) {
+    return env[name];
+  }
+  const wanted = name.toLowerCase();
+  for (const [key, value] of Object.entries(env)) {
+    if (key.toLowerCase() === wanted) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 export function resolveExecutable(name: string, options: ExecutableOptions = {}): string {
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
@@ -32,9 +50,10 @@ export function resolveExecutable(name: string, options: ExecutableOptions = {})
     }
     throw missingExecutable(`Configured executable does not exist: ${configured}`);
   }
-  const candidates = platform === 'win32' ? windowsCandidates(name, env.PATHEXT) : [name];
+  const candidates =
+    platform === 'win32' ? windowsCandidates(name, environmentValue(env, 'PATHEXT')) : [name];
   const found = findOnPath(
-    env.PATH ?? '',
+    environmentValue(env, 'PATH') ?? '',
     candidates,
     exists,
     platform === 'win32' ? ';' : path.delimiter,
@@ -71,7 +90,7 @@ export function executableInvocation(
       viaComSpec: false,
     };
   }
-  const command = env.ComSpec ?? process.env.ComSpec ?? 'cmd.exe';
+  const command = environmentValue(env, 'ComSpec') ?? process.env.ComSpec ?? 'cmd.exe';
   const commandLine = [quoteWindows(executable), ...args.map(quoteWindows)].join(' ');
   return {
     command,
