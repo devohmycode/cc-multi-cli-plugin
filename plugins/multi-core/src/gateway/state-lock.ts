@@ -7,6 +7,9 @@ export interface LockStateFileOptions {
   maxAttempts?: number;
   rename?: typeof rename;
   unlink?: typeof unlink;
+  open?: typeof open;
+  lstat?: typeof lstat;
+  readFile?: typeof readFile;
 }
 
 const lockOperationAttempts = 5;
@@ -36,16 +39,22 @@ export async function lockStateFile(
   const maxAttempts = options.maxAttempts ?? 100;
   const renameFile = options.rename ?? rename;
   const unlinkFile = options.unlink ?? unlink;
+  const openFile = options.open ?? open;
+  const lstatFile = options.lstat ?? lstat;
+  const readFileContents = options.readFile ?? readFile;
   if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) {
     throw new RangeError('State file lock maxAttempts must be a positive integer');
   }
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const release = await tryAcquire(file, owner, platform, unlinkFile);
+    const release = await tryAcquire(file, owner, platform, unlinkFile, openFile, readFileContents);
     if (release) {
       return release;
     }
-    await takeOverStaleLock(file, platform, renameFile, unlinkFile);
+    await takeOverStaleLock(file, platform, renameFile, unlinkFile, lstatFile, readFileContents);
+    if (platform === 'win32') {
+      await delay(20);
+    }
   }
   throw new Error(`State file lock acquisition exceeded ${maxAttempts} attempts`);
 }
@@ -55,8 +64,10 @@ async function tryAcquire(
   owner: LockOwner,
   platform: NodeJS.Platform,
   unlinkFile: typeof unlink,
+  openFile: typeof open,
+  readFileContents: typeof readFile,
 ): Promise<(() => Promise<void>) | undefined> {
-  const descriptor = await openLock(file);
+  const descriptor = await openLock(file, openFile);
   if (!descriptor) {
     return undefined;
   }
@@ -65,12 +76,12 @@ async function tryAcquire(
   } finally {
     await descriptor.close();
   }
-  return () => releaseLock(file, owner, platform, unlinkFile);
+  return () => releaseLock(file, owner, platform, unlinkFile, readFileContents);
 }
 
-async function openLock(file: string) {
+async function openLock(file: string, openFile: typeof open) {
   try {
-    return await open(file, 'wx', 0o600);
+    return await openFile(file, 'wx', 0o600);
   } catch (error) {
     if (isCode(error, 'EEXIST')) {
       return undefined;
@@ -87,17 +98,22 @@ async function takeOverStaleLock(
   platform: NodeJS.Platform,
   renameFile: typeof rename,
   unlinkFile: typeof unlink,
+  lstatFile: typeof lstat,
+  readFileContents: typeof readFile,
 ): Promise<void> {
-  const info = await lstat(file).catch((error: unknown) => {
+  const info = await lstatFile(file).catch((error: unknown) => {
     if (isCode(error, 'ENOENT')) {
       return undefined;
     }
     throw error;
   });
-  if (info?.isDirectory()) {
+  if (!info) {
+    return;
+  }
+  if (info.isDirectory()) {
     throw legacyLockError();
   }
-  const current = await readOwner(file, platform);
+  const current = await readOwner(file, platform, readFileContents);
   if (!current) {
     throw new Error('State file is locked by another gateway (owner metadata is unavailable)');
   }
@@ -129,8 +145,9 @@ async function releaseLock(
   owner: LockOwner,
   platform: NodeJS.Platform,
   unlinkFile: typeof unlink,
+  readFileContents: typeof readFile,
 ): Promise<void> {
-  const current = await readOwner(file, platform);
+  const current = await readOwner(file, platform, readFileContents);
   if (current?.token !== owner.token || current.hostname !== owner.hostname) {
     return;
   }
@@ -167,11 +184,15 @@ async function retryLockOperation<T>(
   throw new Error(`State file lock ${description} did not complete`);
 }
 
-async function readOwner(file: string, platform: NodeJS.Platform): Promise<LockOwner | undefined> {
+async function readOwner(
+  file: string,
+  platform: NodeJS.Platform,
+  readFileContents: typeof readFile = readFile,
+): Promise<LockOwner | undefined> {
   let lastParseError: SyntaxError | undefined;
   for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
-      const contents = await readFile(file, 'utf8');
+      const contents = await readFileContents(file, 'utf8');
       if (contents.trim() === '') {
         await delay(20);
         continue;

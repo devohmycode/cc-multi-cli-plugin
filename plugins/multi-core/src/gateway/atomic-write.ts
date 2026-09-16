@@ -4,7 +4,13 @@ import { rename, rm, writeFile } from 'node:fs/promises';
 export async function atomicWriteFile(
   file: string,
   data: string | Uint8Array,
-  options: { mode?: number; platform?: NodeJS.Platform; retries?: number } = {},
+  options: {
+    mode?: number;
+    platform?: NodeJS.Platform;
+    retries?: number;
+    rename?: typeof rename;
+    rm?: typeof rm;
+  } = {},
 ): Promise<void> {
   const temporary = `${file}.${randomUUID()}.tmp`;
   const retries = options.retries ?? 5;
@@ -13,23 +19,31 @@ export async function atomicWriteFile(
   }
   await writeFile(temporary, data, { mode: options.mode });
   const attempts = options.platform === 'win32' ? retries : 0;
+  const renameFile = options.rename ?? rename;
+  const removeFile = options.rm ?? rm;
   try {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        await rename(temporary, file);
+        await renameFile(temporary, file);
         return;
       } catch (error) {
-        const retryable =
-          options.platform === 'win32' &&
-          error instanceof Error &&
-          'code' in error &&
-          (error.code === 'EPERM' || error.code === 'EBUSY');
+        const retryable = isWindowsRenameRetryable(error, options.platform);
         if (!retryable || attempt >= attempts) {
           throw error;
         }
+        await new Promise<void>((resolve) => setTimeout(resolve, 20));
       }
     }
   } finally {
-    await rm(temporary, { force: true }).catch(() => {});
+    await removeFile(temporary, { force: true }).catch(() => {});
   }
+}
+
+function isWindowsRenameRetryable(error: unknown, platform: NodeJS.Platform | undefined) {
+  return (
+    platform === 'win32' &&
+    error instanceof Error &&
+    'code' in error &&
+    (error.code === 'EPERM' || error.code === 'EBUSY')
+  );
 }

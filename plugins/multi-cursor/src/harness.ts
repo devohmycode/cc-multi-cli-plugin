@@ -14,6 +14,7 @@ import type {
 } from '../../multi-core/src/gateway/messages.ts';
 import type { ModDisplayEvent } from '../../multi-core/src/gateway/mod-bridge.ts';
 import type { PermissionContext } from '../../multi-core/src/gateway/mode-hook.ts';
+import { settleOrAbort } from '../../multi-core/src/gateway/settle.ts';
 import { lockStateFile } from '../../multi-core/src/gateway/state-lock.ts';
 import { estimateTextTokens } from '../../multi-core/src/gateway/tokens.ts';
 import { CursorProviderError, cursorRunError } from './errors.ts';
@@ -530,7 +531,7 @@ export class CursorHarness {
       if (signal.aborted) {
         cancel();
       }
-      const result = await session.run.wait();
+      const result = await settleOrAbort(session.run.wait(), signal, 'Cursor native run');
       // A readable terminal result, success or not, resolves the uncertainty.
       session.interrupted = false;
       session.pendingRun = undefined;

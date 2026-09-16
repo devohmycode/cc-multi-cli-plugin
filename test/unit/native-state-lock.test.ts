@@ -143,3 +143,29 @@ test('supports the Windows lock branch through the injected platform', async (t)
   const nextRelease = await lockStateFile(file, { platform: 'win32' });
   await nextRelease();
 });
+
+test('recovers when a Windows delete-pending marker vanishes between open and stat', async (t) => {
+  const directory = await temporaryDirectory(t, 'multi-lock-delete-pending-');
+  const file = path.join(directory, 'session.lock');
+  let openAttempts = 0;
+  const release = await lockStateFile(file, {
+    platform: 'win32',
+    open: async (...args) => {
+      openAttempts += 1;
+      if (openAttempts === 1) {
+        const error = new Error('delete pending') as NodeJS.ErrnoException;
+        error.code = 'EEXIST';
+        throw error;
+      }
+      const { open } = await import('node:fs/promises');
+      return open(...args);
+    },
+    lstat: async () => {
+      const error = new Error('gone') as NodeJS.ErrnoException;
+      error.code = 'ENOENT';
+      throw error;
+    },
+  });
+  assert.equal(openAttempts, 2);
+  await release();
+});

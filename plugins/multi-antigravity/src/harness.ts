@@ -11,6 +11,7 @@ import type {
   StreamEventName,
 } from '../../multi-core/src/gateway/messages.ts';
 import type { PermissionContext } from '../../multi-core/src/gateway/mode-hook.ts';
+import { abortGraceMs, settleOrAbort } from '../../multi-core/src/gateway/settle.ts';
 import { lockStateFile } from '../../multi-core/src/gateway/state-lock.ts';
 import type {
   AntigravityResult,
@@ -295,37 +296,41 @@ export class AntigravityHarness {
       let streamed = '';
       let initSave: Promise<void> | undefined;
       const startedAt = performance.now();
-      const outcome = await this.run({
-        cwd,
-        prompt: prepared.prompt,
-        model: model.id,
-        effort: modelEffort(model),
-        ...(session.conversationId ? { conversation: session.conversationId } : {}),
-        ...(policy.plan ? { mode: 'plan' as const } : {}),
-        env: { ...process.env, MULTI_ANTIGRAVITY_DENY: JSON.stringify(nativeDenied) },
+      const outcome = await settleOrAbort(
+        this.run({
+          cwd,
+          prompt: prepared.prompt,
+          model: model.id,
+          effort: modelEffort(model),
+          ...(session.conversationId ? { conversation: session.conversationId } : {}),
+          ...(policy.plan ? { mode: 'plan' as const } : {}),
+          env: { ...process.env, MULTI_ANTIGRAVITY_DENY: JSON.stringify(nativeDenied) },
+          signal,
+          onEvent: (event) =>
+            this.eventText(
+              event,
+              response,
+              (text) => {
+                streamed += text;
+              },
+              (conversationId) => {
+                session.conversationId = conversationId;
+                session.interrupted = true;
+                initConversationId = conversationId;
+                // Best-effort durability write: if the gateway crashes before a
+                // terminal result arrives, the next request resumes this native
+                // conversation with the interrupted notice instead of starting a
+                // fresh one. Fired here, not awaited here, so it never blocks the
+                // stream; awaited below before the terminal result is processed.
+                initSave = this.saveSession(session).catch(() => {
+                  // The run continues regardless of a failed durability write.
+                });
+              },
+            ),
+        }),
         signal,
-        onEvent: (event) =>
-          this.eventText(
-            event,
-            response,
-            (text) => {
-              streamed += text;
-            },
-            (conversationId) => {
-              session.conversationId = conversationId;
-              session.interrupted = true;
-              initConversationId = conversationId;
-              // Best-effort durability write: if the gateway crashes before a
-              // terminal result arrives, the next request resumes this native
-              // conversation with the interrupted notice instead of starting a
-              // fresh one. Fired here, not awaited here, so it never blocks the
-              // stream; awaited below before the terminal result is processed.
-              initSave = this.saveSession(session).catch(() => {
-                // The run continues regardless of a failed durability write.
-              });
-            },
-          ),
-      });
+        'Antigravity native run',
+      );
       await initSave;
       const result = outcome.result;
       session.conversationId = result.conversation_id;
@@ -477,7 +482,7 @@ export class AntigravityHarness {
         running.push(exchange.result);
       }
     }
-    await Promise.allSettled(running);
+    await bounded(Promise.allSettled(running));
     for (const session of this.sessions.values()) {
       await this.releaseLock(session);
     }
@@ -851,6 +856,20 @@ async function atomicJson(
   platform: NodeJS.Platform = process.platform,
 ) {
   await atomicWriteFile(file, JSON.stringify(value), { mode: 0o600, platform });
+}
+
+async function bounded(operation: Promise<unknown>) {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      operation,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, abortGraceMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const missingPermissions: CheckAntigravityPermissions = async () => {
