@@ -28,6 +28,25 @@ function windowsInvocation(pathname: string, args: string[], env: NodeJS.Process
   };
 }
 
+function windowsSystemEnvironment(): NodeJS.ProcessEnv {
+  const names = [
+    'SystemRoot',
+    'windir',
+    'SystemDrive',
+    'TEMP',
+    'TMP',
+    'APPDATA',
+    'LOCALAPPDATA',
+    'PATHEXT',
+    'ProgramFiles',
+    'ProgramData',
+    'NUMBER_OF_PROCESSORS',
+  ];
+  return Object.fromEntries(
+    names.filter((name) => process.env[name]).map((name) => [name, process.env[name]]),
+  );
+}
+
 const repository = fileURLToPath(new URL('../../', import.meta.url));
 const directory = await mkdtemp(path.join(os.tmpdir(), 'multi-installed-'));
 const source = path.join(directory, 'marketplace');
@@ -62,6 +81,9 @@ const env = {
   CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
   ...(platform === 'win32'
     ? {
+        // npm, cmd.exe and the plugin manager need the Windows system variables;
+        // without TEMP, APPDATA and PATHEXT the dependency install fails quietly.
+        ...windowsSystemEnvironment(),
         PSModulePath: process.env.PSModulePath ?? path.join(home, 'PowerShell', 'Modules'),
         ComSpec: process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
         USERPROFILE: home,
@@ -108,10 +130,15 @@ const fake =
   platform === 'win32'
     ? path.join(directory, 'claude-fixture.cmd')
     : path.join(directory, 'claude-fixture');
+// Same fake as the launcher unit tests: answers the version, plugin-list and
+// auth probes and acknowledges the Mods session, then reports the picker.
 const fakeScript = `const fs=require('node:fs');const args=process.argv.slice(2);
-if(args[0]==='auth'){console.log(JSON.stringify({loggedIn:false}));process.exitCode=1}else{
+if(args.includes('plugin')&&args.includes('list')){console.log('[]');process.exit(0)}
+if(args[0]==='--version'){console.log(process.env.TEST_CLAUDE_VERSION??'2.1.272');process.exit(0)}
+const result=(value)=>{const base=process.env.MULTI_MOD_GATEWAY_URL;if(!base){console.log(value);return}const url=new URL(base+'/multi/mod/session');const req=require('node:http').request(url,{method:'POST',headers:{'content-type':'application/json','x-multi-gateway-token':process.env.MULTI_GATEWAY_TOKEN}},()=>console.log(value));req.on('error',()=>console.log(value));req.end(JSON.stringify({sessionId:'fixture',event:'start'}));};
+if(args[0]==='auth'){process.stdout.write(JSON.stringify({loggedIn:false}));process.exitCode=1}else{
 const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'utf8'));
-console.log(JSON.stringify(settings.modelPicker.options.map(x=>x.model)));}
+result(JSON.stringify(settings.modelPicker.options.map(x=>x.model)));}
 `;
 await writeFile(fakeSource, fakeScript);
 if (platform === 'win32') {
