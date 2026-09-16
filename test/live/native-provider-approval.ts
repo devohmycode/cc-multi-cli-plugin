@@ -7,9 +7,10 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
 import { NativeApprovalBridge } from '../../plugins/multi-core/src/gateway/approval.ts';
+import { hookCommand } from '../../plugins/multi-core/src/gateway/permission-hook.ts';
 import { terminateProcessTree } from '../../plugins/multi-core/src/gateway/process-tree.ts';
 import type { GatewayEvent } from '../../plugins/multi-core/src/gateway/server.ts';
 import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
@@ -300,7 +301,7 @@ try {
   { mode: 0o600 },
 );
 const settings = path.join(artifacts, 'settings.json');
-const hook = { type: 'command', command: `${process.execPath} ${hookFile}`, timeout: 60 };
+const hook = { type: 'command', command: hookCommand(pathToFileURL(hookFile)), timeout: 60 };
 await writeFile(
   settings,
   JSON.stringify({
@@ -324,19 +325,28 @@ await writeFile(
 // Python stdlib supplies a real terminal; stdin carries only the test's UI answers.
 
 const debugFile = path.join(artifacts, 'debug.log');
-const terminalCommand = process.platform === 'win32' ? process.execPath : 'python3';
+let terminalCommand = 'python3';
+if (process.platform === 'win32') {
+  terminalCommand = launcher ? process.execPath : 'claude';
+}
 const terminalArgs = process.platform === 'win32' ? [] : ['-c', pty];
+let invocationArgs: string[];
+if (launcher) {
+  invocationArgs = [
+    ...(process.platform === 'win32' ? [] : [process.execPath]),
+    fileURLToPath(new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url)),
+    '--',
+  ];
+} else if (process.platform === 'win32') {
+  invocationArgs = [];
+} else {
+  invocationArgs = ['claude'];
+}
 const child = spawn(
   terminalCommand,
   [
     ...terminalArgs,
-    ...(launcher
-      ? [
-          process.execPath,
-          fileURLToPath(new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url)),
-          '--',
-        ]
-      : ['claude']),
+    ...invocationArgs,
     prompt,
     '--model',
     initialModel,

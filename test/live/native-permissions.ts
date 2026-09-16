@@ -5,10 +5,11 @@ import { appendFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs, stripVTControlCharacters } from 'node:util';
+import { hookCommand } from '../../plugins/multi-core/src/gateway/permission-hook.ts';
 import type { HookInput, TranscriptEntry } from './native-events.ts';
-import { pty } from './native-pty.ts';
+import { pty, skipIfPtyUnsupported } from './native-pty.ts';
 
 const { values } = parseArgs({
   options: { model: { type: 'string' }, mode: { type: 'string' }, help: { type: 'boolean' } },
@@ -25,6 +26,9 @@ assert(
   'This Claude tool-permission test supports OpenAI; native Cursor is unsupported.',
 );
 assert(!values.mode || modes.includes(values.mode), 'Unknown permission mode');
+if (skipIfPtyUnsupported()) {
+  process.exit(0);
+}
 assert.equal(spawnSync('python3', ['--version']).status, 0, 'Python 3 required');
 const root = await mkdtemp(path.join(os.tmpdir(), 'native-permissions-'));
 console.log(`Artifacts: ${root}`);
@@ -47,7 +51,7 @@ for (const model of models) {
       hookFile,
       `import {readFileSync,appendFileSync} from 'node:fs'; appendFileSync(${JSON.stringify(eventsFile)},readFileSync(0,'utf8').trim()+'\\n'); console.log('{}');`,
     );
-    const hook = { type: 'command', command: `${process.execPath} ${hookFile}`, timeout: 10 };
+    const hook = { type: 'command', command: hookCommand(pathToFileURL(hookFile)), timeout: 10 };
     const settings = path.join(cwd, 'settings.json');
     // Observation only: no allow/deny/ask rules or permission decisions from hooks.
     await writeFile(
