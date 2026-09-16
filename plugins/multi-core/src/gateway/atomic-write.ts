@@ -13,7 +13,9 @@ export async function atomicWriteFile(
   } = {},
 ): Promise<void> {
   const temporary = `${file}.${randomUUID()}.tmp`;
-  const retries = options.retries ?? 5;
+  // Windows sharing violations last as long as a concurrent reader holds the
+  // file open; 50 paced attempts cover about a second of contention.
+  const retries = options.retries ?? 50;
   if (!Number.isSafeInteger(retries) || retries < 0) {
     throw new RangeError('Atomic write retries must be a non-negative integer');
   }

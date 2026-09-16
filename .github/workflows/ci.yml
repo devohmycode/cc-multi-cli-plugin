@@ -17,10 +17,13 @@ jobs:
           node-version: 24
       - run: npm ci
       # Absolute file URL so child processes spawned from other directories
-      # still resolve the watchdog.
-      - run: echo "NODE_OPTIONS=--import=$(node -p "require('node:url').pathToFileURL(require('node:path').join(process.cwd(), 'test/watchdog.ts')).href")" >> "$GITHUB_ENV"
+      # still resolve the watchdog. GitHub refuses NODE_OPTIONS itself in
+      # GITHUB_ENV, so it goes through an intermediate variable.
+      - run: echo "MULTI_WATCHDOG=--import=$(node -p "require('node:url').pathToFileURL(require('node:path').join(process.cwd(), 'test/watchdog.ts')).href")" >> "$GITHUB_ENV"
         shell: bash
       - run: npm run check
+        env:
+          NODE_OPTIONS: ${{ env.MULTI_WATCHDOG }}
       - if: failure()
         uses: actions/upload-artifact@v4
         with:

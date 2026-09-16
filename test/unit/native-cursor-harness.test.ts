@@ -33,7 +33,19 @@ const signal = () => {
   timer.unref();
   return controller.signal;
 };
-const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+// Polls sleep instead of spinning: a tight readFile loop keeps a handle open,
+// which on Windows makes the harness's atomic rename fail. Every poll is bounded
+// so a wrong expectation fails with a message instead of hitting the test timeout.
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 10));
+async function until(condition: () => Promise<boolean> | boolean, what: string) {
+  const deadline = Date.now() + 15_000;
+  while (!(await condition())) {
+    if (Date.now() > deadline) {
+      throw new Error(`Timed out waiting for ${what}`);
+    }
+    await tick();
+  }
+}
 
 function follow(response: MessagesResponse): MessagesRequest {
   return {
@@ -391,14 +403,12 @@ test('terminal cancellation is durable and a new observed prompt can continue in
   await assert.rejects(request);
   // The outer request settles as soon as the caller disconnects; the internal
   // cancellation and its durability write finish independently afterward.
-  while (f.cancellations() < 1) {
-    await tick();
-  }
+  await until(() => f.cancellations() >= 1, 'the native cancellation');
   let saved = JSON.parse(await readFile(f.sessionFile, 'utf8'));
-  while (saved.interrupted) {
-    await tick();
+  await until(async () => {
     saved = JSON.parse(await readFile(f.sessionFile, 'utf8'));
-  }
+    return !saved.interrupted;
+  }, 'the terminal cancellation to be persisted');
   // A genuine terminal result (even a cancelled one) resolves the uncertainty;
   // the session is not left interrupted.
   assert.equal(saved.interrupted, false);
@@ -407,9 +417,7 @@ test('terminal cancellation is durable and a new observed prompt can continue in
     'main',
     signal(),
   );
-  while (f.sends.length < 2) {
-    await tick();
-  }
+  await until(() => f.sends.length >= 2, 'the second native send');
   f.results[1].resolve({ id: 'run', status: 'finished', result: 'done' });
   await next;
   assert.doesNotMatch(JSON.stringify(f.sends[1].prompt), /first request/);
@@ -495,9 +503,7 @@ test('shutdown during delayed agent creation closes the late agent without sendi
   const harness = f.make();
   const request = harness.handle(body, 'main', signal());
   void request.catch(() => {});
-  while (!f.configurations.length) {
-    await tick();
-  }
+  await until(() => f.configurations.length > 0, 'the native configuration');
   await harness.close();
   gate.resolve();
   await assert.rejects(request, /closed|disconnected/);
@@ -584,9 +590,7 @@ test('failed atomic completion preserves uncertainty and a later retry resumes w
   assert.equal(saved.interrupted, true);
   const second = f.make();
   const retry = second.handle(body, 'main', signal());
-  while (f.sends.length < 2) {
-    await tick();
-  }
+  await until(() => f.sends.length >= 2, 'the second native send');
   assert.match(JSON.stringify(f.sends[1].prompt), /previous turn was interrupted/);
   f.results[1].resolve({ id: 'run', status: 'finished', result: 'done' });
   const response = await retry;
@@ -682,9 +686,7 @@ test('failed initial persistence closes the unused SDK agent and allows a safe s
   f.delayCreate(gate.promise);
   const harness = f.make();
   const request = harness.handle(body, 'main', signal());
-  while (!f.configurations.length) {
-    await tick();
-  }
+  await until(() => f.configurations.length > 0, 'the native configuration');
   await mkdir(f.sessionFile);
   gate.resolve();
   await assert.rejects(request);
