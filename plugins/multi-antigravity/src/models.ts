@@ -1,5 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import {
+  executableInvocation,
+  resolveExecutable,
+} from '../../multi-core/src/gateway/executable.ts';
 import { antigravityEnvironment } from './cli.ts';
 
 export interface AntigravityModel {
@@ -31,12 +35,40 @@ export function parseAntigravityModels(output: string): AntigravityModel[] {
   return [...models.values()];
 }
 
-export async function discoverAntigravityModels(): Promise<AntigravityModel[]> {
-  const { stdout } = await promisify(execFile)('agy', ['models'], {
-    timeout: 15000,
-    maxBuffer: 1024 * 1024,
-    env: antigravityEnvironment({ NO_COLOR: '1' }),
-  });
+export interface AntigravityModelDiscoveryOptions {
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  executable?: string;
+  execFile?: typeof execFile;
+  exists?: (filename: string) => boolean;
+}
+
+export async function discoverAntigravityModels(
+  options: AntigravityModelDiscoveryOptions = {},
+): Promise<AntigravityModel[]> {
+  const platform = options.platform ?? process.platform;
+  const environment = antigravityEnvironment({ ...options.env, NO_COLOR: '1' });
+  const invocation = executableInvocation(
+    resolveExecutable('agy', {
+      platform,
+      env: environment,
+      configuredPath: options.executable,
+      exists: options.exists,
+    }),
+    ['models'],
+    platform,
+    environment,
+  );
+  const { stdout } = await promisify(options.execFile ?? execFile)(
+    invocation.command,
+    invocation.args,
+    {
+      timeout: 15000,
+      maxBuffer: 1024 * 1024,
+      env: environment,
+      ...invocation.options,
+    },
+  );
   return parseAntigravityModels(stdout);
 }
 

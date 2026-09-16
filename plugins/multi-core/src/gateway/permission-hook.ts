@@ -1,9 +1,9 @@
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-export function hookCommand(file: URL): string {
+export function hookCommand(file: URL, platform: NodeJS.Platform = process.platform): string {
   return [process.execPath, fileURLToPath(file)]
     .map((value) => {
-      if (process.platform !== 'win32') {
+      if (platform !== 'win32') {
         return `'${value.replaceAll("'", "'\\''")}'`;
       }
       if (/["%\r\n!]/.test(value)) {

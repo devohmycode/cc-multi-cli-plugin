@@ -50,7 +50,7 @@ define the product direction.
   unsupported modes, unknown workers and untranslatable policies fail
   explicitly. Claude's PreToolUse/PermissionRequest hooks never run for native
   harness tools; they are observability, not policy, and do not block admission.
-  Settings admission currently supports Linux without WSL.
+  Settings admission is implemented for Linux, WSL, macOS, and Windows; offline coverage is CI-verified when the matrix passes, while live macOS/Windows validation remains pending.
 - Preserve Claude subscription passthrough and isolate provider credentials.
   Do not add our own Claude subscription login/token pool or extract Antigravity
   tokens for direct model requests. External operations retain external permissions.
@@ -150,7 +150,7 @@ make the folders look independent.
   to evade validation just to pass lint. Any necessary suppression must name the
   specific rule and explain the concrete external/protocol constraint locally.
 - Knip checks active gateway/provider entry points, tests and scripts. `codex`
-  and Linux `flock` are external commands, not npm dependencies. Biome excludes
+  and no external lock command is an npm dependency. Biome excludes
   the lockfile; hand-written runtime and test code stay covered.
 - Preserve unrelated uncommitted work. Do not restore removed integrations from
   archived plans or install/publish changes merely because an old skill says to.

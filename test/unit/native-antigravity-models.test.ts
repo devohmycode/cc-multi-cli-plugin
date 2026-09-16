@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   antigravityPickerOptions,
+  discoverAntigravityModels,
   parseAntigravityModels,
   selectAntigravityModel,
 } from '../../plugins/multi-antigravity/src/models.ts';
@@ -77,4 +78,36 @@ test('Antigravity never shadows a native base or collapses thinking identities b
     ...models[0],
     effort: 'low',
   });
+});
+
+test('discovers Windows npm shims with injected platform and process execution', async () => {
+  let receivedCommand = '';
+  let receivedArgs: readonly string[] = [];
+  let receivedOptions: Record<string, unknown> = {};
+  const fakeExecFile = ((
+    command: string,
+    args: readonly string[],
+    options: Record<string, unknown>,
+    callback: (error: null, result: { stdout: string; stderr: string }) => void,
+  ) => {
+    receivedCommand = command;
+    receivedArgs = args;
+    receivedOptions = options;
+    callback(null, { stdout: 'gemini-low\tGemini Low\n', stderr: '' });
+  }) as unknown as typeof import('node:child_process').execFile;
+
+  const models = await discoverAntigravityModels({
+    platform: 'win32',
+    env: { PATH: 'C:\\tools', ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+    exists: (filename) => filename === 'C:\\tools\\agy.cmd',
+    execFile: fakeExecFile,
+  });
+
+  assert.equal(receivedCommand, 'C:\\Windows\\System32\\cmd.exe');
+  assert.deepEqual(receivedArgs, ['/d', '/s', '/c', '"C:\\tools\\agy.cmd models"']);
+  assert.equal(receivedOptions.windowsVerbatimArguments, true);
+  assert.deepEqual(
+    models.map(({ id }) => id),
+    ['gemini-low'],
+  );
 });

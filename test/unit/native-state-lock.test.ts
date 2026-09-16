@@ -1,15 +1,78 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os, { hostname } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { lockStateFile } from '../../plugins/multi-core/src/gateway/state-lock.ts';
 
-test('kernel lock excludes concurrent owners and releases after a gateway crash', {
-  timeout: 10000,
-}, async (t) => {
-  const directory = await mkdtemp('/tmp/cursor-lock-test-');
+async function temporaryDirectory(t: test.TestContext, prefix: string): Promise<string> {
+  const directory = await mkdtemp(path.join(os.tmpdir(), prefix));
   t.after(() => rm(directory, { recursive: true, force: true }));
+  return directory;
+}
+
+test('acquires, excludes concurrent owners, and releases a state lock', async (t) => {
+  const directory = await temporaryDirectory(t, 'multi-state-lock-');
+  const file = path.join(directory, 'session.lock');
+  const release = await lockStateFile(file);
+  const metadata = JSON.parse(await readFile(file, 'utf8')) as { pid: number; token: string };
+  assert.equal(metadata.pid, process.pid);
+  assert.ok(metadata.token);
+  await assert.rejects(lockStateFile(file), /locked/);
+  await release();
+  const nextRelease = await lockStateFile(file);
+  await nextRelease();
+});
+
+test('legacy directory locks remain explicit recovery evidence', async (t) => {
+  const directory = await temporaryDirectory(t, 'multi-legacy-lock-');
+  const file = path.join(directory, 'session.lock');
+  await mkdir(file);
+  await assert.rejects(lockStateFile(file), /legacy interrupted lock/);
+});
+
+test('waits for an owner that is still writing its marker', async (t) => {
+  const directory = await temporaryDirectory(t, 'multi-partial-lock-');
+  const file = path.join(directory, 'session.lock');
+  await writeFile(file, '', { mode: 0o600 });
+  const writing = new Promise<void>((resolve, reject) => {
+    setTimeout(() => {
+      writeFile(
+        file,
+        `${JSON.stringify({ pid: process.pid, hostname: hostname(), token: 'writing' })}\n`,
+      ).then(resolve, reject);
+    }, 30);
+  });
+  await assert.rejects(lockStateFile(file), /locked by another gateway/);
+  await writing;
+});
+
+test('does not take over a lock recorded on another hostname', async (t) => {
+  const directory = await temporaryDirectory(t, 'multi-foreign-lock-');
+  const file = path.join(directory, 'session.lock');
+  await writeFile(
+    file,
+    `${JSON.stringify({ pid: 2147483647, hostname: 'another-host', token: 'foreign' })}\n`,
+    { mode: 0o600 },
+  );
+  await assert.rejects(lockStateFile(file), /locked by another gateway/);
+});
+
+test('takes over a lock whose recorded owner is no longer alive', async (t) => {
+  const directory = await temporaryDirectory(t, 'multi-stale-lock-');
+  const file = path.join(directory, 'session.lock');
+  await writeFile(
+    file,
+    `${JSON.stringify({ pid: 2147483647, hostname: hostname(), token: 'stale' })}\n`,
+    { mode: 0o600 },
+  );
+  const release = await lockStateFile(file);
+  await release();
+});
+
+test('releases after the holder process is killed', { timeout: 10000 }, async (t) => {
+  const directory = await temporaryDirectory(t, 'multi-crash-lock-');
   const file = path.join(directory, 'session.lock');
   const module = new URL('../../plugins/multi-core/src/gateway/state-lock.ts', import.meta.url);
   const child = spawn(
@@ -23,65 +86,28 @@ test('kernel lock excludes concurrent owners and releases after a gateway crash'
     { stdio: ['pipe', 'pipe', 'pipe'] },
   );
   t.after(() => {
-    child.kill('SIGKILL');
+    if (!child.killed) {
+      child.kill();
+    }
   });
-  const exited = new Promise<void>((resolve) => child.once('close', () => resolve()));
   await new Promise<void>((resolve, reject) => {
     child.stdout.once('data', () => resolve());
     child.once('error', reject);
     child.once('close', () => reject(new Error('Lock owner exited before acquisition')));
   });
   await assert.rejects(lockStateFile(file), /locked/);
-  child.kill('SIGKILL');
-  await exited;
-  let release: (() => Promise<void>) | undefined;
-  for (let attempt = 0; attempt < 50 && !release; attempt++) {
-    try {
-      release = await lockStateFile(file);
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-  }
-  assert(release, 'Dead gateway must release kernel ownership without deleting state files');
-  await release();
-});
-
-test('legacy directory locks remain explicit recovery evidence', async (t) => {
-  const directory = await mkdtemp('/tmp/cursor-legacy-lock-test-');
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const file = path.join(directory, 'session.lock');
-  await mkdir(file);
-  await assert.rejects(lockStateFile(file), /legacy interrupted lock/);
-});
-
-test('parent descriptor keeps ownership after flock exits and failed acquisition releases its descriptor', async (t) => {
-  const directory = await mkdtemp('/tmp/cursor-fd-lock-test-');
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const file = path.join(directory, 'session.lock');
+  child.kill();
+  await new Promise<void>((resolve) => child.once('close', () => resolve()));
   const release = await lockStateFile(file);
-  assert.equal((await stat(file)).mode & 0o777, 0o600);
-  const descriptors = (await readdir('/proc/self/fd')).length;
-  await assert.rejects(lockStateFile(file), /locked/);
-  assert.equal((await readdir('/proc/self/fd')).length, descriptors);
   await release();
-  const nextRelease = await lockStateFile(file);
-  await nextRelease();
 });
 
-test('missing flock fails explicitly and closes the opened descriptor', async (t) => {
-  const directory = await mkdtemp('/tmp/cursor-no-flock-test-');
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const previous = process.env.PATH;
-  const descriptors = (await readdir('/proc/self/fd')).length;
-  process.env.PATH = directory;
-  try {
-    await assert.rejects(lockStateFile(path.join(directory, 'session.lock')), /ENOENT/);
-    assert.equal((await readdir('/proc/self/fd')).length, descriptors);
-  } finally {
-    if (previous === undefined) {
-      delete process.env.PATH;
-    } else {
-      process.env.PATH = previous;
-    }
-  }
+test('supports the Windows lock branch through the injected platform', async (t) => {
+  const directory = await temporaryDirectory(t, 'multi-win32-lock-');
+  const file = path.join(directory, 'session.lock');
+  const release = await lockStateFile(file, { platform: 'win32' });
+  await assert.rejects(lockStateFile(file, { platform: 'win32' }), /locked/);
+  await release();
+  const nextRelease = await lockStateFile(file, { platform: 'win32' });
+  await nextRelease();
 });

@@ -1,10 +1,34 @@
 import { spawn } from 'node:child_process';
+import { executableInvocation } from '../gateway/executable.ts';
+import { terminateProcessTree } from '../gateway/process-tree.ts';
+
+export interface RunOptions {
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+}
 
 /** Shell-free foreground process, including cancellation and exit status. */
-export async function run(command: string, args: string[], env = process.env): Promise<number> {
-  const child = spawn(command, args, { stdio: 'inherit', env });
-  const terminate = () => child.kill('SIGTERM');
-  const interrupt = () => {}; // The foreground terminal signals both processes.
+export async function run(
+  command: string,
+  args: string[],
+  supplied: RunOptions | NodeJS.ProcessEnv = {},
+): Promise<number> {
+  const options = normalizeOptions(supplied);
+  const platform = options.platform ?? process.platform;
+  const environment = options.env ?? process.env;
+  const invocation = executableInvocation(command, args, platform, environment);
+  const child = spawn(invocation.command, invocation.args, {
+    stdio: 'inherit',
+    env: environment,
+    detached: platform !== 'win32',
+    ...invocation.options,
+  });
+  const terminate = () => {
+    if (child.pid) {
+      terminateProcessTree(child.pid, { platform });
+    }
+  };
+  const interrupt = () => {}; // The foreground terminal signals both processes on Unix.
   process.on('SIGTERM', terminate);
   process.on('SIGINT', interrupt);
   try {
@@ -16,4 +40,11 @@ export async function run(command: string, args: string[], env = process.env): P
     process.off('SIGTERM', terminate);
     process.off('SIGINT', interrupt);
   }
+}
+
+function normalizeOptions(supplied: RunOptions | NodeJS.ProcessEnv): RunOptions {
+  if ('platform' in supplied || 'env' in supplied) {
+    return supplied as RunOptions;
+  }
+  return { env: supplied as NodeJS.ProcessEnv };
 }

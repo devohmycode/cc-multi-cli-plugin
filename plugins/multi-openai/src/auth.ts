@@ -2,6 +2,11 @@ import { spawn } from 'node:child_process';
 import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import {
+  executableInvocation,
+  resolveExecutable,
+} from '../../multi-core/src/gateway/executable.ts';
+import { terminateProcessTree } from '../../multi-core/src/gateway/process-tree.ts';
 
 /** Codex's saved ChatGPT login, forwarded as OpenAI request headers. */
 export interface CodexAuthHeaders {
@@ -57,10 +62,19 @@ function tokenExpiry(token: string): number {
   }
 }
 
-export async function readCodexAuth(authFile: string): Promise<CodexAuthHeaders> {
+export interface CodexAuthOptions {
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  executable?: string;
+}
+
+export async function readCodexAuth(
+  authFile: string,
+  options: CodexAuthOptions = {},
+): Promise<CodexAuthHeaders> {
   const saved = await savedAuth(authFile);
   if (saved.canRefresh && saved.expires <= Date.now() + 60000) {
-    return renewAuth(authFile, saved.headers);
+    return renewAuth(authFile, saved.headers, options);
   }
   return saved.headers;
 }
@@ -70,9 +84,10 @@ export async function codexRequest(
   authFile: string,
   signal: AbortSignal,
   send: (headers: CodexAuthHeaders) => Promise<Response>,
+  options: CodexAuthOptions = {},
 ): Promise<Response> {
   signal.throwIfAborted();
-  const headers = await waitForAuth(readCodexAuth(authFile), signal);
+  const headers = await waitForAuth(readCodexAuth(authFile, options), signal);
   signal.throwIfAborted();
   const response = await send(headers);
   if (response.status !== 401) {
@@ -82,7 +97,7 @@ export async function codexRequest(
   if (!(await savedAuth(authFile)).canRefresh) {
     return response;
   }
-  const renewed = await waitForAuth(renewAuth(authFile, headers), signal);
+  const renewed = await waitForAuth(renewAuth(authFile, headers, options), signal);
   signal.throwIfAborted();
   return send(renewed);
 }
@@ -103,11 +118,17 @@ async function waitForAuth(pending: Promise<CodexAuthHeaders>, signal: AbortSign
   }
 }
 
-async function renewAuth(authFile: string, rejected: CodexAuthHeaders): Promise<CodexAuthHeaders> {
+async function renewAuth(
+  authFile: string,
+  rejected: CodexAuthHeaders,
+  options: CodexAuthOptions = {},
+): Promise<CodexAuthHeaders> {
   const filename = await realpath(authFile);
   let pending = refreshing.get(filename);
   if (!pending) {
-    pending = refreshIfUnchanged(filename, rejected).finally(() => refreshing.delete(filename));
+    pending = refreshIfUnchanged(filename, rejected, options).finally(() =>
+      refreshing.delete(filename),
+    );
     refreshing.set(filename, pending);
   }
   await pending;
@@ -123,7 +144,11 @@ async function renewAuth(authFile: string, rejected: CodexAuthHeaders): Promise<
   return renewed;
 }
 
-async function refreshIfUnchanged(authFile: string, rejected: CodexAuthHeaders) {
+async function refreshIfUnchanged(
+  authFile: string,
+  rejected: CodexAuthHeaders,
+  options: CodexAuthOptions = {},
+) {
   // Another worker or Codex process may already have renewed the shared file.
   if ((await savedAuth(authFile)).headers.authorization !== rejected.authorization) {
     return;
@@ -131,12 +156,24 @@ async function refreshIfUnchanged(authFile: string, rejected: CodexAuthHeaders) 
   if (path.basename(authFile) !== 'auth.json') {
     throw renewalFailure();
   }
-  const child = spawn('codex', ['app-server', '-c', 'cli_auth_credentials_store="file"'], {
-    env: { ...process.env, CODEX_HOME: path.dirname(authFile) },
+  const environment = { ...process.env, ...options.env, CODEX_HOME: path.dirname(authFile) };
+  const invocation = executableInvocation(
+    resolveExecutable('codex', {
+      platform: options.platform,
+      env: environment,
+      configuredPath: options.executable,
+    }),
+    ['app-server', '-c', 'cli_auth_credentials_store="file"'],
+    options.platform,
+    environment,
+  );
+  const child = spawn(invocation.command, invocation.args, {
+    env: environment,
     stdio: ['pipe', 'pipe', 'ignore'],
     timeout: 30000,
-    killSignal: 'SIGKILL',
+    detached: (options.platform ?? process.platform) !== 'win32',
     windowsHide: true,
+    ...invocation.options,
   });
   const lines = createInterface({ input: child.stdout });
   child.on('error', () => lines.close());
@@ -145,7 +182,9 @@ async function refreshIfUnchanged(authFile: string, rejected: CodexAuthHeaders) 
   child.stdout.on('data', (chunk: Buffer) => {
     bytes += chunk.length;
     if (bytes > 1024 * 1024) {
-      child.kill('SIGKILL');
+      if (child.pid) {
+        terminateProcessTree(child.pid, { platform: options.platform, signal: 'SIGKILL' });
+      }
       lines.close();
     }
   });
@@ -163,7 +202,9 @@ async function refreshIfUnchanged(authFile: string, rejected: CodexAuthHeaders) 
   } finally {
     lines.close();
     child.stdin.destroy();
-    child.kill('SIGKILL');
+    if (child.pid) {
+      terminateProcessTree(child.pid, { platform: options.platform, signal: 'SIGKILL' });
+    }
   }
 }
 

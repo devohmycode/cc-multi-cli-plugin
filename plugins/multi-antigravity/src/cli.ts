@@ -1,5 +1,10 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
+import {
+  executableInvocation,
+  resolveExecutable,
+} from '../../multi-core/src/gateway/executable.ts';
+import { terminateProcessTree } from '../../multi-core/src/gateway/process-tree.ts';
 
 type AntigravityStatus =
   | 'SUCCESS'
@@ -69,6 +74,7 @@ export interface AntigravityRunOptions {
   newProject?: boolean;
   printTimeout?: string;
   env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
   executable?: string;
   maxOutputBytes?: number;
   onEvent?: (event: AntigravityStreamEvent) => void;
@@ -141,14 +147,27 @@ export function runAntigravity(options: AntigravityRunOptions): Promise<Antigrav
 
   return new Promise((resolve, reject) => {
     let child: ChildProcess;
+    const platform = options.platform ?? process.platform;
+    const environment = antigravityEnvironment(options.env);
     try {
-      child = spawn(options.executable ?? 'agy', args, {
+      const invocation = executableInvocation(
+        resolveExecutable('agy', {
+          platform,
+          env: environment,
+          configuredPath: options.executable,
+        }),
+        args,
+        platform,
+        environment,
+      );
+      child = spawn(invocation.command, invocation.args, {
         cwd: options.cwd,
-        env: antigravityEnvironment(options.env),
-        detached: process.platform === 'linux',
+        env: environment,
+        detached: platform !== 'win32',
         shell: false,
         stdio: [promptOnStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
         windowsHide: true,
+        ...invocation.options,
       });
     } catch (error) {
       reject(new AntigravityCliError(`Failed to start agy: ${String(error)}`, 'spawn'));
@@ -168,17 +187,8 @@ export function runAntigravity(options: AntigravityRunOptions): Promise<Antigrav
     let settled = false;
 
     const kill = (signal: NodeJS.Signals) => {
-      if (!child.pid) {
-        return;
-      }
-      try {
-        if (process.platform === 'linux') {
-          process.kill(-child.pid, signal);
-        } else {
-          child.kill(signal);
-        }
-      } catch {
-        // The process may have exited between escalation steps.
+      if (child.pid) {
+        terminateProcessTree(child.pid, { platform, signal });
       }
     };
     const stop = () => {

@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
 import { NativeApprovalBridge } from '../../plugins/multi-core/src/gateway/approval.ts';
+import { terminateProcessTree } from '../../plugins/multi-core/src/gateway/process-tree.ts';
 import type { GatewayEvent } from '../../plugins/multi-core/src/gateway/server.ts';
 import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 import { readCodexAuth } from '../../plugins/multi-openai/src/auth.ts';
@@ -34,8 +35,11 @@ assert(
     .every((arg) => ['--native-escalation', '--launcher', '--claude-auth-fixture'].includes(arg)),
   'Unsupported option; native Cursor has no separate reviewer.',
 );
-assert.notEqual(process.platform, 'win32', 'PTY proof requires Linux/macOS');
-assert.equal(spawnSync('python3', ['--version']).status, 0, 'Python 3 required');
+if (process.platform !== 'win32') {
+  assert.equal(spawnSync('python3', ['--version']).status, 0, 'Python 3 required');
+} else {
+  console.warn('SKIP: ConPTY terminal proof is not implemented; running direct non-PTY checks.');
+}
 const artifacts = await mkdtemp(path.join(os.tmpdir(), 'native-provider-approval-'));
 console.log(`Artifacts: ${artifacts}`);
 const config = path.join(artifacts, 'claude-config');
@@ -320,11 +324,12 @@ await writeFile(
 // Python stdlib supplies a real terminal; stdin carries only the test's UI answers.
 
 const debugFile = path.join(artifacts, 'debug.log');
+const terminalCommand = process.platform === 'win32' ? process.execPath : 'python3';
+const terminalArgs = process.platform === 'win32' ? [] : ['-c', pty];
 const child = spawn(
-  'python3',
+  terminalCommand,
   [
-    '-c',
-    pty,
+    ...terminalArgs,
     ...(launcher
       ? [
           process.execPath,
@@ -391,7 +396,9 @@ let failure: Error | undefined;
 const answers: string[] = [];
 const timer = setTimeout(() => {
   failure = new Error('Terminal proof timed out');
-  child.kill('SIGTERM');
+  if (child.pid) {
+    terminateProcessTree(child.pid, { platform: process.platform });
+  }
 }, 180000);
 child.stderr.on('data', (data) => {
   stderr += data;
@@ -423,7 +430,9 @@ child.stdout.on('data', (data) => {
       review.permissionDecision !== 'ask'
     ) {
       failure = new Error('Unexpected permission prompt');
-      child.kill('SIGTERM');
+      if (child.pid) {
+        terminateProcessTree(child.pid, { platform: process.platform });
+      }
       return;
     }
     // The exact test actions are already authorized; exercise both native choices.
@@ -600,7 +609,9 @@ try {
 } finally {
   clearTimeout(timer);
   clearInterval(completionPoll);
-  child.kill('SIGTERM');
+  if (child.pid) {
+    terminateProcessTree(child.pid, { platform: process.platform });
+  }
   server.closeAllConnections();
   server.close();
   gateway.closeAllConnections();

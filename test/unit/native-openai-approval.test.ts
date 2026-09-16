@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
@@ -42,7 +42,7 @@ const verdict = (outcome = 'allow') => [
 ];
 
 async function fixture(t: TestContext) {
-  const cwd = await mkdtemp(path.join(os.tmpdir(), 'approval-unit-'));
+  const cwd = await realpath(await mkdtemp(path.join(os.tmpdir(), 'approval-unit-')));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const authFile = path.join(cwd, 'auth.json');
   await writeFile(
@@ -205,6 +205,23 @@ test('reviewer errors, invalid output, foreign providers, and exhausted investig
   abort.abort();
   await assert.rejects(bridge.respond(request(), abort.signal, context));
   assert.equal(calls, 0);
+});
+
+test('Windows inspection uses lstat protection before opening', async (t) => {
+  const { cwd } = await fixture(t);
+  await writeFile(path.join(cwd, 'safe.txt'), 'safe');
+  const result = await inspectApprovalPath(cwd, { path: 'safe.txt' }, { platform: 'win32' });
+  assert.deepEqual(result, {
+    path: path.join(cwd, 'safe.txt'),
+    bytes: 4,
+    content: 'safe',
+    truncated: false,
+  });
+  await symlink('safe.txt', path.join(cwd, 'link.txt'));
+  await assert.rejects(
+    inspectApprovalPath(cwd, { path: 'link.txt' }, { platform: 'win32' }),
+    /symbolic links and reparse/,
+  );
 });
 
 test('investigation enforces filesystem boundary and truncation; discovery never substitutes models', async (t) => {

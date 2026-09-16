@@ -2,12 +2,13 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
-const root = await mkdtemp('/tmp/multi-session-lifecycle-');
+const root = await mkdtemp(path.join(os.tmpdir(), 'multi-session-lifecycle-'));
 const launcher = fileURLToPath(
   new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url),
 );

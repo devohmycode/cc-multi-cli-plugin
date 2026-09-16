@@ -82,7 +82,9 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="${heig
 
 const destination = new URL('../docs/assets/banner.svg', import.meta.url);
 if (process.argv.includes('--check')) {
-  assert.equal(await readFile(destination, 'utf8'), svg, 'Run npm run banner:generate');
+  // Normalize CRLF so a checkout with autocrlf enabled still compares equal.
+  const current = (await readFile(destination, 'utf8')).replaceAll('\r\n', '\n');
+  assert.equal(current, svg, 'Run npm run banner:generate');
   console.log('Banner is up to date.');
 } else {
   await writeFile(destination, svg);

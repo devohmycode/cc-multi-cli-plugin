@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { terminateProcessTree } from '../../plugins/multi-core/src/gateway/process-tree.ts';
 import { OPENAI_WORKERS } from '../../plugins/multi-openai/src/models.ts';
 
 const args = process.argv.slice(2);
@@ -131,14 +132,10 @@ try {
     child.stderr.on('data', (chunk) => {
       diagnostics += chunk;
     });
-    const stop = (signal: NodeJS.Signals) => {
-      try {
-        if (child.pid && process.platform !== 'win32') {
-          process.kill(-child.pid, signal);
-        } else {
-          child.kill(signal);
-        }
-      } catch {}
+    const stop = (_signal: NodeJS.Signals) => {
+      if (child.pid) {
+        terminateProcessTree(child.pid, { platform: process.platform, signal: _signal });
+      }
     };
     let killTimer: NodeJS.Timeout | undefined;
     const timer = setTimeout(() => {

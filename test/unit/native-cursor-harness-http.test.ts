@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -16,7 +16,7 @@ import { cursorModelOptions } from '../../plugins/multi-cursor/src/models.ts';
 const options = cursorModelOptions([{ id: 'test-model', displayName: 'Test Model' }]);
 
 test('Cursor harness serves isolated main and worker SSE progress without replaying native work', async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'cursor-harness-http-'));
+  const directory = await realpath(await mkdtemp(path.join(os.tmpdir(), 'cursor-harness-http-')));
   let sends = 0;
   const createAgent: CreateCursorHarnessAgent = async (_config: AgentOptions) => {
     const agentId = `agent-${sends + 1}`;
@@ -144,7 +144,9 @@ test('Cursor harness serves isolated main and worker SSE progress without replay
 test('native SSE cancellation stops the SDK run without reporting successful completion', {
   timeout: 5000,
 }, async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'cursor-harness-http-cancel-'));
+  const directory = await realpath(
+    await mkdtemp(path.join(os.tmpdir(), 'cursor-harness-http-cancel-')),
+  );
   const result = Promise.withResolvers<RunResult>();
   const started = Promise.withResolvers<void>();
   let sends = 0;

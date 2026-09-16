@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { setTimeout } from 'node:timers';
 import type { AgentOptions, Run, RunResult, SDKUserMessage, SendOptions } from '@cursor/sdk';
 import type {
   Emit,
@@ -25,7 +27,12 @@ const body: MessagesRequest = {
   model: models[0].model,
   messages: [{ role: 'user', content: 'first request' }],
 };
-const signal = () => AbortSignal.timeout(5000);
+const signal = () => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  timer.unref();
+  return controller.signal;
+};
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 function follow(response: MessagesResponse): MessagesRequest {
@@ -53,7 +60,7 @@ class AutoTestHarness extends CursorHarness {
 }
 
 async function fixture(t: test.TestContext) {
-  const directory = await mkdtemp('/tmp/cursor-harness-test-');
+  const directory = await realpath(await mkdtemp(path.join(os.tmpdir(), 'cursor-harness-test-')));
   const configurations: AgentOptions[] = [];
   const sends: { id: string; prompt: string | SDKUserMessage; options?: SendOptions }[] = [];
   const resumed: string[] = [];

@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import type { InteractionUpdate, Run, RunResult, SendOptions } from '@cursor/sdk';
 import type {
@@ -77,13 +80,17 @@ async function harnessFixture(
       });
     },
   });
+  const stateDirectory = await mkdtemp(path.join(os.tmpdir(), 'native-mod-rows-'));
   const harness = new CursorHarness(models, {
     cwd: process.cwd(),
-    stateDirectory: `/tmp/native-mod-rows-${process.pid}-${Math.random()}`,
+    stateDirectory,
     createAgent,
     resumeAgent: createAgent,
   });
-  t.after(() => harness.close());
+  t.after(async () => {
+    await harness.close();
+    await rm(stateDirectory, { recursive: true, force: true });
+  });
   return {
     harness,
     gate,

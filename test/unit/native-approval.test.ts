@@ -4,8 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
 import test from 'node:test';
-import type { ApprovalContext } from '../../plugins/multi-core/src/gateway/approval.ts';
-import { NativeApprovalBridge } from '../../plugins/multi-core/src/gateway/approval.ts';
+import {
+  type ApprovalContext,
+  approvalCwdForComparison,
+  NativeApprovalBridge,
+} from '../../plugins/multi-core/src/gateway/approval.ts';
 import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 
 const request = (stage = 1, session = 'session-one', command = 'node harmless-test.js') => ({
@@ -263,15 +266,26 @@ test('gateway isolates review context by worker and blocks classifier fallback f
   assert.equal(fetches, 0);
 });
 
+test('classifier cwd comparison accepts Windows drive and UNC paths on Linux', () => {
+  assert.equal(
+    approvalCwdForComparison('C:\\Users\\runner\\repo', 'win32'),
+    'C:/Users/runner/repo',
+  );
+  assert.equal(approvalCwdForComparison('\\\\server\\share\\repo', 'win32'), '//server/share/repo');
+  assert.equal(approvalCwdForComparison('C:/Users/runner/repo', 'win32'), 'C:/Users/runner/repo');
+  assert.equal(approvalCwdForComparison('C:/Users/runner/my repo', 'win32'), undefined);
+});
+
 test('headerless classifier uses pending worker context and rejects ambiguous actions', async (t) => {
   const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
-  const dir = await mkdtemp('/tmp/approval-scope-');
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'approval-scope-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   await writeFile(
     `${dir}/auth.json`,
     JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'fake', account_id: 'fake' } }),
   );
   const contexts: ApprovalContext[] = [];
+  const classifierCwd = process.platform === 'win32' ? 'C:\\Users\\runner\\workspace' : dir;
   let next = { id: 'tool-a', command: 'node a.js' };
   const server = createNativeGateway({
     token: 'token',
@@ -326,7 +340,7 @@ test('headerless classifier uses pending worker context and rejects ambiguous ac
     command: string,
     permissionMode = 'auto',
     pendingCommand = command,
-    cwd = dir,
+    cwd = classifierCwd,
   ) => {
     next = { id: `tool-${worker}`, command: pendingCommand };
     const inference = await send(
@@ -360,11 +374,11 @@ test('headerless classifier uses pending worker context and rejects ambiguous ac
     assert.deepEqual(await guard.json(), {});
   };
   await prepare('worker-a', 'node a.js');
-  await prepare('worker-b', 'node b.js', 'plan', `cd ${dir} && node b.js`);
+  await prepare('worker-b', 'node b.js', 'plan', `cd ${classifierCwd} && node b.js`);
   assert.equal(contexts.length, 0, 'Permission hooks must never invoke review');
   assert.equal((await send(request(1, session, 'node b.js'))).status, 200);
   assert(contexts[0].scope.includes('worker-b'));
-  assert.equal(contexts[0].cwd, dir);
+  assert.equal(contexts[0].cwd, classifierCwd);
   assert.equal(contexts[0].request.messages?.[0].content, 'worker-b');
   await prepare('worker-b', 'node b.js', 'plan', 'cd /other-workspace && node b.js');
   assert.equal((await send(request(1, session, 'node b.js'))).status, 400);
@@ -372,11 +386,11 @@ test('headerless classifier uses pending worker context and rejects ambiguous ac
     'worker-b',
     'node b.js',
     'plan',
-    'cd /tmp/unsafe;pwd && node b.js',
-    '/tmp/unsafe;pwd',
+    `${process.execPath} -e ${JSON.stringify('process.stdout.write("unsafe")')}`,
+    path.join(os.tmpdir(), 'unsafe').replaceAll('\\', '/'),
   );
   assert.equal((await send(request(1, session, 'node b.js'))).status, 400);
-  await prepare('worker-b', 'node b.js', 'plan', `cd ${dir} && node b.js`);
+  await prepare('worker-b', 'node b.js', 'plan', `cd ${classifierCwd} && node b.js`);
   assert.equal((await send(request(1, session, 'node b.js'))).status, 200);
   await prepare('worker-a', 'node b.js');
   assert.equal((await send(request(1, session, 'node b.js'))).status, 400);

@@ -17,6 +17,17 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const execute = promisify(execFile);
+
+function windowsInvocation(pathname: string, args: string[], env: NodeJS.ProcessEnv) {
+  const quote = (value: string) => `"${value.replaceAll('"', '\\"')}"`;
+  const commandLine = [pathname, ...args].map(quote).join(' ');
+  return {
+    command: env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
+    args: ['/d', '/s', '/c', `"${commandLine}"`],
+    windowsVerbatimArguments: true,
+  };
+}
+
 const repository = fileURLToPath(new URL('../../', import.meta.url));
 const directory = await mkdtemp(path.join(os.tmpdir(), 'multi-installed-'));
 const source = path.join(directory, 'marketplace');
@@ -34,11 +45,29 @@ for (const entry of [
 ]) {
   await cp(path.join(repository, entry), path.join(source, entry), { recursive: true });
 }
+const platform = process.platform;
+let shell = 'bash';
+if (platform === 'darwin') {
+  shell = 'zsh';
+} else if (platform === 'win32') {
+  shell = 'powershell';
+}
+const profile =
+  platform === 'win32'
+    ? path.join(home, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1')
+    : path.join(home, shell === 'zsh' ? '.zshrc' : '.bashrc');
 const env = {
   PATH: process.env.PATH,
   HOME: home,
   CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
-  SHELL: '/bin/bash',
+  ...(platform === 'win32'
+    ? {
+        PSModulePath: process.env.PSModulePath ?? path.join(home, 'PowerShell', 'Modules'),
+        ComSpec: process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
+        USERPROFILE: home,
+        PROFILE: profile,
+      }
+    : { SHELL: `/${shell}` }),
   npm_config_omit: 'dev',
 };
 async function native(args: string[]) {
@@ -74,17 +103,22 @@ assert(JSON.parse(catalog.stdout).some((model: { id: string }) => model.id === '
 await rename(`${source}-removed`, source);
 
 // Exercise the real cached gateway and picker, replacing only the outer Claude UI.
-const fake = path.join(directory, 'claude-fixture');
-await writeFile(
-  fake,
-  `#!/usr/bin/env node
-const fs=require('node:fs');const args=process.argv.slice(2);
+const fakeSource = path.join(directory, 'claude-fixture.js');
+const fake =
+  platform === 'win32'
+    ? path.join(directory, 'claude-fixture.cmd')
+    : path.join(directory, 'claude-fixture');
+const fakeScript = `const fs=require('node:fs');const args=process.argv.slice(2);
 if(args[0]==='auth'){console.log(JSON.stringify({loggedIn:false}));process.exitCode=1}else{
 const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'utf8'));
 console.log(JSON.stringify(settings.modelPicker.options.map(x=>x.model)));}
-`,
-  { mode: 0o755 },
-);
+`;
+await writeFile(fakeSource, fakeScript);
+if (platform === 'win32') {
+  await writeFile(fake, `@"${process.execPath}" "${fakeSource}" %*\r\n`);
+} else {
+  await writeFile(fake, `#!${process.execPath}\n${fakeScript}`, { mode: 0o755 });
+}
 const launched = await execute(process.execPath, [launcher], {
   cwd: directory,
   timeout: 30000,
@@ -98,29 +132,58 @@ const launched = await execute(process.execPath, [launcher], {
 const models: string[] = JSON.parse(launched.stdout);
 assert(models.length > 0 && models.every((model) => model.startsWith('multi/zen/')));
 
-await execute(process.execPath, [path.join(core.installPath, 'plugins/multi-core/src/setup.ts')], {
-  env,
-  cwd: directory,
-});
-const bin = path.join(home, '.local/share/multi-cli/bin');
-await access(path.join(bin, 'claude-multi'), fsConstants.X_OK);
-// Setup must never write a bin/claude that would shadow the real claude command.
-await assert.rejects(access(path.join(bin, 'claude'), fsConstants.X_OK));
-const multi = path.join(bin, 'multi');
-const status = await execute(multi, ['status'], { env, cwd: directory });
-assert.deepEqual(JSON.parse(status.stdout).providers, ['zen']);
-const disabled = await execute(
-  multi,
-  [
-    'status',
-    '--settings',
-    JSON.stringify({ enabledPlugins: { 'multi-zen@cc-multi-cli-plugin': false } }),
-  ],
+await execute(
+  process.execPath,
+  [path.join(core.installPath, 'plugins/multi-core/src/setup.ts'), '--shell', shell],
   { env, cwd: directory },
 );
+const bin = path.join(home, '.local', 'share', 'multi-cli', 'bin');
+const multi = platform === 'win32' ? path.join(bin, 'multi.cmd') : path.join(bin, 'multi');
+if (platform === 'win32') {
+  await access(path.join(bin, 'claude-multi.cmd'));
+  await access(path.join(bin, 'claude-multi.ps1'));
+  // Setup must never write a bin/claude that would shadow the real claude command.
+  await assert.rejects(access(path.join(bin, 'claude.cmd')));
+} else {
+  await access(path.join(bin, 'claude-multi'), fsConstants.X_OK);
+  // Setup must never write a bin/claude that would shadow the real claude command.
+  await assert.rejects(access(path.join(bin, 'claude'), fsConstants.X_OK));
+}
+const statusInvocation =
+  platform === 'win32'
+    ? windowsInvocation(multi, ['status'], env)
+    : { command: multi, args: ['status'], windowsVerbatimArguments: false };
+const status = await execute(statusInvocation.command, statusInvocation.args, {
+  env,
+  cwd: directory,
+  windowsVerbatimArguments: statusInvocation.windowsVerbatimArguments,
+});
+assert.deepEqual(JSON.parse(status.stdout).providers, ['zen']);
+const disabledArgs = [
+  'status',
+  '--settings',
+  JSON.stringify({ enabledPlugins: { 'multi-zen@cc-multi-cli-plugin': false } }),
+];
+const disabledInvocation =
+  platform === 'win32'
+    ? windowsInvocation(multi, disabledArgs, env)
+    : { command: multi, args: disabledArgs, windowsVerbatimArguments: false };
+const disabled = await execute(disabledInvocation.command, disabledInvocation.args, {
+  env,
+  cwd: directory,
+  windowsVerbatimArguments: disabledInvocation.windowsVerbatimArguments,
+});
 assert.deepEqual(JSON.parse(disabled.stdout).providers, []);
-await execute(multi, ['uninstall'], { env, cwd: directory });
-assert.equal(await readFile(path.join(home, '.bashrc'), 'utf8'), '');
+const uninstallInvocation =
+  platform === 'win32'
+    ? windowsInvocation(multi, ['uninstall'], env)
+    : { command: multi, args: ['uninstall'], windowsVerbatimArguments: false };
+await execute(uninstallInvocation.command, uninstallInvocation.args, {
+  env,
+  cwd: directory,
+  windowsVerbatimArguments: uninstallInvocation.windowsVerbatimArguments,
+});
+assert.equal(await readFile(profile, 'utf8'), '');
 console.log(
   'PASS: core dependency, isolated cache, gateway picker, native enablement, claude-multi without shadowing claude, setup and uninstall. No inference requests.',
 );

@@ -2,6 +2,8 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { executableInvocation } from '../gateway/executable.ts';
+
 const MARKETPLACE = 'cc-multi-cli-plugin';
 const PROVIDERS = ['openai', 'cursor', 'zen', 'antigravity'] as const;
 export type Provider = (typeof PROVIDERS)[number];
@@ -28,12 +30,23 @@ export function providerSelection(value: string | undefined): Provider[] | undef
 }
 
 /** Ask Claude for its enabled plugins rather than interpreting its cache layout. */
-export async function installedPlugins(claude: string, settingsArgs: string[] = []) {
-  const { stdout } = await promisify(execFile)(
+export async function installedPlugins(
+  claude: string,
+  settingsArgs: string[] = [],
+  options: { platform?: NodeJS.Platform } = {},
+) {
+  const platform = options.platform ?? process.platform;
+  const invocation = executableInvocation(
     claude,
     [...settingsArgs, 'plugin', 'list', '--json'],
-    { timeout: 15000, maxBuffer: 4 * 1024 * 1024 },
+    platform,
   );
+  const { stdout } = await promisify(execFile)(invocation.command, invocation.args, {
+    timeout: 15000,
+    maxBuffer: 4 * 1024 * 1024,
+    encoding: 'utf8',
+    ...invocation.options,
+  });
   const parsed: unknown = JSON.parse(stdout);
   if (!Array.isArray(parsed)) {
     throw new Error('Claude returned an invalid plugin list. Update Claude Code and retry.');

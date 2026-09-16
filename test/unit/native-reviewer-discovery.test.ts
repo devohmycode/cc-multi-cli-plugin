@@ -4,8 +4,20 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+
+async function writeClaudeFixture(bin: string, source: string): Promise<void> {
+  if (process.platform === 'win32') {
+    await writeFile(path.join(bin, 'claude-fixture.js'), source);
+    await writeFile(
+      path.join(bin, 'claude.cmd'),
+      `@"${process.execPath}" "%~dp0claude-fixture.js" %*\r\n`,
+    );
+    return;
+  }
+  await writeFile(path.join(bin, 'claude'), source, { mode: 0o755 });
+}
 
 test('launcher discovers GPT review with Claude subscription, API credentials, or no Claude login', async (t) => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'reviewer-discovery-'));
@@ -19,8 +31,8 @@ test('launcher discovers GPT review with Claude subscription, API credentials, o
       tokens: { access_token: 'codex-fixture', account_id: 'fixture' },
     }),
   );
-  await writeFile(
-    path.join(bin, 'claude'),
+  await writeClaudeFixture(
+    bin,
     `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2);
@@ -42,7 +54,6 @@ if (args[0] === 'auth') {
 }
 emit(fs.readFileSync(args[args.indexOf('--settings') + 1], 'utf8'));
 `,
-    { mode: 0o755 },
   );
   const preload = path.join(cwd, 'preload.mjs');
   const calls = path.join(cwd, 'calls.jsonl');
@@ -63,7 +74,14 @@ globalThis.fetch = async (url, init) => {
     for (const review of ['yes', 'no']) {
       const { stdout } = await promisify(execFile)(
         process.execPath,
-        ['--import', preload, launcher, '--', '--model', 'multi/openai/gpt-6-astra'],
+        [
+          '--import',
+          pathToFileURL(preload).href,
+          launcher,
+          '--',
+          '--model',
+          'multi/openai/gpt-6-astra',
+        ],
         {
           cwd,
           timeout: 20000,

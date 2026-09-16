@@ -8,14 +8,26 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { AgentCatalog } from '../../plugins/multi-core/src/gateway/agent-catalog.ts';
 
+async function writeClaudeFixture(bin: string, source: string): Promise<void> {
+  if (process.platform === 'win32') {
+    await writeFile(path.join(bin, 'claude-fixture.js'), source);
+    await writeFile(
+      path.join(bin, 'claude.cmd'),
+      `@"${process.execPath}" "%~dp0claude-fixture.js" %*\r\n`,
+    );
+    return;
+  }
+  await writeFile(path.join(bin, 'claude'), source, { mode: 0o755 });
+}
+
 test('launcher preserves native auth, disables unavailable auto mode, and merges caller settings', {
   skip: process.platform === 'win32',
 }, async (t) => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'launcher-test-'));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   await mkdir(path.join(cwd, 'bin'));
-  await writeFile(
-    path.join(cwd, 'bin', 'claude'),
+  await writeClaudeFixture(
+    path.join(cwd, 'bin'),
     `#!/usr/bin/env node
 const fs=require('node:fs');const args=process.argv.slice(2);
 if(args.includes('plugin')&&args.includes('list')){console.log('[]');process.exit(0)}
@@ -25,7 +37,6 @@ if(args[0]==='auth'){if(process.env.TEST_AUTH==='malformed'){console.log('not-js
 const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'utf8'));
  result(JSON.stringify({agentView:process.env.CLAUDE_CODE_DISABLE_AGENT_VIEW,backgroundTasks:process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS,functionHooks:process.env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS,settings,models:args.filter(x=>x.startsWith('multi/')),settingsCount:args.filter(x=>x==='--settings').length,hasLocalToken:!!process.env.MULTI_GATEWAY_TOKEN,apiTimeout:process.env.API_TIMEOUT_MS,auth:process.env.ANTHROPIC_API_KEY?'api':process.env.ANTHROPIC_AUTH_TOKEN?'local':'native'}));}
 `,
-    { mode: 0o755 },
   );
   const launcher = fileURLToPath(
     new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url),
@@ -138,8 +149,8 @@ test('Zen credentials add picker models and named workers without leaking the ke
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const bin = path.join(cwd, 'bin');
   await mkdir(bin);
-  await writeFile(
-    path.join(bin, 'claude'),
+  await writeClaudeFixture(
+    bin,
     `#!/usr/bin/env node
 const fs=require('node:fs');const args=process.argv.slice(2);
 if(args.includes('plugin')&&args.includes('list')){console.log('[]');process.exit(0)}
@@ -150,7 +161,6 @@ const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'ut
 const agents=JSON.parse(args[args.indexOf('--agents')+1]);
 result(JSON.stringify({settings,agents:Object.keys(agents),models:args.filter(x=>x.startsWith('multi/')),zenKeyInChild:process.env.OPENCODE_API_KEY,args}));}
 `,
-    { mode: 0o755 },
   );
   const launcher = fileURLToPath(
     new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url),
@@ -267,8 +277,8 @@ test('Zen saved auth supplies the no-login fallback without exposing credentials
     path.join(data, 'auth.json'),
     JSON.stringify({ opencode: { type: 'api', key: 'saved-zen-fixture-key' } }),
   );
-  await writeFile(
-    path.join(bin, 'claude'),
+  await writeClaudeFixture(
+    bin,
     `#!/usr/bin/env node
 const fs=require('node:fs');const args=process.argv.slice(2);
 if(args.includes('plugin')&&args.includes('list')){console.log('[]');process.exit(0)}
@@ -278,7 +288,6 @@ if(args[0]==='auth'){process.stdout.write(JSON.stringify({loggedIn:false}));proc
 const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'utf8'));
 result(JSON.stringify({settings,models:args.filter(x=>x.startsWith('multi/')),zenKeyInChild:process.env.OPENCODE_API_KEY}));}
 `,
-    { mode: 0o755 },
   );
   const launcher = fileURLToPath(
     new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url),
@@ -309,16 +318,31 @@ test('Antigravity launcher groups picker families, keeps workers and enables fun
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const bin = path.join(cwd, 'bin');
   await mkdir(bin);
-  await writeFile(
-    path.join(bin, 'agy'),
-    `#!/usr/bin/env node
-if(process.argv[2] !== 'models') process.exit(9);
-console.log('gemini-low\\tGemini Low\\ngemini-medium\\tGemini Medium\\ngemini-high\\tGemini High\\nsonnet-thinking\\tSonnet Thinking');
+  if (process.platform === 'win32') {
+    await writeFile(
+      path.join(bin, 'agy-fixture.js'),
+      `if(process.argv[2] !== 'models') process.exit(9);
+const rows=[['gemini-low','Gemini Low'],['gemini-medium','Gemini Medium'],['gemini-high','Gemini High'],['sonnet-thinking','Sonnet Thinking']];
+console.log(rows.map(row=>row.join(String.fromCharCode(9))).join(String.fromCharCode(10)));
 `,
-    { mode: 0o755 },
-  );
-  await writeFile(
-    path.join(bin, 'claude'),
+    );
+    await writeFile(
+      path.join(bin, 'agy.cmd'),
+      `@"${process.execPath}" "%~dp0agy-fixture.js" %*\r\n`,
+    );
+  } else {
+    await writeFile(
+      path.join(bin, 'agy'),
+      `#!/usr/bin/env node
+if(process.argv[2] !== 'models') process.exit(9);
+const rows=[['gemini-low','Gemini Low'],['gemini-medium','Gemini Medium'],['gemini-high','Gemini High'],['sonnet-thinking','Sonnet Thinking']];
+console.log(rows.map(row=>row.join(String.fromCharCode(9))).join(String.fromCharCode(10)));
+`,
+      { mode: 0o755 },
+    );
+  }
+  await writeClaudeFixture(
+    bin,
     `#!/usr/bin/env node
 const fs=require('node:fs'); const {execFileSync}=require('node:child_process'); const args=process.argv.slice(2);
 if(args.includes('plugin')&&args.includes('list')){console.log('[]');process.exit(0)}
@@ -331,7 +355,6 @@ const agents=JSON.parse(args[args.indexOf('--agents')+1]);
 if(process.env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS !== '1') throw new Error('function hooks missing');
 result(JSON.stringify({settings,agents}));
 `,
-    { mode: 0o755 },
   );
   const launcher = fileURLToPath(
     new URL('../../plugins/multi-core/src/launcher.ts', import.meta.url),

@@ -1,34 +1,52 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import {
+  setup as installSetup,
+  uninstall as installUninstall,
+} from '../../plugins/multi-core/src/install/installation.ts';
+import {
   providerSelection,
   settingsArguments,
 } from '../../plugins/multi-core/src/install/plugins.ts';
 
 const execute = promisify(execFile);
+
+function windowsInvocation(pathname: string, args: string[], env: NodeJS.ProcessEnv) {
+  const quote = (value: string) => `"${value.replaceAll('"', '\\"')}"`;
+  const commandLine = [pathname, ...args].map(quote).join(' ');
+  return {
+    command: env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
+    args: ['/d', '/s', '/c', `"${commandLine}"`],
+    windowsVerbatimArguments: true,
+  };
+}
 const setup = fileURLToPath(new URL('../../plugins/multi-core/src/setup.ts', import.meta.url));
 const marketplace = 'cc-multi-cli-plugin';
 
 async function fixture(t: test.TestContext) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'multi-install-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
+  const platform = process.platform;
+  const windows = platform === 'win32';
   const home = path.join(directory, "home with spaces and 'quotes'");
   await mkdir(home);
-  const shell = path.join(home, '.bashrc');
-  await writeFile(shell, '# user settings\nexport EXISTING=retained\n');
+  const shell = windows
+    ? path.join(home, 'profile.ps1')
+    : path.join(home, process.platform === 'darwin' ? '.zshrc' : '.bashrc');
+  await writeFile(
+    shell,
+    windows ? '# user settings\r\n' : '# user settings\nexport EXISTING=retained\n',
+  );
   const listing = path.join(directory, 'plugins.json');
   await writeFile(listing, '[]');
-  const real = path.join(directory, 'real-claude');
-  await writeFile(
-    real,
-    `#!/usr/bin/env node
-const fs = require('node:fs');
+  const source = path.join(directory, 'real-claude.js');
+  const script = `const fs = require('node:fs');
 const args = process.argv.slice(2);
 if (args.includes('plugin') && args.includes('list')) {
   console.log(fs.readFileSync(process.env.TEST_PLUGIN_LIST, 'utf8'));
@@ -36,15 +54,63 @@ if (args.includes('plugin') && args.includes('list')) {
   console.log(JSON.stringify({native:true,args}));
   process.exitCode = Number(process.env.TEST_EXIT || 0);
 }
-`,
-    { mode: 0o755 },
-  );
-  const env = { PATH: process.env.PATH, HOME: home, SHELL: '/bin/bash', TEST_PLUGIN_LIST: listing };
+`;
+  await writeFile(source, script);
+  const real = windows
+    ? path.join(directory, 'real-claude.cmd')
+    : path.join(directory, 'real-claude');
+  if (windows) {
+    await writeFile(real, `@"${process.execPath}" "${source}" %*\r\n`);
+  } else {
+    await writeFile(real, `#!${process.execPath}\n${script}`, { mode: 0o755 });
+  }
+  const env = windows
+    ? {
+        PATH: process.env.PATH,
+        HOME: home,
+        USERPROFILE: home,
+        ComSpec: process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
+        PSModulePath: process.env.PSModulePath ?? path.join(home, 'PowerShell', 'Modules'),
+        PROFILE: shell,
+        TEST_PLUGIN_LIST: listing,
+      }
+    : {
+        PATH: process.env.PATH,
+        HOME: home,
+        SHELL: process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash',
+        TEST_PLUGIN_LIST: listing,
+      };
   const install = () => execute(process.execPath, [setup, '--claude', real], { env });
   const bin = path.join(home, '.local/share/multi-cli/bin');
-  const invoke = (name: string, args: string[], extra: Record<string, string> = {}) =>
-    execute(path.join(bin, name), args, { env: { ...env, ...extra }, timeout: 20000 });
-  return { directory, home, shell, listing, real, env, install, invoke };
+  const invoke = (name: string, args: string[], extra: Record<string, string> = {}) => {
+    const executable = path.join(bin, windows ? `${name}.cmd` : name);
+    const invocation = windows
+      ? windowsInvocation(executable, args, env)
+      : { command: executable, args, windowsVerbatimArguments: false };
+    return execute(invocation.command, invocation.args, {
+      cwd: directory,
+      env: { ...env, ...extra },
+      timeout: 20000,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+    });
+  };
+  return { directory, home, shell, listing, real, env, install, invoke, windows };
+}
+
+async function waitForMissing(file: string) {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    try {
+      await access(file);
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        return;
+      }
+      throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Timed out waiting for ${file} to disappear`);
 }
 
 async function core(directory: string, name: string) {
@@ -87,15 +153,20 @@ test('setup preserves shell content, is repeatable, and uninstall survives plugi
   const once = await readFile(f.shell, 'utf8');
   await f.install();
   assert.equal(await readFile(f.shell, 'utf8'), once);
-  await writeFile(f.shell, `${once}# later user edit\n`);
+  const laterEdit = f.windows ? '# later user edit\r\n' : '# later user edit\n';
+  await writeFile(f.shell, `${once}${laterEdit}`);
   const reply = JSON.parse((await f.invoke('claude-multi', ['hello world'])).stdout);
   assert.deepEqual(reply, { native: true, args: ['hello world'] });
   await f.invoke('multi', ['uninstall']);
-  assert.equal(
-    await readFile(f.shell, 'utf8'),
-    '# user settings\nexport EXISTING=retained\n# later user edit\n',
-  );
-  await assert.rejects(f.invoke('claude-multi', []), /ENOENT/);
+  const original = f.windows
+    ? '# user settings\r\n'
+    : '# user settings\nexport EXISTING=retained\n';
+  assert.equal(await readFile(f.shell, 'utf8'), `${original}${laterEdit}`);
+  if (f.windows) {
+    await waitForMissing(path.join(f.home, '.local/share/multi-cli/bin/claude-multi.cmd'));
+  } else {
+    await assert.rejects(f.invoke('claude-multi', []), /ENOENT/);
+  }
   await f.install();
   assert.equal(JSON.parse((await f.invoke('claude-multi', [])).stdout).native, true);
 });
@@ -123,13 +194,80 @@ test('edited shell blocks and project-only executable cores fail explicitly', as
   const f = await fixture(t);
   await f.install();
   const current = await readFile(f.shell, 'utf8');
-  await writeFile(f.shell, current.replace('export PATH=', '# changed PATH='));
+  const pathMarker = f.windows ? '$env:Path = ' : 'export PATH=';
+  assert(current.includes(pathMarker), 'fixture must contain the recorded Multi PATH block');
+  await writeFile(f.shell, current.replace(pathMarker, '# changed PATH='));
   await assert.rejects(f.invoke('multi', ['uninstall']), /was edited/);
   await assert.rejects(f.install(), /was edited/);
   const entries = plugins(await core(f.directory, 'project-core'));
   entries[0].scope = 'project';
   await writeFile(f.listing, JSON.stringify(entries));
   await assert.rejects(f.invoke('claude-multi', []), /user scope/);
+});
+
+test('Windows installation writes quoted PowerShell and cmd shims and uninstalls exactly', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'multi-win-install-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const home = path.join(directory, "home with spaces and 'quotes'");
+  await mkdir(home, { recursive: true });
+  const profile = path.join(home, 'profile.ps1');
+  await writeFile(profile, '# existing profile\r\n');
+  const state = await installSetup('powershell', process.execPath, {
+    platform: 'win32',
+    homedir: home,
+    env: { PATH: '', PATHEXT: '.COM;.EXE;.BAT;.CMD', PROFILE: profile },
+  });
+  const bin = path.join(home, '.local', 'share', 'multi-cli', 'bin');
+  const cmd = await readFile(path.join(bin, 'claude-multi.cmd'), 'utf8');
+  const ps = await readFile(path.join(bin, 'claude-multi.ps1'), 'utf8');
+  assert.match(cmd, /".*" ".*bootstrap\.ts"(?: --multi)? %\*/);
+  assert.equal(cmd.split('\r\n').filter(Boolean).length, 1, 'single-line shim survives uninstall');
+  assert.match(cmd, /^@goto #_undefined_# 2>NUL \|\| ".*" ".*bootstrap\.ts" %\*\r\n$/);
+  assert.match(ps, /''quotes''|quotes/);
+  assert.match(state.block, /\$env:Path/);
+  let deferredCommand = '';
+  let deferredArgs: string[] = [];
+  let deferredOptions: object = {};
+  await installUninstall(path.dirname(bin), {
+    platform: 'win32',
+    env: { ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+    deferDeletion: (command, args, options) => {
+      deferredCommand = command;
+      deferredArgs = args;
+      deferredOptions = options;
+    },
+  });
+  assert.equal(await readFile(profile, 'utf8'), '# existing profile\r\n');
+  assert.deepEqual(deferredArgs, [
+    '/d',
+    '/s',
+    '/c',
+    `"ping -n 2 127.0.0.1 >nul & del /f /q "${path.join(bin, 'claude-multi.cmd')}" "${path.join(bin, 'multi.cmd')}" & rmdir "${bin}" & rmdir "${path.dirname(bin)}""`,
+  ]);
+  assert.equal(deferredCommand, 'C:\\Windows\\System32\\cmd.exe');
+  assert.deepEqual(deferredOptions, {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+    windowsVerbatimArguments: true,
+  });
+  await rm(directory, { recursive: true, force: true });
+});
+
+test('Windows executable discovery uses PATHEXT and does not require mode bits', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'multi-win-resolution-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const home = path.join(directory, 'home');
+  const bin = path.join(home, 'npm global bin');
+  await mkdir(bin, { recursive: true });
+  const claude = path.join(bin, 'claude.CMD');
+  await writeFile(claude, 'shim');
+  const state = await installSetup('pwsh', claude, {
+    platform: 'win32',
+    homedir: home,
+    env: { PATH: bin, PATHEXT: '.CMD', PROFILE: path.join(home, 'profile.ps1') },
+  });
+  assert.equal(state.claude, claude);
 });
 
 test('provider selection and native settings arguments preserve explicit disablement', () => {

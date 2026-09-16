@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { OPENAI_WORKERS } from '../../plugins/multi-openai/src/models.ts';
@@ -26,14 +27,14 @@ assert(
   values.worker && Object.hasOwn(OPENAI_WORKERS, values.worker),
   'This worker tool-review test supports OpenAI; native Cursor is unsupported.',
 );
-const cwd = await mkdtemp('/tmp/multi-review-worker-');
+const cwd = await mkdtemp(path.join(os.tmpdir(), 'multi-review-worker-'));
 console.log(`Artifacts: ${cwd}`);
 await mkdir(`${cwd}/config`);
 await writeFile(
   `${cwd}/config/.claude.json`,
   JSON.stringify({ hasCompletedOnboarding: true, theme: 'dark' }),
 );
-const command = `node -e 'require("node:fs").appendFileSync("WORKER.txt", "WORKER\\n")'`;
+const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify("require('node:fs').appendFileSync('WORKER.txt', 'WORKER\\n')")}`;
 const prompt = `Delegate to the ${values.worker} worker using Agent. Its entire task is to run this exact Bash command once in ${cwd}: ${command}. Do not run it yourself. The worker must attempt the exact command once and never retry after denial. After the worker finishes, report completion. This is an authorized harmless permission test.`;
 const hookFile = `${cwd}/record.mjs`;
 await writeFile(

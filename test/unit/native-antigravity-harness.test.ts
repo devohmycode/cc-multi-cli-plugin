@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -565,6 +565,7 @@ test('a failed native policy check clears ownership for a later retry', async (t
 test('scope and workspace are part of native state ownership', async (t) => {
   const setupResult = await setup();
   const workspace = await mkdtemp(path.join(os.tmpdir(), 'agy-workspace-'));
+  const canonicalWorkspace = await realpath(workspace);
   const harness = new AntigravityHarness([model], {
     ...setupResult,
     checkPermissions: policy,
@@ -587,8 +588,8 @@ test('scope and workspace are part of native state ownership', async (t) => {
     workspaceContext,
   );
   assert.equal(setupResult.calls.length, 2);
-  assert.equal(setupResult.calls[0].cwd, workspace);
-  assert.equal(setupResult.calls[1].cwd, workspace);
+  assert.equal(setupResult.calls[0].cwd, canonicalWorkspace);
+  assert.equal(setupResult.calls[1].cwd, canonicalWorkspace);
 });
 
 test('resumed native usage is reported as the turn delta', async (t) => {

@@ -40,7 +40,7 @@ current status, execution boundaries, and the first bridge milestone.
 ## Requirements
 
 Node ≥ 24.12 and Claude Code. Claude login is optional for external models.
-Native Cursor settings admission currently supports Linux without WSL.
+Native Cursor settings admission is implemented for Linux, WSL, macOS, and Windows; offline coverage is in CI, while live host validation for macOS and Windows is pending.
 Enable OpenAI with Codex's ChatGPT
 login, or Cursor with the SDK login below, or both. From a checkout, run `npm install` for dependencies. `npm test`
 runs type checking and offline tests. Node runs the gateway's TypeScript directly.
@@ -61,9 +61,7 @@ In Claude Code, add the marketplace and install the providers you want:
 ```
 
 Choose any subset; each provider installs the shared core automatically. Use the
-(default) user installation scope for core. Setup supports Bash and Zsh on Linux
-and macOS, and requires Node >= 24.12. It adds a marked PATH block to your shell
-configuration and a wrapper under `~/.local/share/multi-cli/bin/`. It never
+(default) user installation scope for core. Setup supports Bash, Zsh, and fish on Linux/macOS, plus PowerShell and cmd shims on Windows. It requires Node >= 24.12, adds a marked PATH block to the applicable shell configuration, and installs wrappers under the platform-specific Multi data directory. It never
 replaces or shadows the `claude` command; the launch command is the new
 `claude-multi`.
 
@@ -75,7 +73,7 @@ connecting a provider so its models and workers appear in `/model`.
 
 For experimental Antigravity, install `multi-antigravity@cc-multi-cli-plugin`,
 complete the official `agy` login, then use `/multi-antigravity:connect` to install
-its scoped permission hook. Its native integration currently requires Linux.
+its scoped permission hook. Its native integration has platform-specific hook/config paths on Linux, WSL, macOS, and Windows. The POSIX hook guard is retained on Unix; Windows invokes Node directly. Antigravity live validation on macOS and Windows is pending.
 
 To remove the shell integration, run `multi uninstall` (or `/multi-core:uninstall`)
 before uninstalling the plugins, then open a new terminal. Disabling all Multi
@@ -577,13 +575,7 @@ This is outer-transcript summarization, not native-history compaction or rewind.
 
 Worker tool lists, whole-tool deny rules and supported CLI restrictions intersect
 native capabilities. Settings and plugin policies are rechecked before dispatch.
-Linux managed settings and fragments support the same narrow policy translation;
-unsupported managed controls, argument/path-specific rules, ask rules and Claude
-sandbox policies fail explicitly. Unknown plugin definitions and a Cursor
-`permissions.json` that isolated SDK settings cannot honor also fail. Claude and
-Cursor hook files are observability, never run for native tools, and do not block
-admission. macOS, Windows and WSL policy admission remain unsupported. No deny
-policy is silently dropped.
+Managed settings and fragments use the documented source for each platform: `/etc/claude-code` on Linux and WSL, macOS managed preferences plus `/Library/Application Support/ClaudeCode`, and Windows registry plus `C:\Program Files\ClaudeCode`. Unsupported managed controls, argument/path-specific rules, ask rules and Claude sandbox policies fail explicitly. Unknown plugin definitions and a Cursor `permissions.json` that isolated SDK settings cannot honor also fail. Claude and Cursor hook files are observability, never run for native tools, and do not block admission. No deny policy is silently dropped. Offline coverage includes all four platforms; live macOS and Windows policy validation is pending.
 
 `/effort` selects an exact advertised effort value where the model supports one;
 unsupported values fail explicitly. Catalog presets retain their parameters.

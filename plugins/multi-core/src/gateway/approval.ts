@@ -1,6 +1,19 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { MessagesRequest } from './messages.ts';
 
+/** Normalize a workspace path for the classifier's omitted-cd comparison. */
+export function approvalCwdForComparison(
+  cwd: string,
+  platform: NodeJS.Platform = process.platform,
+) {
+  const normalized = cwd.replaceAll('\\', '/');
+  const valid = /^(?:[A-Za-z]:)?[A-Za-z0-9_./-]+$/.test(normalized);
+  if (!valid || (platform === 'win32' && !/^(?:[A-Za-z]:\/|\/\/)/.test(normalized))) {
+    return undefined;
+  }
+  return normalized;
+}
+
 export interface ApprovalContext {
   model: string;
   request: MessagesRequest;

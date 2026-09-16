@@ -100,11 +100,11 @@ explicit capability restrictions and SDK sandbox configuration still apply. Defa
 acceptEdits and dontAsk fail because no equivalent manual decision transport is wired.
 
 Every dispatch rechecks selected user/project/local settings, CLI restrictions,
-plugin definitions/policies and Linux managed settings/fragments. Whole-tool
+plugin definitions/policies and platform managed settings/fragments. Whole-tool
 restrictions translate through capability intersection. Unsupported argument/path
 rules, ask rules, permission hooks, sandbox policy and managed controls reject
 admission. Unknown workers and ignored Cursor policy files also reject. Platform
-admission remains Linux without WSL; other platform policy sources are unsupported.
+admission supports Linux, WSL, macOS and Windows through their documented policy sources. Offline coverage is exercised in CI; live macOS and Windows admission validation remains pending.
 
 ### State and failures
 

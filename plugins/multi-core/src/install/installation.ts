@@ -1,3 +1,4 @@
+import { type SpawnOptions, spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 import {
   access,
@@ -18,22 +19,56 @@ const begin = '# >>> multi-cli >>>';
 const end = '# <<< multi-cli <<<';
 const files = ['bootstrap.ts', 'installation.ts', 'plugins.ts', 'process.ts'];
 
+type Platform = NodeJS.Platform;
+
 export interface Installation {
   claude: string;
   node: string;
   shellFile: string;
   block: string;
+  platform?: Platform;
+  shims?: string[];
 }
 
-function installationDirectory() {
-  return path.join(os.homedir(), '.local', 'share', 'multi-cli');
+export interface InstallationOptions {
+  platform?: Platform;
+  env?: NodeJS.ProcessEnv;
+  homedir?: string;
+  shell?: string;
 }
 
-function quote(value: string) {
+type DeferDeletion = (command: string, args: string[], options: SpawnOptions) => void;
+
+export interface UninstallOptions {
+  platform?: Platform;
+  env?: NodeJS.ProcessEnv;
+  deferDeletion?: DeferDeletion;
+}
+
+function optionsFor(options: InstallationOptions = {}) {
+  return {
+    platform: options.platform ?? process.platform,
+    env: options.env ?? process.env,
+    homedir: options.homedir ?? os.homedir(),
+  };
+}
+
+function installationDirectory(homedir = os.homedir()) {
+  return path.join(homedir, '.local', 'share', 'multi-cli');
+}
+
+function posixQuote(value: string) {
   if (/[\r\n\0]/.test(value)) {
     throw new Error('Newlines and NUL are unsupported in installation paths');
   }
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function powershellQuote(value: string) {
+  if (/[\r\n\0]/.test(value)) {
+    throw new Error('Newlines and NUL are unsupported in installation paths');
+  }
+  return `'${value.replaceAll("'", "''")}'`;
 }
 
 async function optionalText(file: string) {
@@ -60,16 +95,31 @@ export async function readInstallation(directory = installationDirectory()): Pro
 }
 
 /** Preserve the public executable path so Claude's own updater can replace its target. */
-async function findClaude(explicit?: string) {
+async function findClaude(
+  explicit: string | undefined,
+  platform: Platform,
+  env: NodeJS.ProcessEnv,
+) {
+  const pathValue = env.PATH ?? '';
+  const extensions =
+    platform === 'win32' ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';') : [''];
   const candidates = explicit
     ? [explicit]
-    : (process.env.PATH ?? '').split(path.delimiter).map((dir) => path.join(dir, 'claude'));
+    : pathValue
+        .split(path.delimiter)
+        .flatMap((directory) =>
+          extensions.map((extension) => path.join(directory, `claude${extension.toLowerCase()}`)),
+        );
   for (const candidate of candidates) {
     if (!path.isAbsolute(candidate)) {
       continue;
     }
     try {
-      await access(candidate, constants.X_OK);
+      if (platform === 'win32') {
+        await access(candidate);
+      } else {
+        await access(candidate, constants.X_OK);
+      }
       return candidate;
     } catch {
       // Continue searching PATH for an executable.
@@ -80,21 +130,37 @@ async function findClaude(explicit?: string) {
   );
 }
 
-function removeBlock(source: string, block: string) {
-  if (!source.includes(block)) {
-    throw new Error('Multi shell configuration was edited; refusing to overwrite it.');
-  }
-  return source.replace(block, '');
+function normalizeLineEndings(source: string) {
+  return source.replaceAll('\r\n', '\n');
 }
 
-function validateRuntime(shell: string) {
+function removeBlock(source: string, block: string) {
+  const start = source.indexOf(begin);
+  const finish = source.indexOf(end, start + begin.length);
+  const recorded = start >= 0 && finish >= 0 ? source.slice(start, finish + end.length) : '';
+  if (normalizeLineEndings(recorded) !== normalizeLineEndings(block.trim())) {
+    throw new Error('Multi shell configuration was edited; refusing to overwrite it.');
+  }
+  const blockStart = start > 0 && source[start - 1] === '\n' ? start - 1 : start;
+  const blockEnd =
+    finish + end.length < source.length && source[finish + end.length] === '\n'
+      ? finish + end.length + 1
+      : finish + end.length;
+  return `${source.slice(0, blockStart)}${source.slice(blockEnd)}`;
+}
+
+function validateRuntime(shell: string, platform: Platform) {
   const [major, minor] = process.versions.node.split('.').map(Number);
   if (major < 24 || (major === 24 && minor < 12)) {
     throw new Error('Multi setup requires Node >= 24.12 on PATH.');
   }
-  if (process.platform === 'win32' || !['bash', 'zsh'].includes(shell)) {
+  const supported =
+    platform === 'win32' ? ['powershell', 'pwsh', 'cmd', 'cmd.exe'] : ['bash', 'zsh', 'fish'];
+  if (!supported.includes(shell.toLowerCase())) {
     throw new Error(
-      'Multi setup supports Bash or Zsh on Linux/macOS. Use --shell bash or --shell zsh.',
+      platform === 'win32'
+        ? 'Multi setup supports PowerShell or cmd on Windows. Use --shell powershell or --shell cmd.'
+        : 'Multi setup supports Bash, Zsh, or fish on macOS/Linux. Use --shell bash, --shell zsh, or --shell fish.',
     );
   }
 }
@@ -117,24 +183,34 @@ async function previousInstallation(directory: string) {
   return undefined;
 }
 
-export async function setup(shell: string, explicitClaude?: string) {
-  validateRuntime(shell);
-  const directory = installationDirectory();
-  const stateFile = path.join(directory, 'state.json');
-  const previous = await previousInstallation(directory);
-  const shellFile = path.join(os.homedir(), shell === 'bash' ? '.bashrc' : '.zshrc');
-  if (previous && previous.shellFile !== shellFile) {
-    throw new Error('Uninstall the existing shell integration before changing shells.');
+function shellFile(homedir: string, shell: string, platform: Platform, env: NodeJS.ProcessEnv) {
+  if (platform === 'win32') {
+    return (
+      env.PROFILE ??
+      path.join(homedir, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1')
+    );
   }
-  const claude = await findClaude(explicitClaude ?? previous?.claude);
-  const source = await optionalText(shellFile);
-  const original = previous ? removeBlock(source, previous.block) : source;
-  if (original.includes(begin) || original.includes(end)) {
-    throw new Error('Unrecognized Multi shell block; refusing to modify shell configuration.');
+  let relative = '.config/fish/config.fish';
+  if (shell === 'bash') {
+    relative = '.bashrc';
+  } else if (shell === 'zsh') {
+    relative = '.zshrc';
   }
-  const node = process.execPath;
-  const bin = path.join(directory, 'bin');
-  const block = `\n${begin}\nexport PATH=${quote(bin)}:"$PATH"\n${end}\n`;
+  return path.join(homedir, relative);
+}
+
+function blockFor(bin: string, shell: string, platform: Platform) {
+  if (platform === 'win32') {
+    return `\n${begin}\n$env:Path = ${powershellQuote(bin)} + [IO.Path]::PathSeparator + $env:Path\n${end}\n`;
+  }
+  const pathExpression =
+    shell === 'fish'
+      ? `set -gx PATH ${posixQuote(bin)} $PATH`
+      : `export PATH=${posixQuote(bin)}:"$PATH"`;
+  return `\n${begin}\n${pathExpression}\n${end}\n`;
+}
+
+async function writeRuntime(directory: string, bin: string, node: string, platform: Platform) {
   await mkdir(bin, { recursive: true, mode: 0o700 });
   for (const file of files) {
     const origin = fileURLToPath(new URL(file, import.meta.url));
@@ -143,24 +219,124 @@ export async function setup(shell: string, explicitClaude?: string) {
       await copyFile(origin, destination);
     }
   }
-  for (const name of ['claude-multi', 'multi']) {
-    const script = `#!/bin/sh\nexec ${quote(node)} ${quote(path.join(directory, 'bootstrap.ts'))}${name === 'multi' ? ' --multi' : ''} "$@"\n`;
-    await writeFile(path.join(bin, name), script, { mode: 0o700 });
+  const gatewayDirectory = path.join(directory, '..', 'gateway');
+  await mkdir(gatewayDirectory, { recursive: true });
+  for (const file of ['executable.ts', 'process-tree.ts']) {
+    const origin = fileURLToPath(new URL(`../gateway/${file}`, import.meta.url));
+    await copyFile(origin, path.join(gatewayDirectory, file));
   }
-  const state: Installation = { claude, node, shellFile, block };
+  const shimNames = ['claude-multi', 'multi'];
+  for (const name of shimNames) {
+    const bootstrap = path.join(directory, 'bootstrap.ts');
+    if (platform === 'win32') {
+      const suffix = name === 'multi' ? ' --multi' : '';
+      // Same trick as npm's cmd shims: a goto to an undefined label ends batch
+      // processing, so the `||` branch runs Node as a top-level command. cmd.exe
+      // then returns Node's exit code directly (`exit /b` after `&` would return
+      // 0 under `cmd /c`) and no longer re-reads this file while Node runs.
+      const cmd = `@goto #_undefined_# 2>NUL || "${node}" "${bootstrap}"${suffix} %*\r\n`;
+      await writeFile(path.join(bin, `${name}.cmd`), cmd);
+      await writeFile(
+        path.join(bin, `${name}.ps1`),
+        `& ${powershellQuote(node)} ${powershellQuote(bootstrap)}${suffix} @args\r\nexit $LASTEXITCODE\r\n`,
+      );
+    } else {
+      const suffix = name === 'multi' ? ' --multi' : '';
+      const script = `#!/bin/sh\nexec ${posixQuote(node)} ${posixQuote(bootstrap)}${suffix} "$@"\n`;
+      await writeFile(path.join(bin, name), script, { mode: 0o700 });
+    }
+  }
+  return platform === 'win32'
+    ? shimNames.flatMap((name) => [`${name}.cmd`, `${name}.ps1`])
+    : shimNames;
+}
+
+export async function setup(
+  shell: string,
+  explicitClaude?: string,
+  options: InstallationOptions = {},
+) {
+  const resolved = optionsFor(options);
+  const normalizedShell = shell.toLowerCase();
+  validateRuntime(normalizedShell, resolved.platform);
+  const directory = installationDirectory(resolved.homedir);
+  const stateFile = path.join(directory, 'state.json');
+  const previous = await previousInstallation(directory);
+  const startupFile = shellFile(resolved.homedir, normalizedShell, resolved.platform, resolved.env);
+  if (previous && previous.shellFile !== startupFile) {
+    throw new Error('Uninstall the existing shell integration before changing shells.');
+  }
+  const claude = await findClaude(
+    explicitClaude ?? previous?.claude,
+    resolved.platform,
+    resolved.env,
+  );
+  const source = await optionalText(startupFile);
+  const original = previous ? removeBlock(source, previous.block) : source;
+  if (original.includes(begin) || original.includes(end)) {
+    throw new Error('Unrecognized Multi shell block; refusing to modify shell configuration.');
+  }
+  const node = process.execPath;
+  const bin = path.join(directory, 'bin');
+  const block = blockFor(bin, normalizedShell, resolved.platform);
+  const shims = await writeRuntime(directory, bin, node, resolved.platform);
+  const state: Installation = {
+    claude,
+    node,
+    shellFile: startupFile,
+    block,
+    platform: resolved.platform,
+    shims,
+  };
   await writeFile(`${stateFile}.tmp`, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
   await rename(`${stateFile}.tmp`, stateFile);
-  await writeFile(shellFile, original + block);
+  await mkdir(path.dirname(startupFile), { recursive: true });
+  await writeFile(startupFile, original + block);
   return state;
 }
 
-export async function uninstall(directory = installationDirectory()) {
+export async function uninstall(
+  directory = installationDirectory(),
+  options: UninstallOptions = {},
+) {
+  const platform = options.platform ?? process.platform;
   const state = await readInstallation(directory);
   const source = await readFile(state.shellFile, 'utf8');
   await writeFile(state.shellFile, removeBlock(source, state.block));
-  // Delete only known installation files, leaving unrelated files untouched.
-  for (const file of [...files, 'state.json', 'bin/claude-multi', 'bin/multi']) {
+  const shimFiles = state.shims ?? ['claude-multi', 'multi'];
+  const shimPaths = shimFiles.map((file) => path.join(directory, 'bin', file));
+  const deferred = platform === 'win32' ? shimPaths.filter((file) => /\.cmd$/i.test(file)) : [];
+  const immediate = shimPaths.filter((file) => !deferred.includes(file));
+  for (const file of [
+    ...files,
+    'state.json',
+    '../gateway/executable.ts',
+    '../gateway/process-tree.ts',
+    ...immediate.map((file) => path.relative(directory, file)),
+  ]) {
     await rm(path.join(directory, file), { force: true });
+  }
+  if (deferred.length) {
+    const bin = path.join(directory, 'bin');
+    const command = `"ping -n 2 127.0.0.1 >nul & del /f /q ${deferred.map((file) => `"${file}"`).join(' ')} & rmdir "${bin}" & rmdir "${directory}""`;
+    const deferDeletion =
+      options.deferDeletion ??
+      ((commandLine, args, spawnOptions) => {
+        spawn(commandLine, args, spawnOptions).unref();
+      });
+    // cmd.exe reopens a running batch file for each line and on exit, so its
+    // shims must be removed by a detached process after the parent exits.
+    deferDeletion(
+      options.env?.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
+      ['/d', '/s', '/c', command],
+      {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+        windowsVerbatimArguments: true,
+      },
+    );
+    return;
   }
   for (const empty of [path.join(directory, 'bin'), directory]) {
     try {
