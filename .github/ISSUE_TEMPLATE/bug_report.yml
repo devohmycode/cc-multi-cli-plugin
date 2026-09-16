@@ -18,6 +18,8 @@ body:
       options:
         - OpenAI / Codex login
         - Cursor SDK
+        - OpenCode Zen
+        - Antigravity CLI
         - Claude passthrough
         - Gateway / model picker / workers
         - Other
@@ -28,7 +30,7 @@ body:
     id: cli-version
     attributes:
       label: Claude Code, Node and provider versions
-      placeholder: "e.g. 2026.04.17-787b533"
+      placeholder: "Claude Code: … / Node: … / provider CLI or SDK: …"
 
   - type: textarea
     id: what-happened
@@ -36,7 +38,7 @@ body:
       label: What happened?
       description: What did you run, what did you expect, what did you get?
       placeholder: |
-        I ran `node plugins/multi-core/src/launcher.ts` and asked openai-luna-high to fix foo.js.
+        I ran `claude-multi` and asked openai-luna-high to fix foo.js.
         I expected the worker to edit foo.js and report what it changed.
         Instead the worker failed with "OpenAI returned HTTP 400" after 8 minutes.
     validations:

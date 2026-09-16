@@ -10,11 +10,16 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ### Documentation
 
+- Add README navigation, CI status, feature highlights, provider documentation links,
+  and expandable setup details. Add a contributor quick start and pull-request
+  template; refresh issue forms for all four integrations and remove outdated
+  project maturity labels.
+
 - Rewrite the README as a short install-and-use page and move provider detail into
   `docs/openai.md`, `docs/cursor.md`, `docs/zen.md`, `docs/antigravity.md` and
   `docs/permissions.md`. `ARCHITECTURE.md` and `AGENTS.md` describe the current
-  system without roadmap or history. Antigravity is no longer labelled experimental
-  in the picker, worker descriptions or plugin manifests.
+  system without roadmap or history. Antigravity uses consistent naming
+  in the picker, worker descriptions and plugin manifests.
 
 ### Cross-platform runtime
 
@@ -179,8 +184,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   PreToolUse hooks are no longer treated as a precedence conflict.
 - Keep native actions display-only and reject unsupported policy/content. Resume the
   newest turn on the native conversation with a notice instead of refusing an
-  interrupted or history-changed session. Cache reuse and native compaction
-  retain experimental status.
+  interrupted or history-changed session. Cache reuse remains best-effort; native compaction has limited validation.
 - Persist the native conversation id and an interrupted flag as soon as a run's
   `init` event reports one, before its terminal result arrives, so a gateway
   crash mid-run still resumes the native conversation on the next request
@@ -373,7 +377,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 - Record the accepted transition to Cursor-owned tools, persistent state and
   native review, with Claude Code providing display and outer coordination.
-  Preserve cache/UI probe findings and distinguish the current callback prototype
+  Preserve cache/UI probe findings and distinguish the historical callback implementation
   from the target architecture. Implementation begins after this checkpoint.
 
 - Default Cursor model routes, named workers and catalog-based live checks to
@@ -491,7 +495,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 - Moved plugin runtime code from `plugins/multi/scripts/` to `plugins/multi-core/src/` and live integration checks to `test/live/`. Root `scripts/` remains for development utilities. Updated imports, npm scripts, and documented launcher commands to the new paths.
 
-### Experimental Cursor SDK bridge
+### Cursor SDK bridge
 
 - Reduced the default Cursor `/model` lineup to Auto, Grok 4.6, and Composer 2.5, filtered against the signed-in account catalog. Users can add other account models with the documented `MULTI_CURSOR_EXTRA_MODELS` environment variable. Full model IDs, presets, and registered workers remain available.
 - Added the official `@cursor/sdk` integration, browser login, account model/preset discovery, `/model` entries, and named Cursor workers alongside Claude and OpenAI. No private Cursor token extraction or backend selector.
@@ -521,9 +525,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 - **GPT as the main Claude Code agent.** The native gateway launcher adds Astra, Sol, Terra, and Luna to `/model` alongside Claude. Registered GPT requests now work for the main conversation as well as subagents, with main-session identity and separate subscription authentication. Provider-specific reasoning state is filtered at the request boundary while ordinary messages and tool history survive model switches. Includes offline switching tests and a live Claude → GPT → native delegation → Claude reproducer. Unsupported content, auxiliary features, and context-window limitations remain documented in the README.
 
-- **Native GPT-5.6 workers and reasoning selection.** The experimental launcher now registers `openai-sol`, `openai-terra`, and `openai-luna` alongside Astra's `openai-native`. Each supports `-low`, `-medium`, `-high`, `-xhigh`, and `-max`; unsuffixed names use medium. Model routing uses an explicit allowlist, traces include the actual upstream reasoning level, and the opt-in live test accepts a worker name and checks model/effort as well as native Read/Edit completion.
+- **Native GPT-5.6 workers and reasoning selection.** The launcher now registers `openai-sol`, `openai-terra`, and `openai-luna` alongside Astra's `openai-native`. Each supports `-low`, `-medium`, `-high`, `-xhigh`, and `-max`; unsuffixed names use medium. Model routing uses an explicit allowlist, traces include the actual upstream reasoning level, and the opt-in live test accepts a worker name and checks model/effort as well as native Read/Edit completion.
 
-- **Experimental native OpenAI subagent.** `node plugins/multi/scripts/native-model-gateway.mjs` launches Claude with an `openai-native` worker backed by GPT-6 Astra through the existing Codex ChatGPT login. A session-local gateway preserves the main agent's Claude subscription and separates provider credentials. The worker uses native Claude Code tools and agent lifecycle instead of a Sonnet forwarder. Includes Messages/Responses streaming translation, encrypted reasoning continuation, cancellation, offline contract tests, and an opt-in launcher; no global configuration changes. Text/function-tool scope and remaining limitations are documented in the README.
+- **Native OpenAI subagent.** `node plugins/multi/scripts/native-model-gateway.mjs` launches Claude with an `openai-native` worker backed by GPT-6 Astra through the existing Codex ChatGPT login. A session-local gateway preserves the main agent's Claude subscription and separates provider credentials. The worker uses native Claude Code tools and agent lifecycle instead of a Sonnet forwarder. Includes Messages/Responses streaming translation, encrypted reasoning continuation, cancellation, offline contract tests, and an opt-in launcher; no global configuration changes. Text/function-tool scope and remaining limitations are documented in the README.
 
 - **Grok on your Cursor subscription, documented.** Grok models (`grok-4.6`, `grok-4.6-fast`, `grok-4.5`, `grok-4.5-fast`) are in the Cursor model pool, so `/cursor:delegate --model grok-4.6` (and the research/explore commands) run Grok with no code change — the Cursor adapter passes `--model` through verbatim. README gains a **Models** section that also records why "Grok Bot" (the Cursor-bundled cloud-teammates app — no CLI, API, or headless mode) is not integrable and why Grok Build (`grok`) is out of scope (separate SuperGrok / X Premium+ entitlement).
 - **OpenCode `--effort` is now forwarded as `opencode run --variant`** (OpenCode's provider-specific reasoning-effort knob, validated by OpenCode per model). Headless transport only; the ACP path ignores it. Pinned in `test/unit/opencode-headless.test.mjs`.
@@ -536,7 +540,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 - **Refreshed repository guidance for the upcoming gateway refactor.** `AGENTS.md`, `CLAUDE.md`, README, and architecture docs now distinguish the target design from the existing command/skill/forwarder surface, which may be replaced or deleted. Removed stale compatibility promises and model/billing claims; corrected privacy documentation to match current local state storage. Existing command and skill prompts and runtime behavior are unchanged by this documentation pass.
 
-- **Consolidated the product direction around our custom Node gateway and external harness bridges.** `ARCHITECTURE.md` now defines the single-session `/model` and native-worker experience, subscription and execution boundaries, six integration targets, and the first Antigravity bridge milestone. README, agent orientation, integration guidance, and privacy descriptions distinguish the working direct GPT prototype from planned CLI-backed workers. Superseded gateway-engine proposals, transport roadmaps, and stale handoffs are archived locally with historical labels. Documentation only; no new provider or harness bridge is implemented by this change.
+- **Consolidated the product direction around our custom Node gateway and external harness bridges.** `ARCHITECTURE.md` now defines the single-session `/model` and native-worker experience, subscription and execution boundaries, six integration targets, and the first Antigravity bridge milestone. README, agent orientation, integration guidance, and privacy descriptions distinguish the working direct GPT integration from planned CLI-backed workers. Superseded gateway-engine proposals, transport roadmaps, and stale handoffs are archived locally with historical labels. Documentation only; no new provider or harness bridge is implemented by this change.
 
 - **Codex defaults route to GPT-6 Astra.** Both `--task-kind spec` and `open-ended` now map to `gpt-6-astra` at `medium` effort (verified against the live app-server `model/list` for this account on codex-cli 0.153.4: Astra is the catalog default; GPT-6 ships as a single slug, so the spec/open-ended split is framing-only until the line splits again). `VALID_REASONING_EFFORTS` drops `none` and `minimal` — no served model advertises them and Astra returns HTTP 400 for both; the accepted set is `low|medium|high|xhigh|max|ultra` (`ultra` = max reasoning plus automatic subagent delegation). Forwarder prompts, skills, and the `/codex:execute` argument hint updated to match.
 - **`gpt-5-4-prompting` skill renamed to `gpt-6-prompting`** and prefixed with the six Astra-specific prompting notes from OpenAI's "Using GPT-6 Astra" guide (bias toward action instead of asking, literal AGENTS.md/skill adherence, list-vs-prose default, explicit delegation at `ultra`, skip tests for trivial reversible edits, rejected efforts). The XML block recipes are unchanged. `codex-rescue` and `codex-cli-runtime` reference the new name; `NOTICE` keeps the upstream attribution.
@@ -585,7 +589,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 - **OpenCode provider.** `/opencode:delegate`, `/opencode:research`, and `/opencode:explore` are now shipped commands. Transport: headless `opencode run --format json`, piped NDJSON. The adapter (`lib/adapters/opencode.mjs`) parses the NDJSON event stream (step_start, text, step_finish, tool_use, error), derives file changes and command executions from completed tool_use events, and delivers the prompt on stdin (newline-safe). Read-only roles (`research`, `explore`) are enforced via injected oc-* primary agents (`OPENCODE_CONFIG_CONTENT`) with write/edit/bash denied plus an `OPENCODE_PERMISSION` deny floor — OpenCode has no `--read-only` flag. Write roles use `--dangerously-skip-permissions`. `--until-done` is supported; `--effort` is not. Default model: `opencode/claude-opus-4-8` (Zen, billed separately). **Token-offload caveat: `anthropic/*` models reuse the Claude Code subscription — zero offload; use `opencode/*`, `openai/*`, `google/*`, `github-copilot/*`, or `ollama/*` for real offload.** MCP servers are read from OpenCode's own `opencode.json` (not managed by `/multi:setup`). Set `OPENCODE_CLI_PATH` to pin a specific binary; set `OPENCODE_CLI_DEFAULT_MODEL` to override the default model. The adapter is registered in `lib/adapters/registry.mjs` and the opencode plugin is listed in `.claude-plugin/marketplace.json`.
 
 - **Reworked the Cursor slice into `/cursor:delegate`, `/cursor:research`, `/cursor:explore`** (replacing `/cursor:execute`, `/cursor:plan`, `/cursor:debug`). `delegate` is agentic implementation (Cursor writes code; the calling Claude thread runs the listed `## Verification` commands), `research` is read-only **external** web/docs research (Cursor's built-in WebSearch with the Exa MCP as a fallback), and `explore` is read-only codebase Q&A (semantic search + grep). All three default to Cursor's `auto` model and accept `--model`. `delegate` also gains the autonomous **`--until-done`** multi-step loop (with `--max-turns`), previously Codex-only — the loop's stop logic is now a shared, transport-agnostic helper (`evaluateAutonomousStop`).
-- **Implemented the Antigravity slice on Google's headless `agy` CLI (EXPERIMENTAL).** `/antigravity:research` and `/antigravity:explore` now run read-only against `agy -p` (Gemini 3.5 Flash). Because `agy`'s headless stdout is empty upstream (gemini-cli#27466, unfixed as of agy 1.0.3), the adapter spawns `agy -p`, learns the conversation id from a per-invocation `--log-file`, and recovers the answer from agy's on-disk transcript JSONL (`~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl`); the last non-empty `PLANNER_RESPONSE` step is the answer. Auth is `agy`'s own OAuth keyring (no API key); the desktop app is not required. Cancel is a process-tree kill. Per-call `--model`, write-`delegate`, and `--until-done` are intentionally unsupported on this path. New pure-helper tests in `test/unit/antigravity-headless.test.mjs` (against captured fixtures).
+- **Implemented the Antigravity slice on Google's headless `agy` CLI.** `/antigravity:research` and `/antigravity:explore` now run read-only against `agy -p` (Gemini 3.5 Flash). Because `agy`'s headless stdout is empty upstream (gemini-cli#27466, unfixed as of agy 1.0.3), the adapter spawns `agy -p`, learns the conversation id from a per-invocation `--log-file`, and recovers the answer from agy's on-disk transcript JSONL (`~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl`); the last non-empty `PLANNER_RESPONSE` step is the answer. Auth is `agy`'s own OAuth keyring (no API key); the desktop app is not required. Cancel is a process-tree kill. Per-call `--model`, write-`delegate`, and `--until-done` are intentionally unsupported on this path. New pure-helper tests in `test/unit/antigravity-headless.test.mjs` (against captured fixtures).
 
 ### Fixed
 

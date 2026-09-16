@@ -2,6 +2,9 @@
 
 # cc-multi-cli-plugin
 
+**One Claude Code session. Your models. Their native tools.**
+
+[![CI](https://github.com/greenpolo/cc-multi-cli-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/greenpolo/cc-multi-cli-plugin/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/greenpolo/cc-multi-cli-plugin?include_prereleases&sort=semver&label=release)](https://github.com/greenpolo/cc-multi-cli-plugin/releases)
 [![Built for Claude Code](https://img.shields.io/badge/built_for-Claude_Code-d97757)](https://docs.anthropic.com/en/docs/claude-code)
@@ -9,6 +12,16 @@
 [![Stars](https://img.shields.io/github/stars/greenpolo/cc-multi-cli-plugin?style=social)](https://github.com/greenpolo/cc-multi-cli-plugin/stargazers)
 
 Multi brings external models and coding harnesses into one Claude Code session through the `/model` picker and named native workers, with each provider's own login and permissions. Providers are OpenAI (ChatGPT via Codex login), Cursor (official SDK), OpenCode Zen (API key), and Antigravity (official CLI).
+
+[Quick start](#install) · [Providers](#providers) · [Documentation](#documentation) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
+
+## Why Multi?
+
+- **Choose your model in place.** Switch through `/model` and select supported reasoning effort with `/effort`.
+- **Delegate to named workers.** Run provider-specific subagents with progress, elapsed time, and cancellation.
+- **Keep native execution.** OpenAI and Zen use Claude Code's tools; Cursor and Antigravity run their own SDK or CLI tools.
+- **Carry your session forward.** Resume saved sessions while keeping provider credentials and native state separate.
+- **Stay in control.** Claude's permission mode and explicit tool restrictions govern provider dispatch.
 
 ## Install
 
@@ -26,6 +39,8 @@ In Claude Code, add the marketplace and install the providers you want:
 
 Install any subset; each provider pulls in the shared `multi-core` plugin. Open a new terminal, run `claude-multi`, and connect the providers you installed:
 
+### Providers
+
 | Plugin | Command | What it gives you |
 | --- | --- | --- |
 | `multi-openai` | `/multi-openai:login` | [ChatGPT models through Codex](docs/openai.md) |
@@ -35,11 +50,14 @@ Install any subset; each provider pulls in the shared `multi-core` plugin. Open 
 
 `multi status` shows what is installed and connected. `multi uninstall` removes the shell integration and keeps provider logins. Plain `claude` is never changed. Details: [installation](docs/installation.md).
 
-### For agents
+<details>
+<summary>Installing with a coding agent</summary>
 
 Paste this into any coding agent:
 
 > Install cc-multi-cli-plugin by following https://github.com/greenpolo/cc-multi-cli-plugin/blob/main/docs/installation.md#for-agents. Ask which providers I want, hand browser logins and API-key entry to me, and never ask for credentials in chat.
+
+</details>
 
 ## Use
 
@@ -49,11 +67,37 @@ Launch with `claude-multi`. `/model` lists the external models next to Claude's;
 
 Linux, macOS, and Windows are supported. See [platform support](docs/platform-support.md).
 
-## Development
+## Documentation
 
-Run `npm run check` for the repository checks.
+| Start here | Learn more |
+| --- | --- |
+| [Installation and account setup](docs/installation.md) | [Permissions and review](docs/permissions.md) |
+| [OpenAI](docs/openai.md) · [Cursor](docs/cursor.md) | [Architecture and execution flow](ARCHITECTURE.md) |
+| [OpenCode Zen](docs/zen.md) · [Antigravity](docs/antigravity.md) | [Platform support and verification](docs/platform-support.md) |
 
-See the [contributor guide](AGENTS.md).
+<details>
+<summary>Does this change my normal Claude setup?</summary>
+
+No. Launch Multi with `claude-multi`; plain `claude` stays unchanged. Provider plugins are opt-in, and each provider uses its own authentication. `multi uninstall` removes the shell integration while preserving provider logins.
+
+</details>
+
+<details>
+<summary>Where do tools run?</summary>
+
+OpenAI and Zen use Claude Code's tool execution loop. Cursor uses its official SDK, and Antigravity uses the real `agy` CLI. Native harness actions are displayed in the session and are never replayed as executable Claude tool calls. See [architecture](ARCHITECTURE.md) and [permissions](docs/permissions.md) for the boundaries.
+
+</details>
+
+## Contributing
+
+Bug reports, provider improvements, and documentation fixes are welcome. Read the
+[contributing guide](CONTRIBUTING.md) for local setup and checks, or open a
+[bug report](https://github.com/greenpolo/cc-multi-cli-plugin/issues/new?template=bug_report.yml) or
+[feature request](https://github.com/greenpolo/cc-multi-cli-plugin/issues/new?template=feature_request.yml).
+
+CI runs the repository checks on Linux, macOS, and Windows. See the
+[workflow results](https://github.com/greenpolo/cc-multi-cli-plugin/actions/workflows/ci.yml).
 
 ## License
 

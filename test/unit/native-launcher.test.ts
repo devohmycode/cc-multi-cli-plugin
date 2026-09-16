@@ -19,7 +19,8 @@ async function writeClaudeFixture(bin: string, source: string): Promise<void> {
     await writeFile(path.join(bin, 'claude-fixture.js'), source);
     await writeFile(
       path.join(bin, 'claude.cmd'),
-      `@"${process.execPath}" "%~dp0claude-fixture.js" %*\r\n`,
+      // npm's global shim layout, so the launcher runs the fixture through Node directly.
+      `endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\claude-fixture.js" %*\r\n`,
     );
     return;
   }
@@ -334,7 +335,8 @@ console.log(rows.map(row=>row.join(String.fromCharCode(9))).join(String.fromChar
     );
     await writeFile(
       path.join(bin, 'agy.cmd'),
-      `@"${process.execPath}" "%~dp0agy-fixture.js" %*\r\n`,
+      // npm's global shim layout, so the launcher runs the fixture through Node directly.
+      `endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\agy-fixture.js" %*\r\n`,
     );
   } else {
     await writeFile(
@@ -506,7 +508,7 @@ test('launcher argument limits are platform-aware and identify largest providers
         'C:\\bin\\claude.cmd',
         'win32',
       ),
-    /through the Windows shim limit of 8,000/,
+    /Windows cmd.exe shim limit of 8,000/,
   );
 });
 

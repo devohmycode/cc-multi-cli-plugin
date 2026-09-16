@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Use this template for a provider integration, model/worker choice, permission mapping, or session improvement.
-        OpenAI and Cursor are experimental integrations. Antigravity, OpenCode, llama.cpp and Grok Build are planned.
+        Current integrations are OpenAI, Cursor, OpenCode Zen, and Antigravity.
         Describe the execution route you need: Claude-executed tools or the provider's native harness.
 
   - type: textarea

@@ -12,7 +12,8 @@ async function writeClaudeFixture(bin: string, source: string): Promise<void> {
     await writeFile(path.join(bin, 'claude-fixture.js'), source);
     await writeFile(
       path.join(bin, 'claude.cmd'),
-      `@"${process.execPath}" "%~dp0claude-fixture.js" %*\r\n`,
+      // npm's global shim layout, so the launcher runs the fixture through Node directly.
+      `endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\claude-fixture.js" %*\r\n`,
     );
     return;
   }
