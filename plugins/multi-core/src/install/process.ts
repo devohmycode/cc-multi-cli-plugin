@@ -11,9 +11,8 @@ export interface RunOptions {
 export async function run(
   command: string,
   args: string[],
-  supplied: RunOptions | NodeJS.ProcessEnv = {},
+  options: RunOptions = {},
 ): Promise<number> {
-  const options = normalizeOptions(supplied);
   const platform = options.platform ?? process.platform;
   const environment = options.env ?? process.env;
   const invocation = executableInvocation(command, args, platform, environment);
@@ -40,11 +39,4 @@ export async function run(
     process.off('SIGTERM', terminate);
     process.off('SIGINT', interrupt);
   }
-}
-
-function normalizeOptions(supplied: RunOptions | NodeJS.ProcessEnv): RunOptions {
-  if ('platform' in supplied || 'env' in supplied) {
-    return supplied as RunOptions;
-  }
-  return { env: supplied as NodeJS.ProcessEnv };
 }

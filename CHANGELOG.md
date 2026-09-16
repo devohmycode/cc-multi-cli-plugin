@@ -4,6 +4,14 @@ Entries record changes when they were made, including superseded decisions.
 See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 [README.md](README.md) for current capabilities.
 
+## Unreleased
+
+- Fix `multi login openai`, `multi login cursor`, `multi login antigravity` and the
+  no-provider `claude` pass-through failing with `spawn <command> ENOENT`. The
+  foreground process runner read its empty default options as an empty environment
+  map, so children were spawned without `PATH`. `run()` now accepts options only and
+  inherits the parent environment unless one is supplied. (#18)
+
 ## 0.2.0 — 2026-09-16
 
 - Let setup name the launch command (`--command <name>`, default `claude-multi`) and persist the `/model` rows to show (`--models all|none|<ids>`). Choices survive setup reruns, renames remove the previous shim, and `multi` stays reserved. Naming the command `claude` is allowed with a warning; nested runs inside a Multi session then pass through to the real executable. The setup skill and the agent install guide ask both questions with the defaults offered.
