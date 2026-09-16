@@ -80,7 +80,8 @@ if (args.includes('plugin') && args.includes('list')) {
         SHELL: process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash',
         TEST_PLUGIN_LIST: listing,
       };
-  const install = () => execute(process.execPath, [setup, '--claude', real], { env });
+  const install = (flags: string[] = []) =>
+    execute(process.execPath, [setup, '--claude', real, ...flags], { env });
   const bin = path.join(home, '.local/share/multi-cli/bin');
   const invoke = (name: string, args: string[], extra: Record<string, string> = {}) => {
     const executable = path.join(bin, windows ? `${name}.cmd` : name);
@@ -124,7 +125,7 @@ async function core(directory: string, name: string) {
   await mkdir(src, { recursive: true });
   await writeFile(
     path.join(src, 'launcher.ts'),
-    `console.log(JSON.stringify({root:import.meta.url,args:process.argv.slice(2),providers:process.env.MULTI_ENABLED_PROVIDERS,claude:process.env.MULTI_REAL_CLAUDE}));`,
+    `console.log(JSON.stringify({root:import.meta.url,args:process.argv.slice(2),providers:process.env.MULTI_ENABLED_PROVIDERS,claude:process.env.MULTI_REAL_CLAUDE,models:process.env.MULTI_MODELS ?? null}));`,
   );
   return root;
 }
@@ -188,6 +189,61 @@ test('wrapper follows installed core updates and enables only selected providers
   assert.match(JSON.parse((await f.invoke('claude-multi', [])).stdout).root, /core-v2/);
   await writeFile(f.listing, JSON.stringify(plugins(next, false)));
   assert.equal(JSON.parse((await f.invoke('claude-multi', [])).stdout).native, true);
+});
+
+test('setup renames the launch command, persists picker models, and keeps them across reruns', async (t) => {
+  const f = await fixture(t);
+  const root = await core(f.directory, 'core');
+  await writeFile(f.listing, JSON.stringify(plugins(root)));
+  const stateFile = path.join(f.home, '.local/share/multi-cli/state.json');
+  const shim = (name: string) =>
+    path.join(f.home, '.local/share/multi-cli/bin', f.windows ? `${name}.cmd` : name);
+  const first = await f.install(['--command', 'mc', '--models', 'multi/zen/kimi-k2.5']);
+  assert.match(first.stdout, /start mc\./);
+  assert.match(first.stdout, /shows only: multi\/zen\/kimi-k2\.5/);
+  await assert.rejects(access(shim('claude-multi')), /ENOENT/);
+  const custom = JSON.parse((await f.invoke('mc', [])).stdout);
+  assert.equal(custom.models, 'multi/zen/kimi-k2.5');
+  assert.equal(custom.providers, 'zen');
+  // An explicit environment selection still wins for one launch.
+  const explicit = JSON.parse((await f.invoke('mc', [], { MULTI_MODELS: '' })).stdout);
+  assert.equal(explicit.models, '');
+  // Re-running setup without flags keeps the customization.
+  await f.install();
+  assert.equal(JSON.parse(await readFile(stateFile, 'utf8')).command, 'mc');
+  assert.equal(JSON.parse((await f.invoke('mc', [])).stdout).models, 'multi/zen/kimi-k2.5');
+  // `none` hides external rows; `all` restores launcher defaults.
+  await f.install(['--models', 'none']);
+  assert.equal(JSON.parse((await f.invoke('mc', [])).stdout).models, '');
+  await f.install(['--models', 'all']);
+  assert.equal(JSON.parse((await f.invoke('mc', [])).stdout).models, null);
+  assert.equal('models' in JSON.parse(await readFile(stateFile, 'utf8')), false);
+  // Renaming removes the previous shim and uninstall removes the current one.
+  await f.install(['--command', 'claude-multi']);
+  await assert.rejects(access(shim('mc')), /ENOENT/);
+  assert.equal(JSON.parse((await f.invoke('claude-multi', [])).stdout).providers, 'zen');
+  await assert.rejects(f.install(['--command', 'multi']), /reserved/);
+  await assert.rejects(f.install(['--command', 'bad name']), /Invalid launch command/);
+  await assert.rejects(f.install(['--models', 'gpt-6-astra']), /Invalid picker model/);
+  await f.invoke('multi', ['uninstall']);
+  if (f.windows) {
+    await waitForMissing(shim('claude-multi'));
+  } else {
+    await assert.rejects(access(shim('claude-multi')), /ENOENT/);
+  }
+});
+
+test('a launch command named claude passes nested runs through to the real executable', async (t) => {
+  const f = await fixture(t);
+  const root = await core(f.directory, 'core');
+  await writeFile(f.listing, JSON.stringify(plugins(root)));
+  const install = await f.install(['--command', 'claude']);
+  assert.match(install.stderr, /shadows the plain claude command/);
+  assert.equal(JSON.parse((await f.invoke('claude', [])).stdout).providers, 'zen');
+  const nested = JSON.parse(
+    (await f.invoke('claude', ['-p', 'hi'], { MULTI_GATEWAY_TOKEN: 'token' })).stdout,
+  );
+  assert.deepEqual(nested, { native: true, args: ['-p', 'hi'] });
 });
 
 test('edited shell blocks and project-only executable cores fail explicitly', async (t) => {

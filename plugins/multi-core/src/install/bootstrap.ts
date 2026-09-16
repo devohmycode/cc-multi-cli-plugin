@@ -14,6 +14,12 @@ async function dispatch(state: Installation, args: string[], management: boolean
   if (!management && (!root || providers.length === 0)) {
     return run(state.claude, args);
   }
+  if (!management && state.command === 'claude' && process.env.MULTI_GATEWAY_TOKEN) {
+    // A launch command named `claude` also catches Claude's own nested runs (agents
+    // calling `claude -p`, SDK spawns, hooks). Inside a Multi session those must
+    // reach the real executable rather than start a second gateway.
+    return run(state.claude, args);
+  }
   if (!root) {
     throw new Error('Enable multi-core at user scope before using Multi commands.');
   }
@@ -25,6 +31,9 @@ async function dispatch(state: Installation, args: string[], management: boolean
   }
   const env = {
     ...process.env,
+    ...(state.models !== undefined && process.env.MULTI_MODELS === undefined
+      ? { MULTI_MODELS: state.models }
+      : {}),
     MULTI_REAL_CLAUDE: state.claude,
     MULTI_ENABLED_PROVIDERS: providers.join(','),
     MULTI_ANTIGRAVITY: providers.includes('antigravity') ? '1' : '0',

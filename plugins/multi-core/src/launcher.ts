@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -253,7 +254,27 @@ async function main() {
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+/**
+ * Claude's plugin cache may be a symlink to a checkout. Node resolves the entry
+ * module to its real path, so compare real paths rather than the argv spelling.
+ */
+function isEntryModule(argument: string | undefined): boolean {
+  if (!argument) {
+    return false;
+  }
+  const entry = fileURLToPath(import.meta.url);
+  const resolved = path.resolve(argument);
+  if (resolved === entry) {
+    return true;
+  }
+  try {
+    return realpathSync(resolved) === realpathSync(entry);
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryModule(process.argv[1])) {
   void main().catch((error) => {
     console.error(`Native gateway: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);

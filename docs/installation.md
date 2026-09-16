@@ -28,8 +28,31 @@ In Claude Code, add the marketplace and install the providers you want:
 Each provider pulls in `multi-core`. Setup writes one marked PATH block to the
 applicable shell file: `~/.bashrc`, `~/.zshrc`, fish's config file, or the
 PowerShell profile. It writes wrappers and shims under Multi's platform data
-directory. It never shadows `claude`; `claude-multi` starts Multi. Open a new
-terminal after setup.
+directory. It never shadows `claude` unless you ask for that name; `claude-multi`
+starts Multi. Open a new terminal after setup.
+
+## Customize the launch
+
+Setup accepts two optional flags. Both persist in Multi's install state, so
+re-running setup without them keeps your choices.
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--command <name>` | `claude-multi` | Name of the launch command placed on PATH. `multi` is reserved. |
+| `--models <selection>` | `all` | External rows in `/model`: `all`, `none`, or comma-separated full IDs such as `multi/openai/gpt-6-astra,multi/cursor/grok-4.6`. Claude's own models always stay listed. |
+
+```text
+/multi-core:setup --command multiclaude --models multi/openai/gpt-6-astra,multi/zen/kimi-k2.5
+```
+
+Multi is the real Claude Code binary started behind a local gateway, so only the
+command name differs from a plain launch. Naming the command `claude` is allowed
+but shadows the plain command: every `claude` launch, including scripts, editors
+and agents that call `claude -p`, starts the gateway first. Nested runs inside a
+Multi session pass through to plain Claude. Setup prints a warning when you pick
+that name; re-run with `--command claude-multi` to restore the default. Setting
+`MULTI_MODELS` in the environment overrides the saved model selection for one
+launch. Model IDs are listed in each provider's documentation.
 
 ## Connect accounts
 
@@ -59,11 +82,16 @@ then remove the provider and core plugins through `/plugin` if desired.
 
 1. Check Node, Claude Code, the shell, the platform, and the requested providers.
 2. Install the selected plugins at user scope through Claude's plugin manager.
-3. Run `/multi-core:setup` and explain the marked PATH change.
+3. Ask two optional questions, offering the defaults: what to name the launch
+   command (default `claude-multi`; explain that only the name differs from a
+   plain launch, and that `claude` would shadow the plain command), and which
+   external models to show in `/model` (default all; full IDs are in the provider
+   docs). Run `/multi-core:setup` with `--command` and `--models` as chosen and
+   explain the marked PATH change.
 4. Hand browser sign-in to the human. Have the human enter Zen keys in a separate
    terminal. Never accept credentials in chat or an agent tool session.
-5. Run `multi status`. Ask the human to open a new terminal, launch `claude-multi`,
-   and check `/model`.
+5. Run `multi status`. Ask the human to open a new terminal, launch the chosen
+   command, and check `/model`.
 
 ## Run from a checkout
 

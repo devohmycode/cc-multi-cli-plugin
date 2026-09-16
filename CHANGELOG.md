@@ -6,6 +6,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Let setup name the launch command (`--command <name>`, default `claude-multi`) and persist the `/model` rows to show (`--models all|none|<ids>`). Choices survive setup reruns, renames remove the previous shim, and `multi` stays reserved. Naming the command `claude` is allowed with a warning; nested runs inside a Multi session then pass through to the real executable. The setup skill and the agent install guide ask both questions with the defaults offered.
+
+- Run the launcher when Claude's plugin cache is a symlink to a checkout. The entry-module guard added with the Windows command-line limit compared the argv spelling against Node's real-path module URL, so `claude-multi` exited silently without starting Claude.
+
 - Limit named Cursor workers to picker rows, shorten worker announcements, and reject Windows launcher command lines above the platform ceiling with provider size diagnostics. Representative four-provider worker definitions remain under 30,000 bytes; off-Windows command-line behavior is covered through injected platform tests.
 
 ### Documentation

@@ -9,6 +9,7 @@
 [![Latest release](https://img.shields.io/github/v/release/greenpolo/cc-multi-cli-plugin?include_prereleases&sort=semver&label=release)](https://github.com/greenpolo/cc-multi-cli-plugin/releases)
 [![Built for Claude Code](https://img.shields.io/badge/built_for-Claude_Code-d97757)](https://docs.anthropic.com/en/docs/claude-code)
 [![Node 24.12+](https://img.shields.io/badge/Node-%E2%89%A524.12-555)](#install)
+[![Linux · macOS · Windows](https://img.shields.io/badge/platforms-Linux_%C2%B7_macOS_%C2%B7_Windows-555)](docs/platform-support.md)
 [![Stars](https://img.shields.io/github/stars/greenpolo/cc-multi-cli-plugin?style=social)](https://github.com/greenpolo/cc-multi-cli-plugin/stargazers)
 
 Multi brings external models and coding harnesses into one Claude Code session through the `/model` picker and named native workers, with each provider's own login and permissions. Providers are OpenAI (ChatGPT via Codex login), Cursor (official SDK), OpenCode Zen (API key), and Antigravity (official CLI).
@@ -52,14 +53,14 @@ Install any subset; each provider pulls in the shared `multi-core` plugin. Open 
 | `multi-zen` | `/multi-zen:connect` | [OpenCode Zen models with an API key](docs/zen.md) |
 | `multi-antigravity` | `/multi-antigravity:connect` | [Antigravity models and workers through `agy`](docs/antigravity.md) |
 
-`multi status` shows what is installed and connected. `multi uninstall` removes the shell integration and keeps provider logins. Plain `claude` is never changed. Details: [installation](docs/installation.md).
+`multi status` shows what is installed and connected. `multi uninstall` removes the shell integration and keeps provider logins. Plain `claude` is never changed. Rename the launch command or trim the `/model` rows with `/multi-core:setup --command <name> --models <ids>`. Details: [installation](docs/installation.md).
 
 <details>
 <summary>Installing with a coding agent</summary>
 
 Paste this into any coding agent:
 
-> Install cc-multi-cli-plugin by following https://github.com/greenpolo/cc-multi-cli-plugin/blob/main/docs/installation.md#for-agents. Ask which providers I want, hand browser logins and API-key entry to me, and never ask for credentials in chat.
+> Install cc-multi-cli-plugin by following https://github.com/greenpolo/cc-multi-cli-plugin/blob/main/docs/installation.md#for-agents. Ask which providers I want, what to name the launch command (default `claude-multi`), and which models to show in `/model` (default all). Hand browser logins and API-key entry to me, and never ask for credentials in chat.
 
 </details>
 
@@ -69,7 +70,7 @@ Launch with `claude-multi`. `/model` lists the external models next to Claude's;
 
 ## Platforms
 
-Linux, macOS, and Windows are supported. See [platform support](docs/platform-support.md).
+Linux, macOS, and Windows are supported, with offline checks running in CI on all three for every commit. WSL behaves as Linux. See [platform support](docs/platform-support.md) for the live-verified matrix per provider.
 
 ## Documentation
 
