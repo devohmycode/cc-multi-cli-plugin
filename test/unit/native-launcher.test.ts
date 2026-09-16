@@ -27,6 +27,18 @@ async function writeClaudeFixture(bin: string, source: string): Promise<void> {
   await writeFile(path.join(bin, 'claude'), source, { mode: 0o755 });
 }
 
+/** Windows reads the profile and data roots from these, not from HOME. */
+function windowsHome(root: string): NodeJS.ProcessEnv {
+  if (process.platform !== 'win32') {
+    return {};
+  }
+  return {
+    USERPROFILE: root,
+    APPDATA: path.join(root, 'AppData', 'Roaming'),
+    LOCALAPPDATA: path.join(root, 'AppData', 'Local'),
+  };
+}
+
 test('launcher preserves native auth, disables unavailable auto mode, and merges caller settings', {
   skip: process.platform === 'win32',
 }, async (t) => {
@@ -69,6 +81,7 @@ const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'ut
         env: {
           PATH: path.join(cwd, 'bin') + path.delimiter + process.env.PATH,
           HOME: cwd,
+          ...windowsHome(cwd),
           CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
           CODEX_HOME: cwd,
           TEST_AUTH: auth,
@@ -103,6 +116,7 @@ const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'ut
         env: {
           PATH: path.join(cwd, 'bin') + path.delimiter + process.env.PATH,
           HOME: cwd,
+          ...windowsHome(cwd),
           CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
           CODEX_HOME: cwd,
           TEST_AUTH: auth,
@@ -118,6 +132,7 @@ const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'ut
       env: {
         PATH: path.join(cwd, 'bin') + path.delimiter + process.env.PATH,
         HOME: cwd,
+        ...windowsHome(cwd),
         CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
         CODEX_HOME: cwd,
         TEST_CLAUDE_VERSION: '2.1.271',
@@ -136,6 +151,7 @@ const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'ut
     env: {
       PATH: path.join(cwd, 'bin') + path.delimiter + process.env.PATH,
       HOME: cwd,
+      ...windowsHome(cwd),
       CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
       CODEX_HOME: cwd,
     },
@@ -181,6 +197,7 @@ result(JSON.stringify({settings,agents:Object.keys(agents),models:args.filter(x=
       env: {
         PATH: `${bin}${path.delimiter}${process.env.PATH}`,
         HOME: cwd,
+        ...windowsHome(cwd),
         XDG_DATA_HOME: path.join(cwd, 'data'),
         CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
         CODEX_HOME: cwd,
@@ -228,6 +245,7 @@ result(JSON.stringify({settings,agents:Object.keys(agents),models:args.filter(x=
     env: {
       PATH: `${bin}${path.delimiter}${process.env.PATH}`,
       HOME: cwd,
+      ...windowsHome(cwd),
       XDG_DATA_HOME: path.join(cwd, 'data'),
       CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
       CODEX_HOME: cwd,
@@ -246,6 +264,7 @@ result(JSON.stringify({settings,agents:Object.keys(agents),models:args.filter(x=
       env: {
         PATH: `${bin}${path.delimiter}${process.env.PATH}`,
         HOME: cwd,
+        ...windowsHome(cwd),
         XDG_DATA_HOME: path.join(cwd, 'data'),
         CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
         CODEX_HOME: cwd,
@@ -305,6 +324,7 @@ result(JSON.stringify({settings,models:args.filter(x=>x.startsWith('multi/')),ze
     env: {
       PATH: `${bin}${path.delimiter}${process.env.PATH}`,
       HOME: cwd,
+      ...windowsHome(cwd),
       XDG_DATA_HOME: path.join(cwd, 'data'),
       CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
       CODEX_HOME: cwd,
@@ -386,6 +406,7 @@ result(JSON.stringify({settings,agents}));
       env: {
         PATH: `${bin}${path.delimiter}${process.env.PATH}`,
         HOME: cwd,
+        ...windowsHome(cwd),
         CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
         CODEX_HOME: cwd,
         MULTI_ANTIGRAVITY: '1',
