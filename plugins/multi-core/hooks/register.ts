@@ -1,6 +1,7 @@
 import type { EngineInterface, Register } from 'claude-code';
 import { register as registerCompaction } from './compact.ts';
 import { register as registerLifecycle } from './lifecycle.ts';
+import { register as registerUsage } from './usage.ts';
 import { register as registerWorkers } from './workers.ts';
 
 const displayTools = [
@@ -44,6 +45,7 @@ type GatewayResponse = {
 // Claude Code 2.1.272 loads exactly one entry from hooks.json `modules`; compose here.
 export const register: Register = (on, options) => {
   let generation: number | undefined;
+  registerUsage(on, options);
   registerLifecycle(on, options);
   registerCompaction(on, options);
   registerWorkers(on, options);
@@ -89,6 +91,11 @@ export const register: Register = (on, options) => {
     if (!(await active($))) {
       return next(event);
     }
+    await $.command.register({
+      name: 'multi-usage',
+      description: 'Open provider quotas, spend, and session receipts.',
+      immediate: true,
+    });
     for (const [name, description] of displayTools) {
       try {
         await $.tool.register({
@@ -142,6 +149,32 @@ export const register: Register = (on, options) => {
       };
     }
     generation = typeof response.generation === 'number' ? response.generation : undefined;
+    return next(event);
+  });
+  on('classic.SessionStart', async ($, event, next) => {
+    if (!(await active($))) {
+      return next(event);
+    }
+    const permissionMode = event.permission_mode;
+    if (typeof permissionMode !== 'string') {
+      return next(event);
+    }
+    const policyGeneration = await preparePolicy($, event.session_id, event.cwd, generation);
+    if (!policyGeneration) {
+      return next(event);
+    }
+    const response = await request($, '/multi/mod/session', {
+      policyGeneration,
+      sessionId: event.session_id,
+      cwd: event.cwd,
+      model: await $.session.model(),
+      event: 'prompt',
+      generation,
+      permissionMode,
+    });
+    if (response?.accepted) {
+      generation = typeof response.generation === 'number' ? response.generation : undefined;
+    }
     return next(event);
   });
 };

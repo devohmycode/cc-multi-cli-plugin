@@ -1,7 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ModBridge } from './mod-bridge.ts';
 import type { ModCompactions } from './mod-compaction.ts';
+import { usageRoute } from './mod-usage.ts';
 import type { PermissionContext, PermissionModes } from './mode-hook.ts';
+import type { ProviderUsageDashboard } from './provider-usage.ts';
+import type { ReceiptLedger } from './receipts.ts';
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -36,8 +39,21 @@ export async function handleModRoute(
   bridge: ModBridge,
   permissionModes?: PermissionModes,
   compactions?: ModCompactions,
+  receipts?: ReceiptLedger,
+  billedUsage?: (session: string) => Promise<unknown>,
+  dashboard?: ProviderUsageDashboard,
 ) {
   try {
+    if (
+      ['/multi/mod/usage', '/multi/mod/receipts', '/multi/mod/usage/complete'].includes(
+        url.pathname,
+      )
+    ) {
+      if (!receipts) {
+        throw new Error('Usage accounting is unavailable');
+      }
+      return reply(res, await usageRoute(req, url, parsed, receipts, billedUsage, dashboard));
+    }
     switch (url.pathname) {
       case '/multi/mod/telemetry':
         if (req.method === 'POST') {
@@ -303,9 +319,9 @@ function compactRoute(
     throw new Error('Compaction policy generation is unknown or stale');
   }
   const agent = value.agentId === undefined ? undefined : text(value.agentId, 'agentId');
-  const context = modes.resolve(session, agent);
   const identity = { session, agent, generation: current.generation };
   if (route === '/multi/mod/compact/run') {
+    const context = modes.resolve(session, agent);
     return reply(res, compactions.run(identity, text(value.precomputeId, 'precomputeId'), context));
   }
   const input = {
@@ -317,6 +333,7 @@ function compactRoute(
     if (!input.messages.length) {
       throw new Error('Precompute requires a transcript');
     }
+    modes.resolve(session, agent);
     return reply(res, compactions.prepare(input));
   }
   if (route !== '/multi/mod/compact/authorize') {
@@ -324,9 +341,18 @@ function compactRoute(
   }
   const result = compactions.authorize(input);
   if (!result.messages) {
-    modes.authorizeModCompaction(session, agent);
+    authorizeBoundary(modes, session, agent);
   }
   return reply(res, result);
+}
+
+function authorizeBoundary(modes: PermissionModes, session: string, agent?: string) {
+  if (agent) {
+    modes.resolve(session, agent);
+    modes.authorizeModCompaction(session, agent);
+    return;
+  }
+  modes.authorizeRestoredModCompaction(session);
 }
 function transcript(value: unknown): Record<string, unknown>[] {
   if (

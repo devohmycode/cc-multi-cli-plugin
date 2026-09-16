@@ -94,6 +94,25 @@ test('PermissionModes retains a tool-free compaction boundary and acknowledges w
   );
 });
 
+test('compaction authorization accepts a restored bridge generation without a prompt snapshot', async (t) => {
+  const modes = new PermissionModes(async () => ({}));
+  const base = await start(t, modes);
+  const started = await request(base, '/multi/mod/session', {
+    sessionId: 'resumed',
+    event: 'start',
+    cwd: '/workspace',
+  });
+  assert.equal(started.status, 200);
+  const result = await request(base, '/multi/mod/compact/authorize', {
+    sessionId: 'resumed',
+    generation: started.body.generation,
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.allow, true);
+  assert.deepEqual(modes.resolve('resumed').tools, []);
+  assert.throws(() => modes.resolve('resumed', 'unknown'), /worker/i);
+});
+
 test('mod requests have a control-plane byte limit and reject malformed restrictions', async (t) => {
   const base = await start(t);
   const oversized = await fetch(`${base}/multi/mod/session`, {

@@ -8,6 +8,7 @@ import {
   type ApprovalContext,
   approvalCwdForComparison,
   NativeApprovalBridge,
+  parseApprovalRequest,
 } from '../../plugins/multi-core/src/gateway/approval.ts';
 import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 
@@ -33,6 +34,19 @@ const request = (stage = 1, session = 'session-one', command = 'node harmless-te
       ],
     },
   ],
+});
+
+test('classifier policy is retained as admitted review evidence and cache identity', () => {
+  const first = request() as ReturnType<typeof request> & { system: unknown };
+  first.system = [{ type: 'text', text: 'Deny this exact command.' }];
+  const parsed = parseApprovalRequest(first);
+  assert.equal(parsed.policy, 'Deny this exact command.');
+  const second = request() as ReturnType<typeof request> & { system: unknown };
+  second.system = [{ type: 'text', text: 'Allow this exact command.' }];
+  assert.notEqual(parsed.key, parseApprovalRequest(second).key);
+  const malformed = request() as ReturnType<typeof request> & { system: unknown };
+  malformed.system = [{ type: 'image', source: 'unexpected' }];
+  assert.throws(() => parseApprovalRequest(malformed), /Malformed approval policy/);
 });
 const signal = () => new AbortController().signal;
 

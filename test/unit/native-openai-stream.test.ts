@@ -156,7 +156,7 @@ test('reasoning prefers final encrypted state and retains early state only when 
       created,
       itemEvent('added', { ...reasoning, encrypted_content: 'early' }),
       itemEvent('done', final),
-      terminal(),
+      terminal([final]),
     ]);
     const next = toResponses(
       { messages: [{ role: 'assistant', content: result.content }] },
@@ -169,6 +169,31 @@ test('reasoning prefers final encrypted state and retains early state only when 
   await assert.rejects(
     translate([created, terminal([{ type: 'reasoning' }])]),
     /omitted encrypted/,
+  );
+});
+
+test('terminal reasoning ciphertext may rotate without changing visible reasoning or emitted state', async () => {
+  const seen = capture();
+  const result = await translate(
+    [
+      created,
+      itemEvent('added', reasoning),
+      itemEvent('done', reasoning),
+      terminal([{ ...reasoning, encrypted_content: 'rotated' }]),
+    ],
+    seen.emit,
+  );
+  const next = toResponses(
+    { messages: [{ role: 'assistant', content: result.content }] },
+    'gpt-6-astra',
+  );
+  assert('encrypted_content' in next.input[0]);
+  assert.equal(next.input[0].encrypted_content, 'opaque');
+  assert(seen.events.some((event) => event.type === 'message_stop'));
+  const changed = { ...reasoning, summary: [{ type: 'summary_text', text: 'Changed' }] };
+  await assert.rejects(
+    translate([created, itemEvent('done', reasoning), terminal([changed])]),
+    /changed a completed item/,
   );
 });
 

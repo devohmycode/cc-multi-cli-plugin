@@ -1,4 +1,5 @@
 import type { EngineInterface, Register } from 'claude-code';
+import { forgetUsageSession } from './usage.ts';
 
 type Status = {
   model?: string;
@@ -23,7 +24,13 @@ export const register: Register = (on) => {
     void postStep($, event);
     return yield* next(event);
   });
-  on('turn.complete', ($, event, next) => {
+  on('turn.complete', async ($, event, next) => {
+    await request($, '/multi/mod/usage/complete', {
+      sessionId: await $.session.id(),
+      agentId: event.agentId,
+      turnId: event.turnId,
+      outcome: event.reason,
+    });
     running.delete(event.agentId ?? 'main');
     if (event.isAborted) {
       void cancelCompaction($, event.agentId);
@@ -31,7 +38,8 @@ export const register: Register = (on) => {
     void $.ui.status(undefined);
     return next(event);
   });
-  on('session.detach', ($, event, next) => {
+  on('session.detach', async ($, event, next) => {
+    forgetUsageSession(await $.session.id());
     running.clear();
     void detach($);
     return next(event);

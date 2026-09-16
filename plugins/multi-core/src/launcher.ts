@@ -40,6 +40,7 @@ import { executableInvocation, resolveExecutable } from './gateway/executable.ts
 import { ModBridge } from './gateway/mod-bridge.ts';
 import { PermissionModes } from './gateway/mode-hook.ts';
 import { hookCommand } from './gateway/permission-hook.ts';
+import { ReceiptLedger } from './gateway/receipts.ts';
 import type { GatewayEvent } from './gateway/server.ts';
 import { createNativeGateway } from './gateway/server.ts';
 
@@ -151,7 +152,16 @@ async function main() {
     cursorModels.length > 0,
     openaiReview,
   );
+  const receipts = new ReceiptLedger({
+    file: process.env.MULTI_RECEIPTS_FILE
+      ? path.resolve(process.env.MULTI_RECEIPTS_FILE)
+      : undefined,
+    onError: (error) => {
+      process.stderr.write(`[native] receipt not written: ${String(error)}\n`);
+    },
+  });
   const server = createNativeGateway({
+    receipts,
     token,
     enabledProviders,
     authFile,
@@ -210,6 +220,8 @@ async function main() {
     server.close();
     await cursor?.close();
     await antigravity?.close();
+    receipts.finishAll();
+    await receipts.drain();
     await rm(settingsDir, { recursive: true, force: true });
     throw error;
   }
@@ -225,6 +237,8 @@ async function main() {
     server.close();
     await cursor?.close();
     await antigravity?.close();
+    receipts.finishAll();
+    await receipts.drain();
     await rm(settingsDir, { recursive: true, force: true });
   };
   try {

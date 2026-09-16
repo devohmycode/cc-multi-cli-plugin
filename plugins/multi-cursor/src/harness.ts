@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import type { AgentOptions, Run, SDKAgent } from '@cursor/sdk';
+import type { AgentOptions, AgentUsage, Run, SDKAgent, TokenUsage } from '@cursor/sdk';
 import type { WorkerPermissions } from '../../multi-core/src/gateway/agent-definitions.ts';
 import { atomicWriteFile } from '../../multi-core/src/gateway/atomic-write.ts';
 import type {
@@ -28,12 +28,13 @@ import type { NativeRowObserver } from './progress.ts';
 import { cursorRowObservation, formatCursorProgress } from './progress.ts';
 import { cursorHistoryHash, cursorTerminalSuffix, prepareCursorRequest } from './request.ts';
 
-type Agent = Pick<SDKAgent, 'agentId' | 'send' | 'close'>;
+type Agent = Pick<SDKAgent, 'agentId' | 'send' | 'close'> & Partial<Pick<SDKAgent, 'getUsage'>>;
 export type CreateCursorHarnessAgent = (options: AgentOptions) => Promise<Agent>;
 type PendingRun = {
   key: string;
   runId?: string;
   model: string;
+  effort?: string;
   inputTokens: number;
 };
 type SavedSession = {
@@ -76,6 +77,30 @@ const hash = (value: unknown) =>
 
 const INTERRUPTED_NOTICE =
   '[Cursor] The previous turn was interrupted. Report its state and do not repeat completed actions.';
+const billedUsageTimeoutMs = 5000;
+
+function selectedEffort(selection: ReturnType<CursorHarness['selection']>) {
+  return selection.params?.find(
+    (parameter) => parameter.id === 'effort' || parameter.id === 'reasoning_effort',
+  )?.value;
+}
+
+async function boundedUsage(request: Promise<AgentUsage>) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      request,
+      new Promise<AgentUsage>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('Cursor billed usage request timed out')),
+          billedUsageTimeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Cursor owns state, tools and review. External actions are display-only text. */
 export class CursorHarness {
@@ -153,6 +178,68 @@ export class CursorHarness {
       throw new Error('Cursor requires a conversation');
     }
     return prepareCursorRequest(body).inputTokens;
+  }
+
+  /** Fetch Cursor's billed usage on demand; this is not inferred from turn tokens. */
+  async billedUsage(scope: string): Promise<
+    Array<{
+      agentId: string;
+      scope: string;
+      usage: AgentUsage['usage'];
+      cost?: AgentUsage['cost'];
+      runs: AgentUsage['runs'];
+    }>
+  > {
+    const active = this.sessions.get(scope);
+    let agent = active?.agent;
+    let temporary = false;
+    if (!agent) {
+      const saved = await readSession(this.sessionFile(scope));
+      if (!saved) {
+        return [];
+      }
+      agent = await this.resumeAgent(saved.agentId, {});
+      temporary = true;
+    }
+    try {
+      if (!agent.getUsage) {
+        return [];
+      }
+      const usage = await boundedUsage(agent.getUsage());
+      return [
+        { agentId: agent.agentId, scope, usage: usage.usage, cost: usage.cost, runs: usage.runs },
+      ];
+    } finally {
+      if (temporary) {
+        this.closeAgent(agent);
+      }
+    }
+  }
+
+  async billedUsageForSession(sessionId: string) {
+    const scopes = [...this.sessions.keys()].filter((scope) => {
+      try {
+        const parsed: unknown = JSON.parse(scope);
+        return Array.isArray(parsed) && parsed[0] === sessionId;
+      } catch {
+        return false;
+      }
+    });
+    if (scopes.length > 64) {
+      throw new Error('Cursor billing query exceeds 64 active agents');
+    }
+    const deadline = Date.now() + 7000;
+    const results: Awaited<ReturnType<CursorHarness['billedUsage']>> = [];
+    for (let index = 0; index < scopes.length; index += 4) {
+      if (Date.now() + billedUsageTimeoutMs > deadline) {
+        throw new Error('Cursor billed usage session query timed out');
+      }
+      const batch = await Promise.all(
+        scopes.slice(index, index + 4).map((scope) => this.billedUsage(scope)),
+      );
+      results.push(...batch.flat());
+    }
+    return results;
   }
 
   async handle(
@@ -267,7 +354,12 @@ export class CursorHarness {
       for (const event of saved.events) {
         emit(...event);
       }
-      return saved.response;
+      return {
+        ...saved.response,
+        multi_usage: saved.response.multi_usage
+          ? { ...saved.response.multi_usage, replayed: true }
+          : { source: 'unavailable', replayed: true },
+      };
     }
     const terminal: Event[] = [];
     const replay: { key: string; events: Event[] } = { key, events: [] };
@@ -337,7 +429,7 @@ export class CursorHarness {
       events.push([name, structuredClone(value)]);
     });
     response.text(result.result ?? '');
-    return { response: response.finish(), events };
+    return { response: response.finish(result.usage, pending.model, pending.effort), events };
   }
 
   private async session(scope: string, body: MessagesRequest, context: PermissionContext) {
@@ -459,8 +551,14 @@ export class CursorHarness {
     }
   }
 
-  private async persistDispatch(session: Session, key: string, model: string, inputTokens: number) {
-    session.pendingRun = { key, model, inputTokens };
+  private async persistDispatch(
+    session: Session,
+    key: string,
+    model: string,
+    inputTokens: number,
+    effort?: string,
+  ) {
+    session.pendingRun = { key, model, inputTokens, effort };
     // Durability write: a gateway crash before a terminal result arrives leaves
     // the session interrupted, so the next request resumes it with a notice
     // instead of guessing what the dispatched run did.
@@ -506,11 +604,13 @@ export class CursorHarness {
       }
       await this.configureSession(session, body, context);
       await this.archiveReply(session);
+      const selection = this.selection(body);
       const dispatch = await this.persistDispatch(
         session,
         replay.key,
-        body.model ?? '',
+        selection.id,
         prepared.inputTokens,
+        selectedEffort(selection),
       );
       dispatched = true;
       signal.throwIfAborted();
@@ -518,7 +618,7 @@ export class CursorHarness {
       session.run = await this.dispatchRun(
         session,
         prepared.prompt,
-        { model: this.selection(body), mode: cursorPermissionPolicy(context).mode },
+        { model: selection, mode: cursorPermissionPolicy(context).mode },
         signal,
         stream,
         (delta) => {
@@ -544,7 +644,7 @@ export class CursorHarness {
         exchange.rowObserver?.({ type: 'text', text: suffix });
       }
       stream.text(suffix);
-      const response = stream.finish();
+      const response = stream.finish(result.usage, selection.id, selectedEffort(selection));
       session.response = response;
       session.replay = replay;
       // Completion and its replayable HTTP reply must commit together.
@@ -793,12 +893,26 @@ class HarnessResponse {
     this.emit('content_block_stop', { index });
   }
 
-  finish() {
+  finish(usage?: TokenUsage, model?: string, effort?: string) {
     if (this.activeTextIndex !== undefined) {
       this.emit('content_block_stop', { index: this.activeTextIndex });
     }
     this.response.stop_reason = 'end_turn';
-    this.response.usage.output_tokens = estimateTextTokens(JSON.stringify(this.response.content));
+    if (usage) {
+      this.response.usage.input_tokens = usage.inputTokens;
+      this.response.usage.output_tokens = usage.outputTokens;
+      this.response.usage.cache_read_input_tokens = usage.cacheReadTokens;
+      this.response.usage.cache_creation_input_tokens = usage.cacheWriteTokens;
+    } else {
+      this.response.usage.output_tokens = estimateTextTokens(JSON.stringify(this.response.content));
+    }
+    this.response.multi_usage = {
+      source: usage ? 'provider' : 'estimate',
+      ...(model === undefined ? {} : { model }),
+      ...(effort === undefined ? {} : { effort }),
+      ...(usage?.reasoningTokens === undefined ? {} : { reasoning_tokens: usage.reasoningTokens }),
+      ...(usage?.totalTokens === undefined ? {} : { total_tokens: usage.totalTokens }),
+    };
     this.emit('message_delta', {
       delta: { stop_reason: 'end_turn', stop_sequence: null },
       usage: this.response.usage,

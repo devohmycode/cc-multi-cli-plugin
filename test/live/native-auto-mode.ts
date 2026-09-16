@@ -283,16 +283,30 @@ try {
           kind === 'ALLOW' ? 'allow' : 'deny',
           `Missing auto-mode verdict for ${kind}`,
         );
-        assert(
-          classified.requests.every(
-            (r) =>
-              r.model?.startsWith('claude-') &&
-              traces.some(
-                (t) => t.route === 'anthropic' && t.model === r.model && t.status === 200,
-              ),
-          ),
-          'Classifier did not use successful Anthropic passthrough',
-        );
+        if (item.name === 'sonnet') {
+          assert(
+            classified.requests.every(
+              (r) =>
+                r.model?.startsWith('claude-') &&
+                traces.some(
+                  (t) => t.route === 'anthropic' && t.model === r.model && t.status === 200,
+                ),
+            ),
+            'Claude classifier did not use successful Anthropic passthrough',
+          );
+        } else {
+          assert(
+            traces.some(
+              (trace) =>
+                trace.route === 'approval' &&
+                trace.model === 'codex-auto-review' &&
+                trace.stage === 1 &&
+                trace.outcome === (kind === 'ALLOW' ? 'allow' : 'deny') &&
+                Boolean(trace.agentId) === item.worker,
+            ),
+            `Missing provider-owned ${kind} review for the originating worker`,
+          );
+        }
       }
       assert.equal(allowed, 'ALLOW\n', 'Allowed canary did not execute');
       assert.equal(denied, null, 'Denied canary executed');
@@ -306,10 +320,12 @@ try {
         ),
         'Missing actual classifier denial for the canary',
       );
-      assert(
-        traces.some((t) => t.route === 'anthropic' && t.status === 200),
-        'Missing successful Anthropic traffic',
-      );
+      if (item.name === 'sonnet' || item.worker) {
+        assert(
+          traces.some((t) => t.route === 'anthropic' && t.status === 200),
+          'Missing successful Claude parent traffic',
+        );
+      }
       if (item.name !== 'sonnet') {
         assert(
           traces.some(
@@ -321,7 +337,13 @@ try {
       assert(
         traces
           .filter((t) => t.route === 'openai')
-          .every((t) => !t.tools || t.tools.every((name: string) => name === 'Bash')),
+          .every(
+            (t) =>
+              !t.tools ||
+              t.tools.every(
+                (name: string) => name === 'Bash' || (item.worker && name === 'SubagentHandback'),
+              ),
+          ),
         'External worker attempted another tool',
       );
       assert(!/DEP0190/.test(diagnostics + debug), 'Deprecated shell spawning');

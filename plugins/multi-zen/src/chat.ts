@@ -882,6 +882,11 @@ class ChatAccumulator {
       stop_reason: stop,
       stop_sequence: stopSequence,
       usage: resultUsage,
+      multi_usage: {
+        source: 'provider',
+        total_tokens: this.usageValue.prompt_tokens + this.usageValue.completion_tokens,
+        model: this.model,
+      },
     };
   }
 

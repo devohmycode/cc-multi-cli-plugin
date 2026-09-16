@@ -6,6 +6,37 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Add a session-only quota-aware model selection toggle to `/multi-usage`.
+  An optional main-agent hook suggests the least-used suitable subscription
+  on main-agent `Agent`/`Task` calls before tool execution. Guidance is advisory: no model overrides, spawn
+  restrictions, or waiting for quota resets.
+
+- Show subscription quota for Codex, Cursor, Zen Go, and Antigravity in
+  `/multi-usage`, including provider reset times. Antigravity uses native
+  headless account commands and also reports AI credits; Cursor retains
+  per-agent billing alongside its account quota. Missing Go entitlement,
+  failed lookups, and unavailable prepaid Zen balance are explicit.
+
+- Add a native `/multi-usage` menu for provider quotas, billed spend where
+  available, session tokens, and receipts, with optional per-invocation JSONL receipts through `MULTI_RECEIPTS_FILE`.
+  Receipts preserve model, effort, provider, endpoint, count source, and replay
+  accounting, with incomplete outcomes for interrupted runs. Codex quota windows
+  come from its native account API; Cursor charges come from the SDK. Providers
+  without a connected billing interface are explicitly marked unavailable.
+- Use Cursor SDK token counters in Claude responses and preserve native usage
+  during recovery. Report Antigravity count provenance and reasoning totals;
+  keep Cursor billed usage and spend separate from runtime token counts.
+
+- Accept rotated Zen reasoning ciphertext at terminal reconciliation while still
+  rejecting changes to visible reasoning, fixing interrupted tool streams.
+- Preserve native Auto-mode classifier policy in provider reviews and enforce its
+  hard-block section as mandatory restrictions. Recognize native worker handback
+  in the live check.
+- Allow tool-free compaction immediately after restoring a session, before a new
+  prompt has supplied its permission snapshot. Keep unknown workers rejected.
+- Repair live Zen usage comparisons to include auxiliary model requests and
+  explicitly select its provider on fresh-process resume.
+
 - Fix `multi login openai`, `multi login cursor`, `multi login antigravity` and the
   no-provider `claude` pass-through failing with `spawn <command> ENOENT`. The
   foreground process runner read its empty default options as an empty environment

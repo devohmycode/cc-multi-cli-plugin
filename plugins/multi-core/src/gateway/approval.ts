@@ -28,6 +28,8 @@ export interface ApprovalAction {
   transcript: Record<string, unknown>[];
   action: Record<string, unknown>;
   stage: 1 | 2;
+  /** Claude's admitted classifier policy, carried separately from transcript data. */
+  policy?: string;
 }
 export interface ApprovalVerdict {
   model: string;
@@ -80,7 +82,39 @@ function approvalEnvelope(body: unknown) {
   ) {
     throw new Error('Missing approval session identity');
   }
-  return { text, session: body.metadata.user_id };
+  const policy = approvalPolicy(body.system);
+  if (policy !== undefined && policy.length > 131072) {
+    throw new Error('Approval policy is too large');
+  }
+  return { text, session: body.metadata.user_id, policy };
+}
+
+function approvalPolicy(value: unknown): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value === 'string') {
+    if (value.length > 131072) {
+      throw new Error('Approval policy is too large');
+    }
+    return value;
+  }
+  if (
+    !Array.isArray(value) ||
+    value.some(
+      (block) =>
+        !record(block) ||
+        block.type !== 'text' ||
+        typeof block.text !== 'string' ||
+        block.text.length > 131072,
+    )
+  ) {
+    throw new Error('Malformed approval policy');
+  }
+  return value
+    .map((block) => String(block.text))
+    .filter((text) => !text.startsWith('x-anthropic-billing-header:'))
+    .join('\n');
 }
 
 function approvalStage(instruction: string | undefined): 1 | 2 {
@@ -98,7 +132,7 @@ function approvalStage(instruction: string | undefined): 1 | 2 {
 
 /** Strict, version-sensitive Claude 2.1.263 classifier envelope. Unknown formats fail closed. */
 export function parseApprovalRequest(body: unknown): ApprovalAction & { key: string } {
-  const { text, session } = approvalEnvelope(body);
+  const { text, session, policy } = approvalEnvelope(body);
   const close = text.indexOf('</transcript>\n');
   if (text[0] !== '<transcript>\n' || close <= 1 || close !== text.length - 2) {
     throw new Error('Unsupported approval transcript');
@@ -126,9 +160,9 @@ export function parseApprovalRequest(body: unknown): ApprovalAction & { key: str
     throw new Error('Missing proposed approval action');
   }
   const key = createHash('sha256')
-    .update(JSON.stringify([session, transcript]))
+    .update(JSON.stringify([session, transcript, policy ?? null]))
     .digest('hex');
-  return { transcript, action, stage, key };
+  return { transcript, action, stage, key, ...(policy ? { policy } : {}) };
 }
 
 /** Adapts provider allow/block verdicts AFTER Claude's own permission filtering.

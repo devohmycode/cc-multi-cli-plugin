@@ -58,8 +58,9 @@ const artifacts = await mkdtemp(path.join(tmpdir(), 'native-compaction-'));
 const cwd = path.join(artifacts, 'workspace');
 await mkdir(cwd);
 const sessionId = randomUUID();
-const fileNonce = randomBytes(12).toString('hex');
-const decision = randomBytes(12).toString('hex');
+// Short, labelled markers test exact retention without making random hex copying the task.
+const fileNonce = `file-${randomBytes(4).toString('hex')}`;
+const decision = `release-${randomBytes(4).toString('hex')}`;
 await writeFile(path.join(cwd, 'fixture.txt'), `alpha ${fileNonce}\n`);
 const report = {
   version: 1,
@@ -236,8 +237,14 @@ async function turn(
 }
 
 function remembers(text: string) {
-  assert(text.includes(fileNonce), `${currentStage}: lost original file nonce`);
-  assert(text.includes(decision), `${currentStage}: lost conversation-only release code`);
+  assert(
+    text.includes(fileNonce),
+    `${currentStage}: lost original file nonce ${fileNonce}: ${text}`,
+  );
+  assert(
+    text.includes(decision),
+    `${currentStage}: lost conversation-only release code ${decision}: ${text}`,
+  );
 }
 function compacted(boundaries: Event['compact_metadata'][], trigger: string) {
   assert.equal(

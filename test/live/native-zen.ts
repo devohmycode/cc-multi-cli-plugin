@@ -41,6 +41,15 @@ interface ClaudeEvent {
   session_id?: string;
   compact_metadata?: { trigger?: string; pre_tokens?: number };
   usage?: MessagesResponse['usage'];
+  modelUsage?: Record<
+    string,
+    {
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadInputTokens: number;
+      cacheCreationInputTokens: number;
+    }
+  >;
   message?: { content?: string | Array<{ type?: string; name?: string }> };
 }
 
@@ -121,7 +130,7 @@ await writeFile(
   }),
 );
 const fixtureNonce = randomBytes(8).toString('hex');
-const finalLine = `Record 239: amber birch cedar delta elm fir grove hazel iris juniper. ${fixtureNonce}`;
+const finalLine = `ZEN_FINAL_${fixtureNonce}`;
 await writeFile(
   path.join(artifacts, 'fixture.txt'),
   Array.from({ length: 240 }, (_, index) =>
@@ -201,13 +210,6 @@ async function observe(response: Response, sample: UsageSample) {
     sample.output = usage.output_tokens ?? usage.completion_tokens ?? 0;
     console.log(JSON.stringify(sample));
   }
-}
-
-function modelArguments(stage: string, selectedModel: string): string[] {
-  if (stage === 'resume') {
-    return [];
-  }
-  return ['--model', `multi/zen/${selectedModel}`];
 }
 
 function createGateway() {
@@ -290,11 +292,13 @@ async function runClaude(
       prompt,
       first ? '--session-id' : '--resume',
       sessionId,
-      ...modelArguments(stage, selectedModel),
+      '--model',
+      `multi/zen/${selectedModel}`,
       ...(zenModel(selectedModel)?.protocol === 'responses' ? ['--effort', 'low'] : []),
       ...(useTools ? ['--tools', 'Read', '--allowedTools', 'Read'] : ['--tools', '']),
       '--strict-mcp-config',
-      ...(first ? ['--settings', settingsFile] : []),
+      '--settings',
+      settingsFile,
       '--setting-sources',
       '',
       ...(stage === 'compaction' ? [] : ['--disable-slash-commands']),
@@ -354,10 +358,14 @@ async function runClaude(
       assert.deepEqual(toolUses, [], `${stage}: unexpected tool call ${toolUses.join(', ')}`);
     }
     await Promise.all(observations.slice(observationStart));
-    assert.equal(result.usage?.cache_read_input_tokens ?? 0, sum(stage, 'cached'));
-    assert.equal(result.usage?.cache_creation_input_tokens ?? 0, sum(stage, 'written'));
-    assert.equal(result.usage?.input_tokens ?? 0, freshInput(stage));
-    assert.equal(result.usage?.output_tokens ?? 0, sum(stage, 'output'));
+    // Claude's turn usage excludes auxiliary title generation. Its model totals
+    // include those billed requests, as do the raw upstream samples below.
+    const usage = result.modelUsage?.[`multi/zen/${selectedModel}`];
+    assert(usage, `${stage}: missing model usage`);
+    assert.equal(usage.cacheReadInputTokens, sum(stage, 'cached'));
+    assert.equal(usage.cacheCreationInputTokens, sum(stage, 'written'));
+    assert.equal(usage.inputTokens, freshInput(stage));
+    assert.equal(usage.outputTokens, sum(stage, 'output'));
     return { events, result };
   } finally {
     clearTimeout(timer);
@@ -463,7 +471,11 @@ try {
   }
   await Promise.all(observations);
   const stableSamples = samples.filter(
-    (sample) => sample.stage !== 'cancel' && sample.stage !== 'compaction',
+    // Every conversation request in this fixture advertises Read. Claude's
+    // auxiliary title request has its own system prompt and no tools; include
+    // its spend above, but do not compare its prefix to the coding conversation.
+    (sample) =>
+      sample.stage !== 'cancel' && sample.stage !== 'compaction' && sample.toolsHash !== hash([]),
   );
   const sameModel = stableSamples.filter((sample) => sample.model === model);
   assert(sameModel.length >= 2, 'Expected at least two requests for the cache comparison');

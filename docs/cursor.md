@@ -83,5 +83,7 @@ The SDK's native Auto fallback is accepted when its classifier is unavailable;
 completion does not prove that review occurred. Cursor-native child spawning is
 disabled. The SDK exposes no public force-compaction or threshold control, manual
 approval transport, arbitrary Claude-native tool cards, strict forced tool choice,
-stop strings, PDF attachments, or per-response generation caps. Token counts are
-local estimates.
+stop strings, PDF attachments, or per-response generation caps. Cursor turn
+usage is reported when the SDK provides it; otherwise the Messages response
+marks its local token estimate explicitly. Billed usage is queried separately,
+on demand, and may lag while Cursor settles billing.

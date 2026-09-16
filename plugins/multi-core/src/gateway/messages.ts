@@ -97,6 +97,15 @@ export interface MessagesResponse {
   stop_reason: StopReason | null;
   stop_sequence: string | null;
   usage: Usage;
+  /** Provider accounting metadata; estimates are never presented as billed usage. */
+  multi_usage?: {
+    source: 'provider' | 'estimate' | 'mixed' | 'unavailable';
+    reasoning_tokens?: number;
+    total_tokens?: number;
+    replayed?: boolean;
+    model?: string;
+    effort?: string;
+  };
 }
 
 type BlockDelta =

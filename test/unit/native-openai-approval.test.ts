@@ -41,6 +41,25 @@ const verdict = (outcome = 'allow') => [
   { type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ outcome }) }] },
 ];
 
+test('reviewer promotes admitted hard blocks into mandatory instructions', async (t) => {
+  const { cwd, authFile } = await fixture(t);
+  const policy = '## HARD BLOCK\n- Deny CANARY unconditionally.\n\n## SOFT BLOCK\nSoft rules.';
+  const bridge = await createOpenAIApproval(authFile, cwd, async (_url, init) => {
+    const body = JSON.parse(String(init.body));
+    assert(body.instructions.includes('Deny CANARY unconditionally.'));
+    assert(body.instructions.includes('Any matching hard block MUST return outcome deny'));
+    assert(!body.instructions.includes('Soft rules.'));
+    assert.equal(JSON.parse(body.input[0].content).admitted_classifier_policy, policy);
+    return sse(verdict('deny'));
+  });
+  const result = await bridge.respond(
+    { ...request(), system: [{ type: 'text', text: policy }] },
+    new AbortController().signal,
+    { ...context, cwd },
+  );
+  assert.equal(result.outcome, 'deny');
+});
+
 async function fixture(t: TestContext) {
   const cwd = await realpath(await mkdtemp(path.join(os.tmpdir(), 'approval-unit-')));
   t.after(() => rm(cwd, { recursive: true, force: true }));

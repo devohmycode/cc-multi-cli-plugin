@@ -258,7 +258,12 @@ export class AntigravityHarness {
       for (const event of replay.events) {
         emit(...event);
       }
-      return replay.response;
+      return {
+        ...replay.response,
+        multi_usage: replay.response.multi_usage
+          ? { ...replay.response.multi_usage, replayed: true }
+          : { source: 'unavailable' as const, replayed: true },
+      };
     }
     return this.execute(body, context, model, cwd, identity, key, exchange, emit);
   }
@@ -341,7 +346,11 @@ export class AntigravityHarness {
         throw new AntigravityProviderError(result.error ?? `Antigravity run ${result.status}`);
       }
       response.text(antigravityTerminalSuffix(streamed, result.response));
-      const finished = response.finish(usageDelta(result.usage, session.usage));
+      const finished = response.finish(
+        usageDelta(result.usage, session.usage),
+        model.id,
+        modelEffort(model),
+      );
       const terminalEvents = response.takeTerminalEvents();
       session.usage = result.usage;
       session.response = finished;
@@ -529,17 +538,30 @@ class HarnessResponse {
     }
     this.emit('content_block_delta', { index: 0, delta: { type: 'text_delta', text: value } });
   }
-  finish(usage?: AntigravityUsage) {
+  finish(usage?: AntigravityUsage, model?: string, effort?: string) {
     if (this.started) {
       this.emit('content_block_stop', { index: 0 });
     }
     this.response.stop_reason = 'end_turn';
+    const estimatedOutput = Math.ceil(JSON.stringify(this.response.content).length / 4);
     this.response.usage.input_tokens = usage?.input_tokens ?? this.response.usage.input_tokens;
-    this.response.usage.output_tokens =
-      usage?.output_tokens ?? Math.ceil(JSON.stringify(this.response.content).length / 4);
+    this.response.usage.output_tokens = usage?.output_tokens ?? estimatedOutput;
     if (usage?.cache_read_tokens !== undefined) {
       this.response.usage.cache_read_input_tokens = usage.cache_read_tokens;
     }
+    const hasInput = usage?.input_tokens !== undefined;
+    const hasOutput = usage?.output_tokens !== undefined;
+    let source: NonNullable<MessagesResponse['multi_usage']>['source'] = 'estimate';
+    if (usage !== undefined) {
+      source = hasInput && hasOutput ? 'provider' : 'mixed';
+    }
+    this.response.multi_usage = {
+      source,
+      ...(model === undefined ? {} : { model }),
+      ...(effort === undefined ? {} : { effort }),
+      ...(usage?.thinking_tokens === undefined ? {} : { reasoning_tokens: usage.thinking_tokens }),
+      ...(usage?.total_tokens === undefined ? {} : { total_tokens: usage.total_tokens }),
+    };
     this.terminalEvents.push([
       'message_delta',
       {

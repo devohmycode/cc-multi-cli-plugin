@@ -753,7 +753,11 @@ function outputValue(item: ResponsesOutputItem): unknown {
     case 'function_call':
       return [item.call_id, item.name, item.arguments];
     case 'reasoning':
-      return [item.encrypted_content, item.summary ?? []];
+      // The provider may rotate encrypted_content between output_item.done and
+      // response.completed while preserving the visible reasoning summary.
+      // Already emitted signatures retain the completed item snapshot; opaque
+      // ciphertext is not a stable identity field for terminal reconciliation.
+      return [item.summary ?? []];
   }
 }
 
@@ -847,6 +851,11 @@ class ResponseStream {
       output_tokens: usage?.output_tokens ?? 0,
       cache_read_input_tokens: cached,
       cache_creation_input_tokens: written,
+    };
+    message.multi_usage = {
+      source: usage ? 'provider' : 'unavailable',
+      ...(usage ? { total_tokens: (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0) } : {}),
+      model: this.model,
     };
     message.stop_reason = stopReason;
     message.stop_sequence = this.stopped;

@@ -68,6 +68,10 @@ Paste this into any coding agent:
 
 Launch with `claude-multi`. `/model` lists the external models next to Claude's; `/effort` sets effort where the model supports it. Named workers run as subagents with live progress, elapsed time and cancellation. Claude's permission mode governs every provider; see [permissions](docs/permissions.md). Resume a saved session with `claude-multi --resume <session-id>`.
 
+Use `/multi-usage` to open a provider usage menu with quotas, billed spend where
+available, session tokens, and worker receipts. Set `MULTI_RECEIPTS_FILE` before
+launching to append JSONL receipts. See [usage and receipts](docs/usage.md).
+
 ## Platforms
 
 Linux, macOS, and Windows are supported, with offline checks running in CI on all three for every commit. WSL behaves as Linux. See [platform support](docs/platform-support.md) for the live-verified matrix per provider.

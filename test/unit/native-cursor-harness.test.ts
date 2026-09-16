@@ -58,6 +58,15 @@ function follow(response: MessagesResponse): MessagesRequest {
   };
 }
 
+function replayedResponse(response: MessagesResponse): MessagesResponse {
+  return {
+    ...response,
+    multi_usage: response.multi_usage
+      ? { ...response.multi_usage, replayed: true }
+      : { source: 'unavailable', replayed: true },
+  };
+}
+
 // These offline fixtures explicitly exercise Auto unless a test supplies another mode.
 class AutoTestHarness extends CursorHarness {
   override handle(
@@ -94,6 +103,31 @@ async function fixture(t: test.TestContext) {
       agentId: id,
       close() {
         closes++;
+      },
+      async getUsage() {
+        return {
+          usage: {
+            inputTokens: 120,
+            outputTokens: 30,
+            cacheReadTokens: 80,
+            cacheWriteTokens: 10,
+            totalTokens: 240,
+            reasoningTokens: 12,
+          },
+          runs: [
+            {
+              runId: 'turn-1',
+              usage: {
+                inputTokens: 120,
+                outputTokens: 30,
+                cacheReadTokens: 80,
+                cacheWriteTokens: 10,
+                totalTokens: 240,
+                reasoningTokens: 12,
+              },
+            },
+          ],
+        };
       },
       async send(prompt: string | SDKUserMessage, options?: SendOptions): Promise<Run> {
         sends.push({ id, prompt, options });
@@ -224,6 +258,69 @@ async function fixture(t: test.TestContext) {
     },
   };
 }
+
+test('Cursor billed usage is queried separately from turn accounting', async (t) => {
+  const f = await fixture(t);
+  const harness = f.make();
+  await harness.handle(body, 'billing', signal());
+  const billed = await harness.billedUsage('billing');
+  assert.equal(billed[0].agentId, 'agent-1');
+  assert.equal(billed[0].scope, 'billing');
+  assert.equal(billed[0].usage.totalTokens, 240);
+  assert.equal(billed[0].runs[0].runId, 'turn-1');
+});
+
+test('Cursor maps native run totals once and preserves them through disk replay', async (t) => {
+  const f = await fixture(t);
+  f.hold();
+  const harness = f.make();
+  const pending = harness.handle(body, 'main', signal());
+  await f.started;
+  f.results[0].resolve({
+    id: 'run',
+    status: 'finished',
+    result: 'done',
+    usage: {
+      inputTokens: 120,
+      outputTokens: 30,
+      cacheReadTokens: 80,
+      cacheWriteTokens: 10,
+      totalTokens: 240,
+      reasoningTokens: 12,
+    },
+  });
+  const result = await pending;
+  assert.deepEqual(result.usage, {
+    input_tokens: 120,
+    output_tokens: 30,
+    cache_read_input_tokens: 80,
+    cache_creation_input_tokens: 10,
+  });
+  assert.equal(result.multi_usage?.source, 'provider');
+  assert.equal(result.multi_usage?.total_tokens, 240);
+  assert.equal(result.multi_usage?.reasoning_tokens, 12);
+  await harness.close();
+  const replay = await f.make().handle(body, 'main', signal());
+  assert.deepEqual(replay.usage, result.usage);
+  assert.equal(replay.multi_usage?.replayed, true);
+  assert.equal(f.sends.length, 1);
+});
+
+test('Cursor billed session queries match exact session identity across worker scopes', async (t) => {
+  const f = await fixture(t);
+  const harness = f.make();
+  for (const scope of [
+    ['s', 'main'],
+    ['s', 'worker'],
+    ['s-other', 'main'],
+  ]) {
+    await harness.handle(body, JSON.stringify(scope), signal());
+  }
+  const billed = await harness.billedUsageForSession('s');
+  assert.equal(billed.length, 2);
+  assert(billed.every((entry) => JSON.parse(entry.scope)[0] === 's'));
+  assert.deepEqual(await harness.billedUsageForSession('missing'), []);
+});
 
 async function interruptedManifest(f: Awaited<ReturnType<typeof fixture>>) {
   const harness = f.make();
@@ -364,7 +461,7 @@ test('completed requests deduplicate across disk resume and follow-ups use the s
   assert.doesNotMatch(JSON.stringify(saved), /first request/);
   await first.close();
   const second = f.make();
-  assert.deepEqual(await second.handle(body, 'main', signal()), response);
+  assert.deepEqual(await second.handle(body, 'main', signal()), replayedResponse(response));
   assert.equal(f.sends.length, 1);
   await second.handle(follow(response), 'main', signal());
   assert.deepEqual(f.resumed, ['agent-1']);
@@ -657,13 +754,13 @@ test('a committed native reply survives transport loss before terminal delivery'
   const saved = JSON.parse(await readFile(f.sessionFile, 'utf8'));
   assert.equal(saved.interrupted, false);
   assert.equal(saved.replay.events.at(-1)[0], 'message_stop');
-  assert.deepEqual(await first.handle(body, 'main', signal()), saved.response);
+  assert.deepEqual(await first.handle(body, 'main', signal()), replayedResponse(saved.response));
   await first.close();
   const second = f.make();
   const replayed: string[] = [];
   assert.deepEqual(
     await second.handle(body, 'main', signal(), (name) => replayed.push(name)),
-    saved.response,
+    replayedResponse(saved.response),
   );
   assert.equal(replayed.at(-1), 'message_stop');
   assert.equal(f.sends.length, 1);
@@ -687,7 +784,7 @@ test('a failed reply archive blocks the next send and can retry without repeatin
   await first.handle(follow(response), 'main', signal());
   assert.equal(f.sends.length, 2);
   await first.close();
-  assert.deepEqual(await f.make().handle(body, 'main', signal()), response);
+  assert.deepEqual(await f.make().handle(body, 'main', signal()), replayedResponse(response));
   assert.equal(f.sends.length, 2);
 });
 
@@ -716,7 +813,10 @@ test('new native dispatches recheck policy files while cached replies remain rep
   const policy = path.join(f.directory, '.cursor', 'permissions.json');
   await mkdir(path.dirname(policy));
   await writeFile(policy, '{"deny":["Shell(rm)"]}');
-  assert.deepEqual(await first.handle(body, 'main', signal()), response);
+  const cached = await first.handle(body, 'main', signal());
+  assert.deepEqual(cached.usage, response.usage);
+  assert.equal(cached.multi_usage?.source, response.multi_usage?.source);
+  assert.equal(cached.multi_usage?.model, 'test-model');
   await assert.rejects(
     first.handle(follow(response), 'main', signal()),
     /permissions.json.*unsupported/,
@@ -901,6 +1001,6 @@ test('settled exchange eviction replays disk replies without repeating native wo
     };
     response = await harness.handle(request, 'main', signal());
   }
-  assert.deepEqual(await harness.handle(body, 'main', signal()), first);
+  assert.deepEqual(await harness.handle(body, 'main', signal()), replayedResponse(first));
   assert.equal(f.sends.length, 257);
 });

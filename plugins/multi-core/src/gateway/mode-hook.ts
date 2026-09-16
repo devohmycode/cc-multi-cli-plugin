@@ -216,6 +216,16 @@ export class PermissionModes {
     }
   }
 
+  /** Arm a tool-free boundary when SessionStart restored no prompt snapshot. */
+  authorizeRestoredModCompaction(session: string): void {
+    if (this.parents.has(session)) {
+      this.authorizeModCompaction(session);
+      return;
+    }
+    this.recordModSession(session, { permissionMode: 'default', tools: [], disallowedTools: [] });
+    this.authorizeModCompaction(session);
+  }
+
   finishModCompaction(session: string, agent: string | undefined, id: string | undefined): void {
     const key = JSON.stringify([session, agent ?? 'main']);
     const saved = this.compactions.get(key);

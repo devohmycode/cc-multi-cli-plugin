@@ -6,6 +6,11 @@ test('registers display tools and posts a session snapshot', async ($, on) => {
     MULTI_MOD_GATEWAY_URL: 'http://127.0.0.1:4000',
   });
   on('session.start', () => ({ cwd: '/tmp' }));
+  const commands: string[] = [];
+  on('command.register', (_$, event) => {
+    commands.push(event.name);
+    return { value: { command: event.name } };
+  });
   const requests: string[] = [];
   on('session.id', () => ({ value: 'test-session' }));
   on('session.cwd', () => ({ value: '/tmp' }));
@@ -22,11 +27,13 @@ test('registers display tools and posts a session snapshot', async ($, on) => {
   });
   await $.session.start({ cwd: '/tmp', model: 'multi/cursor/auto' });
   expect(requests).toContain('http://127.0.0.1:4000/multi/mod/session');
+  expect(commands).toEqual(['multi-usage']);
 });
 
 test('mod is dormant without launcher environment', async ($, on) => {
   mock.env(on, {});
   on('session.start', () => ({ cwd: '/tmp' }));
+  on('command.register', (_$, event) => ({ value: { command: event.name } }));
   on('session.id', () => ({ value: 'inactive-session' }));
   on('session.cwd', () => ({ value: '/tmp' }));
   on('session.model', () => ({ value: 'claude-sonnet' }));
@@ -45,6 +52,7 @@ test('display tool checks allow and calls answer from the streamed block input',
     MULTI_MOD_GATEWAY_URL: 'http://127.0.0.1:4000',
   });
   on('session.start', () => ({ cwd: '/tmp' }));
+  on('command.register', (_$, event) => ({ value: { command: event.name } }));
   on('session.id', () => ({ value: 'call-session' }));
   on('session.cwd', () => ({ value: '/tmp' }));
   on('session.model', () => ({ value: 'multi/cursor/auto' }));

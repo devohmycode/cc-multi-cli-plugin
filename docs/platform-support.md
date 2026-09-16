@@ -20,9 +20,14 @@ Windows results on a real host (Windows 11, PowerShell 7, Node 24, Claude Code
 2.1.273): the unit suite, live install, Cursor, OpenAI reviewer, OpenAI
 approval worker and Antigravity checks pass. The permissions check skips its
 PTY cases, and the provider-approval check skips its dialog proof; its direct
-non-PTY path still needs its expectations adapted. The Zen, auto-mode and
-compaction checks fail on Windows and on Linux with the same assertions, so
-they are open gateway regressions rather than platform issues.
+non-PTY path still needs its expectations adapted. The previously reported Zen, auto-mode and compaction failures also reproduced
+on Linux. The fixes cover Zen terminal reasoning reconciliation, native Auto
+policy propagation, and compaction before the first restored prompt. Linux
+validation now covers manual/repeated compaction and fresh-process resume. Saved
+live Zen traces pass the corrected tool, usage, resume, and cache assertions;
+saved OpenAI worker Auto traces pass the corrected allow/deny and handback checks.
+The automatic compaction case and Windows live reruns remain pending; these Linux
+results do not establish Windows live support.
 
 ## Live checklist
 

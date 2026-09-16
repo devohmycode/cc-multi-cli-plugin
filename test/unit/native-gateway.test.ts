@@ -13,6 +13,7 @@ import type {
   StreamEventBody,
   StreamEventName,
 } from '../../plugins/multi-core/src/gateway/messages.ts';
+import { ReceiptLedger } from '../../plugins/multi-core/src/gateway/receipts.ts';
 import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 import { estimateInputTokens } from '../../plugins/multi-core/src/gateway/tokens.ts';
 import {
@@ -422,7 +423,7 @@ test('fragmented SSE and truncated or failed responses never become successful c
 async function gateway(
   t: TestContext,
   fetchImpl: GatewayFetch,
-  options: { timeoutMs?: number; agentCatalog?: AgentCatalog } = {},
+  options: { timeoutMs?: number; agentCatalog?: AgentCatalog; receipts?: ReceiptLedger } = {},
 ) {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'native-gateway-test-'));
   const authFile = path.join(cwd, 'auth.json');
@@ -465,6 +466,50 @@ async function gateway(
       body: typeof payload === 'string' ? payload : JSON.stringify(payload),
     });
 }
+
+test('gateway receipts aggregate provider responses until the owning worker finishes', async (t) => {
+  const lines: string[] = [];
+  const receipts = new ReceiptLedger({
+    writer: async (line) => {
+      lines.push(line);
+    },
+  });
+  let responses = 0;
+  const call = await gateway(
+    t,
+    async () => new Response(sse(textEvents).replaceAll('resp_test', `resp_${++responses}`)),
+    { receipts },
+  );
+  const headers = { 'x-claude-code-session-id': 's', 'x-claude-code-agent-id': 'a' };
+  for (let step = 0; step < 2; step++) {
+    assert.equal((await call({ ...body, output_config: { effort: 'high' } }, headers)).status, 200);
+  }
+  assert.equal(lines.length, 0);
+  const response = await call(
+    { sessionId: 's', agentId: 'a', turnId: 't', outcome: 'answer' },
+    {},
+    '/multi/mod/usage/complete',
+  );
+  assert.equal(response.status, 200);
+  await receipts.drain();
+  const receipt = JSON.parse(lines[0]);
+  assert.equal(receipt.requests, 2);
+  assert.equal(receipt.usage.output_tokens, 30);
+  assert.equal(receipt.entries[0].model, 'gpt-6-astra');
+  assert.equal(receipt.entries[0].effort, 'high');
+  assert.equal(receipt.entries[0].source, 'provider');
+  assert.equal(receipts.snapshot('other').requests, 0);
+  assert.equal(
+    (
+      await call(
+        { sessionId: 's', agentId: 'a', turnId: 't', outcome: 'invalid' },
+        {},
+        '/multi/mod/usage/complete',
+      )
+    ).status,
+    400,
+  );
+});
 
 test('Claude subscription requests retain their raw body, OAuth and beta headers', async (t) => {
   const raw = '{ "model": "claude-opus-4-6", "messages": [] }';

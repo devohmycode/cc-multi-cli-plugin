@@ -23,3 +23,6 @@ node_modules/
 
 # Node diagnostic reports written by test/watchdog.ts
 report.*.json
+
+# Local Claude agent worktrees are independent checkouts, not source inputs.
+/.claude/worktrees/

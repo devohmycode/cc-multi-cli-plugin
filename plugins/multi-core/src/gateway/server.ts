@@ -8,16 +8,24 @@ import {
   type AntigravityHarness,
   AntigravityProviderError,
 } from '../../../multi-antigravity/src/harness.ts';
+import {
+  formatAntigravityQuota,
+  readAntigravityAccountStatus,
+} from '../../../multi-antigravity/src/quota.ts';
 import { CursorProviderError } from '../../../multi-cursor/src/errors.ts';
 import type { CursorHarness } from '../../../multi-cursor/src/harness.ts';
+import { formatCursorQuota, readCursorQuota } from '../../../multi-cursor/src/quota.ts';
+import { readCursorAccountUsage } from '../../../multi-cursor/src/usage.ts';
 import { CodexAuthError, codexRequest } from '../../../multi-openai/src/auth.ts';
 import { openaiInstructions } from '../../../multi-openai/src/instructions.ts';
 import { MODELS } from '../../../multi-openai/src/models.ts';
-import type { Effort, ResponsesRequest } from '../../../multi-openai/src/responses.ts';
+import type { ResponsesRequest } from '../../../multi-openai/src/responses.ts';
 import { forAnthropic, fromResponses, toResponses } from '../../../multi-openai/src/responses.ts';
+import { readCodexUsage } from '../../../multi-openai/src/usage.ts';
 import { validateZenKey } from '../../../multi-zen/src/auth.ts';
 import { fromChat } from '../../../multi-zen/src/chat.ts';
 import { zenRequest } from '../../../multi-zen/src/request.ts';
+import { formatZenQuota, readZenQuota } from '../../../multi-zen/src/usage.ts';
 import type { AgentCatalog } from './agent-catalog.ts';
 import type { ApprovalContext, NativeApprovalBridge } from './approval.ts';
 import { approvalCwdForComparison, isApprovalRequest, parseApprovalRequest } from './approval.ts';
@@ -29,6 +37,8 @@ import { handleModRoute } from './mod-routes.ts';
 import type { PermissionContext, PermissionModes } from './mode-hook.ts';
 import type { PendingApprovalTool } from './permission-hook.ts';
 import { approvalCapabilityGuard } from './permission-hook.ts';
+import { codexQuotaView, ProviderUsageDashboard } from './provider-usage.ts';
+import { ReceiptLedger } from './receipts.ts';
 import { estimateInputTokens } from './tokens.ts';
 import { forwardObservedTools, ToolObserver } from './tool-observer.ts';
 import { originalToolNames } from './tools.ts';
@@ -65,7 +75,7 @@ export interface GatewayEvent {
   model?: string;
   agentId?: string | null;
   path?: string;
-  effort?: Effort;
+  effort?: string;
   status?: number;
   stopReason?: StopReason | null;
   tools?: string[];
@@ -74,16 +84,25 @@ export interface GatewayEvent {
   cached?: boolean;
   permissionContext?: PermissionContext;
   usage?: MessagesResponse['usage'];
+  usageMetadata?: MessagesResponse['multi_usage'];
+  requestId?: string;
+  /** Upstream API the request was billed through, present on completion events. */
+  endpoint?: string;
+  /** Claude session that owns the request, when the client identified one. */
+  session?: string;
 }
 
 export interface GatewayOptions {
+  receipts?: ReceiptLedger;
+  usageDashboard?: ProviderUsageDashboard;
   token: string;
   enabledProviders?: readonly string[];
   authFile: string;
   fetchImpl?: GatewayFetch;
   onEvent?: (event: GatewayEvent) => void;
   timeoutMs?: number;
-  cursor?: Pick<CursorHarness, 'validate' | 'handle'>;
+  cursor?: Pick<CursorHarness, 'validate' | 'handle'> &
+    Partial<Pick<CursorHarness, 'billedUsageForSession'>>;
   antigravity?: Pick<AntigravityHarness, 'validate' | 'handle'>;
   zen?: { apiKey: string };
   /** OpenAI review for GPT-originated actions, independent of Claude authentication. */
@@ -148,7 +167,7 @@ export function createNativeGateway({
   enabledProviders,
   authFile,
   fetchImpl = fetch,
-  onEvent = () => {},
+  onEvent: observer = () => {},
   timeoutMs,
   cursor,
   antigravity,
@@ -160,7 +179,45 @@ export function createNativeGateway({
   permissionModes,
   agentCatalog,
   modBridge = new ModBridge(),
+  receipts = new ReceiptLedger(),
+  usageDashboard,
 }: GatewayOptions): Server {
+  const billedUsage = cursor?.billedUsageForSession?.bind(cursor);
+  const dashboard =
+    usageDashboard ??
+    new ProviderUsageDashboard({
+      enabled: (enabledProviders ?? ['openai', 'cursor', 'zen', 'antigravity']).filter(
+        (provider) => {
+          if (provider === 'cursor') {
+            return Boolean(cursor);
+          }
+          if (provider === 'zen') {
+            return Boolean(zen);
+          }
+          if (provider === 'antigravity') {
+            return Boolean(antigravity);
+          }
+          return provider === 'openai';
+        },
+      ),
+      openai: async () => codexQuotaView(await readCodexUsage(authFile)),
+      cursor: cursor
+        ? (session) =>
+            readCursorAccountUsage(
+              session,
+              async () => formatCursorQuota(await readCursorQuota()),
+              billedUsage,
+            )
+        : undefined,
+      zen: zen ? async () => formatZenQuota(await readZenQuota({ apiKey: zen.apiKey })) : undefined,
+      antigravity: antigravity
+        ? async () => formatAntigravityQuota(await readAntigravityAccountStatus())
+        : undefined,
+    });
+  const onEvent = (event: GatewayEvent) => {
+    receipts.observe(event);
+    observer(event);
+  };
   if (!token) {
     throw new Error('Gateway token required');
   }
@@ -346,13 +403,9 @@ export function createNativeGateway({
       exchange.permissionContext?.compaction,
     );
     rememberResult(exchange, result);
-    onEvent({
-      route: provider,
-      agentId,
-      model: body.model,
-      stopReason: result.stop_reason,
-      tools: result.content.filter((b) => b.type === 'tool_use').map((b) => b.name),
-    });
+    onEvent(
+      completionEvent(exchange, result, provider, provider === 'cursor' ? '@cursor/sdk' : 'agy'),
+    );
     sendResult(exchange, result);
     modBridge.complete(scope);
   }
@@ -421,10 +474,9 @@ export function createNativeGateway({
       abort.abort();
     }
     onEvent({
-      route: 'openai',
-      agentId,
-      stopReason: result.stop_reason,
-      tools: result.content.filter((b) => b.type === 'tool_use').map((b) => b.name),
+      ...completionEvent(exchange, result, 'openai', 'responses'),
+      model: request.model,
+      effort: request.reasoning.effort,
     });
     sendResult(exchange, result);
   }
@@ -479,13 +531,7 @@ export function createNativeGateway({
     if (result.stop_reason === 'stop_sequence') {
       exchange.abort.abort();
     }
-    onEvent({
-      route: 'zen',
-      agentId,
-      model: body.model,
-      stopReason: result.stop_reason,
-      usage: result.usage,
-    });
+    onEvent(completionEvent(exchange, result, 'zen', prepared.endpoint));
     sendResult(exchange, result);
   }
   async function handleAnthropic(exchange: ProviderRequest) {
@@ -602,9 +648,43 @@ export function createNativeGateway({
     }
     return handleAnthropic(exchange);
   }
+  function completionEvent(
+    exchange: ProviderRequest,
+    result: MessagesResponse,
+    route: GatewayEvent['route'],
+    endpoint: string,
+  ): GatewayEvent {
+    return {
+      route,
+      endpoint,
+      session: exchange.identity.session || fallbackSession,
+      agentId: exchange.agentId,
+      model: result.multi_usage?.model ?? exchange.body.model,
+      effort: result.multi_usage?.effort ?? exchange.body.output_config?.effort,
+      stopReason: result.stop_reason,
+      tools: result.content.filter((block) => block.type === 'tool_use').map((block) => block.name),
+      usage: result.usage,
+      usageMetadata: result.multi_usage ?? { source: 'unavailable' },
+      requestId: JSON.stringify([
+        route,
+        exchange.identity.session || fallbackSession,
+        exchange.agentId,
+        result.id,
+      ]),
+    };
+  }
+  function beginUsage(exchange: ProviderRequest, external: string | null) {
+    if (external && exchange.url.pathname === '/v1/messages') {
+      receipts.start({
+        session: exchange.identity.session || fallbackSession,
+        agentId: exchange.agentId,
+      });
+    }
+  }
   async function forwardProvider(exchange: ProviderRequest, external: string | null) {
     const { body, agentId, url } = exchange;
     const route = providerRoute(external);
+    beginUsage(exchange, external);
     let permissionContext: PermissionContext | undefined;
     if (
       permissionModes &&
@@ -674,7 +754,18 @@ export function createNativeGateway({
       const url = new URL(req.url ?? '', 'http://localhost');
       const { raw, parsed, body } = await readRequest(req, agentCatalog);
       if (url.pathname.startsWith('/multi/mod/')) {
-        return handleModRoute(req, res, url, parsed, modBridge, permissionModes, compactions);
+        return handleModRoute(
+          req,
+          res,
+          url,
+          parsed,
+          modBridge,
+          permissionModes,
+          compactions,
+          receipts,
+          billedUsage,
+          dashboard,
+        );
       }
       const external = externalModel(body.model);
       assertProviderEnabled(external, enabledProviders);
@@ -936,6 +1027,9 @@ function authorizeRequest(
       '/multi/mod/offer',
       '/multi/mod/telemetry',
       '/multi/mod/lifecycle',
+      '/multi/mod/usage',
+      '/multi/mod/usage/complete',
+      '/multi/mod/receipts',
       '/multi/mod/detach',
       '/multi/mod/compact/precompute',
       '/multi/mod/compact/run',

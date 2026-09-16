@@ -49,6 +49,42 @@ async function setup() {
   return { stateDirectory, calls, run };
 }
 
+test('Antigravity exposes native usage in the Messages response', async (t) => {
+  const stateDirectory = await mkdtemp(path.join(os.tmpdir(), 'agy-usage-'));
+  t.after(() => rm(stateDirectory, { recursive: true, force: true }));
+  const harness = new AntigravityHarness([model], {
+    stateDirectory,
+    checkPermissions: policy,
+    run: async () => ({
+      result: {
+        conversation_id: 'usage-conversation',
+        status: 'SUCCESS' as const,
+        response: 'native',
+        usage: { input_tokens: 40, output_tokens: 9, thinking_tokens: 3, total_tokens: 49 },
+      },
+      exitCode: 0,
+      signal: null,
+      stderr: '',
+    }),
+  });
+  t.after(() => harness.close());
+  const response = await harness.handle(
+    { model: model.model, messages: [{ role: 'user', content: 'usage' }] },
+    'usage',
+    new AbortController().signal,
+    undefined,
+    context,
+  );
+  assert.deepEqual(response.usage, { input_tokens: 40, output_tokens: 9 });
+  assert.deepEqual(response.multi_usage, {
+    source: 'provider',
+    reasoning_tokens: 3,
+    total_tokens: 49,
+    model: 'gemini-test-low',
+    effort: 'low',
+  });
+});
+
 /** Bounded poll that sleeps between checks and fails with a reason. */
 async function until(condition: () => boolean, what: string) {
   const deadline = Date.now() + 15_000;

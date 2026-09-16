@@ -25,6 +25,13 @@ export class CursorWorkspaces {
     return this.harness(cwd).handle(...args);
   }
 
+  async billedUsageForSession(sessionId: string) {
+    const batches = await Promise.all(
+      [...this.harnesses.values()].map((harness) => harness.billedUsageForSession(sessionId)),
+    );
+    return batches.flat();
+  }
+
   private harness(cwd: string) {
     if (this.closed) {
       throw new Error('Cursor workspaces are closed');
