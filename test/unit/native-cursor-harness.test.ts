@@ -575,6 +575,13 @@ test('failed atomic completion preserves uncertainty and a later retry resumes w
     events.push(name);
   });
   await Promise.race([f.started, request]);
+  // The dispatch durability write lands shortly after the run starts. Swap the
+  // file for a directory only once it has landed, or the write would race the
+  // swap and recreate the file.
+  await until(async () => {
+    const saved = JSON.parse(await readFile(f.sessionFile, 'utf8'));
+    return saved.pendingRun?.runId === 'run';
+  }, 'the dispatch durability write');
   const backup = `${f.sessionFile}.backup`;
   await rename(f.sessionFile, backup);
   await mkdir(f.sessionFile);
@@ -588,6 +595,10 @@ test('failed atomic completion preserves uncertainty and a later retry resumes w
   await harness.close();
   const saved = JSON.parse(await readFile(f.sessionFile, 'utf8'));
   assert.equal(saved.interrupted, true);
+  // Without a recorded run id there is nothing to recover, so the retry must
+  // resume with the interrupted notice. Recovery itself is covered separately.
+  delete saved.pendingRun.runId;
+  await writeFile(f.sessionFile, JSON.stringify(saved));
   const second = f.make();
   const retry = second.handle(body, 'main', signal());
   await until(() => f.sends.length >= 2, 'the second native send');
