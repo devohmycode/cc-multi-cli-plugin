@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import { promisify } from 'node:util';
 import vm from 'node:vm';
@@ -240,6 +242,29 @@ test('escalates cancellation and reports missing terminal evidence as aborted', 
     signal: controller.signal,
   });
   setTimeout(() => controller.abort(), 50);
+  await assert.rejects(pending, (error: unknown) => isCliError(error) && error.code === 'aborted');
+});
+
+test('cancellation settles when a Windows child never emits close', async () => {
+  const controller = new AbortController();
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const stdin = new PassThrough();
+  const child = Object.assign(new EventEmitter(), {
+    pid: 4242,
+    stdin,
+    stdout,
+    stderr,
+  }) as unknown as import('node:child_process').ChildProcess;
+  const pending = runAntigravity({
+    cwd: process.cwd(),
+    executable: process.execPath,
+    prompt: 'cancel',
+    platform: 'win32',
+    signal: controller.signal,
+    spawn: () => child,
+  });
+  controller.abort();
   await assert.rejects(pending, (error: unknown) => isCliError(error) && error.code === 'aborted');
 });
 

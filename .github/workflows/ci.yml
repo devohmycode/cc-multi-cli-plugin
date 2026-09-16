@@ -17,3 +17,11 @@ jobs:
           node-version: 24
       - run: npm ci
       - run: npm run check
+        env:
+          NODE_OPTIONS: --import=./test/watchdog.ts
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-reports-${{ matrix.os }}
+          path: report.*.json
+          if-no-files-found: ignore

@@ -4,7 +4,12 @@ import { hostname } from 'node:os';
 
 export interface LockStateFileOptions {
   platform?: NodeJS.Platform;
+  maxAttempts?: number;
+  rename?: typeof rename;
+  unlink?: typeof unlink;
 }
+
+const lockOperationAttempts = 5;
 
 interface LockOwner {
   pid: number;
@@ -28,20 +33,28 @@ export async function lockStateFile(
 ): Promise<() => Promise<void>> {
   const platform = options.platform ?? process.platform;
   const owner: LockOwner = { pid: process.pid, hostname: hostname(), token: randomUUID() };
+  const maxAttempts = options.maxAttempts ?? 100;
+  const renameFile = options.rename ?? rename;
+  const unlinkFile = options.unlink ?? unlink;
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) {
+    throw new RangeError('State file lock maxAttempts must be a positive integer');
+  }
 
-  for (;;) {
-    const release = await tryAcquire(file, owner, platform);
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const release = await tryAcquire(file, owner, platform, unlinkFile);
     if (release) {
       return release;
     }
-    await takeOverStaleLock(file, platform);
+    await takeOverStaleLock(file, platform, renameFile, unlinkFile);
   }
+  throw new Error(`State file lock acquisition exceeded ${maxAttempts} attempts`);
 }
 
 async function tryAcquire(
   file: string,
   owner: LockOwner,
   platform: NodeJS.Platform,
+  unlinkFile: typeof unlink,
 ): Promise<(() => Promise<void>) | undefined> {
   const descriptor = await openLock(file);
   if (!descriptor) {
@@ -52,7 +65,7 @@ async function tryAcquire(
   } finally {
     await descriptor.close();
   }
-  return () => releaseLock(file, owner, platform);
+  return () => releaseLock(file, owner, platform, unlinkFile);
 }
 
 async function openLock(file: string) {
@@ -69,7 +82,12 @@ async function openLock(file: string) {
   }
 }
 
-async function takeOverStaleLock(file: string, platform: NodeJS.Platform): Promise<void> {
+async function takeOverStaleLock(
+  file: string,
+  platform: NodeJS.Platform,
+  renameFile: typeof rename,
+  unlinkFile: typeof unlink,
+): Promise<void> {
   const info = await lstat(file).catch((error: unknown) => {
     if (isCode(error, 'ENOENT')) {
       return undefined;
@@ -88,7 +106,7 @@ async function takeOverStaleLock(file: string, platform: NodeJS.Platform): Promi
   }
   const stale = `${file}.stale-${randomUUID()}`;
   try {
-    await rename(file, stale);
+    await retryLockOperation(() => renameFile(file, stale), platform, 'stale-lock takeover');
   } catch (error) {
     if (isCode(error, 'ENOENT')) {
       return;
@@ -97,27 +115,56 @@ async function takeOverStaleLock(file: string, platform: NodeJS.Platform): Promi
       cause: error,
     });
   }
-  await unlink(stale).catch((error: unknown) => {
-    if (!isCode(error, 'ENOENT')) {
-      throw error;
-    }
-  });
+  await retryLockOperation(() => unlinkFile(stale), platform, 'stale-lock cleanup').catch(
+    (error: unknown) => {
+      if (!isCode(error, 'ENOENT')) {
+        throw error;
+      }
+    },
+  );
 }
 
 async function releaseLock(
   file: string,
   owner: LockOwner,
   platform: NodeJS.Platform,
+  unlinkFile: typeof unlink,
 ): Promise<void> {
   const current = await readOwner(file, platform);
   if (current?.token !== owner.token || current.hostname !== owner.hostname) {
     return;
   }
-  await unlink(file).catch((error: unknown) => {
-    if (!isCode(error, 'ENOENT')) {
-      throw error;
+  await retryLockOperation(() => unlinkFile(file), platform, 'lock release').catch(
+    (error: unknown) => {
+      if (!isCode(error, 'ENOENT')) {
+        throw error;
+      }
+    },
+  );
+}
+
+async function retryLockOperation<T>(
+  operation: () => Promise<T>,
+  platform: NodeJS.Platform,
+  description: string,
+): Promise<T> {
+  for (let attempt = 0; attempt < lockOperationAttempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      const retryable = platform === 'win32' && (isCode(error, 'EPERM') || isCode(error, 'EBUSY'));
+      if (!retryable || attempt === lockOperationAttempts - 1) {
+        throw new Error(
+          `State file lock ${description} failed after ${lockOperationAttempts} attempts`,
+          {
+            cause: error,
+          },
+        );
+      }
+      await delay(20);
     }
-  });
+  }
+  throw new Error(`State file lock ${description} did not complete`);
 }
 
 async function readOwner(file: string, platform: NodeJS.Platform): Promise<LockOwner | undefined> {

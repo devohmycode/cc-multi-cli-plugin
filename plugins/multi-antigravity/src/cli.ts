@@ -76,6 +76,7 @@ export interface AntigravityRunOptions {
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   executable?: string;
+  spawn?: (...args: Parameters<typeof spawn>) => ChildProcess;
   maxOutputBytes?: number;
   onEvent?: (event: AntigravityStreamEvent) => void;
 }
@@ -111,6 +112,7 @@ const defaultMaxOutputBytes = 8 * 1024 * 1024;
 const promptArgumentLimitBytes = 128 * 1024;
 const interruptGraceMs = 1500;
 const terminateGraceMs = 1500;
+const cancellationWaitMs = interruptGraceMs + terminateGraceMs + 1000;
 
 export function runAntigravity(options: AntigravityRunOptions): Promise<AntigravityRunResult> {
   const promptOnStdin = Buffer.byteLength(options.prompt) >= promptArgumentLimitBytes;
@@ -160,7 +162,7 @@ export function runAntigravity(options: AntigravityRunOptions): Promise<Antigrav
         platform,
         environment,
       );
-      child = spawn(invocation.command, invocation.args, {
+      child = (options.spawn ?? spawn)(invocation.command, invocation.args, {
         cwd: options.cwd,
         env: environment,
         detached: platform !== 'win32',
@@ -184,6 +186,7 @@ export function runAntigravity(options: AntigravityRunOptions): Promise<Antigrav
     let aborted = false;
     let interruptTimer: NodeJS.Timeout | undefined;
     let terminateTimer: NodeJS.Timeout | undefined;
+    let cancellationTimer: NodeJS.Timeout | undefined;
     let settled = false;
 
     const kill = (signal: NodeJS.Signals) => {
@@ -201,6 +204,12 @@ export function runAntigravity(options: AntigravityRunOptions): Promise<Antigrav
     const clearTimers = () => {
       clearTimeout(interruptTimer);
       clearTimeout(terminateTimer);
+      clearTimeout(cancellationTimer);
+    };
+    const closePipes = () => {
+      child.stdin?.destroy();
+      child.stdout?.destroy();
+      child.stderr?.destroy();
     };
     const fail = (error: AntigravityCliError) => {
       if (!parser.failure) {
@@ -261,7 +270,11 @@ export function runAntigravity(options: AntigravityRunOptions): Promise<Antigrav
     const onAbort = () => {
       if (!aborted) {
         aborted = true;
+        closePipes();
         stop();
+        cancellationTimer = setTimeout(() => {
+          finish(null, null);
+        }, cancellationWaitMs);
       }
     };
     const finish = (exitCode: number | null, signal: NodeJS.Signals | null) => {

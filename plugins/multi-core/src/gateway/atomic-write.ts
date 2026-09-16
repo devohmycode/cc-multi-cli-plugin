@@ -7,8 +7,12 @@ export async function atomicWriteFile(
   options: { mode?: number; platform?: NodeJS.Platform; retries?: number } = {},
 ): Promise<void> {
   const temporary = `${file}.${randomUUID()}.tmp`;
+  const retries = options.retries ?? 5;
+  if (!Number.isSafeInteger(retries) || retries < 0) {
+    throw new RangeError('Atomic write retries must be a non-negative integer');
+  }
   await writeFile(temporary, data, { mode: options.mode });
-  const attempts = options.platform === 'win32' ? (options.retries ?? 5) : 0;
+  const attempts = options.platform === 'win32' ? retries : 0;
   try {
     for (let attempt = 0; ; attempt += 1) {
       try {

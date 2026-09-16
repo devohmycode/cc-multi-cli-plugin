@@ -13,3 +13,12 @@ test('atomicWriteFile replaces files on Unix and retries Windows sharing errors'
   await atomicWriteFile(file, 'new', { platform: 'linux' });
   assert.equal(await readFile(file, 'utf8'), 'new');
 });
+
+test('rejects an unbounded retry configuration', async () => {
+  await assert.rejects(
+    atomicWriteFile(path.join(os.tmpdir(), 'unused-atomic-write-test'), 'data', {
+      retries: Infinity,
+    }),
+    /retries must be a non-negative integer/,
+  );
+});

@@ -102,6 +102,38 @@ test('releases after the holder process is killed', { timeout: 10000 }, async (t
   await release();
 });
 
+test('bounds repeated stale-lock takeover races', async (t) => {
+  const directory = await temporaryDirectory(t, 'multi-lock-budget-');
+  const file = path.join(directory, 'session.lock');
+  await writeFile(
+    file,
+    `${JSON.stringify({ pid: 2147483647, hostname: hostname(), token: 'stale' })}\n`,
+  );
+  await assert.rejects(lockStateFile(file, { maxAttempts: 1 }), /exceeded 1 attempts/);
+  const release = await lockStateFile(file);
+  await release();
+});
+
+test('bounds transient Windows unlink failures during release', async (t) => {
+  const directory = await temporaryDirectory(t, 'multi-lock-unlink-');
+  const file = path.join(directory, 'session.lock');
+  let failures = 1;
+  const release = await lockStateFile(file, {
+    platform: 'win32',
+    unlink: async (target) => {
+      if (failures > 0) {
+        failures -= 1;
+        const error = new Error('sharing violation') as NodeJS.ErrnoException;
+        error.code = 'EPERM';
+        throw error;
+      }
+      await rm(target);
+    },
+  });
+  await release();
+  assert.equal(failures, 0);
+});
+
 test('supports the Windows lock branch through the injected platform', async (t) => {
   const directory = await temporaryDirectory(t, 'multi-win32-lock-');
   const file = path.join(directory, 'session.lock');
