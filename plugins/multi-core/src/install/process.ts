@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { executableInvocation } from '../gateway/executable.ts';
 import { terminateProcessTree } from '../gateway/process-tree.ts';
 
 export interface RunOptions {
@@ -14,10 +15,13 @@ export async function run(
 ): Promise<number> {
   const options = normalizeOptions(supplied);
   const platform = options.platform ?? process.platform;
-  const child = spawn(command, args, {
+  const environment = options.env ?? process.env;
+  const invocation = executableInvocation(command, args, platform, environment);
+  const child = spawn(invocation.command, invocation.args, {
     stdio: 'inherit',
-    env: options.env ?? process.env,
+    env: environment,
     detached: platform !== 'win32',
+    ...invocation.options,
   });
   const terminate = () => {
     if (child.pid) {

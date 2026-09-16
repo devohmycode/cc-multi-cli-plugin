@@ -796,6 +796,9 @@ async function discoverAntigravity() {
       if (!isMissingExecutable(error)) {
         throw error;
       }
+      console.error(
+        `Antigravity choices unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
   if (enabledProviders?.includes('antigravity') && antigravityModels.length) {

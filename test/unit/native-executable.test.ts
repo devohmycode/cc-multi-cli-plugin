@@ -25,6 +25,17 @@ test('resolves Windows npm shims using PATHEXT order', () => {
   ]);
 });
 
+test('uses standard Windows executable extensions when PATHEXT is absent', () => {
+  assert.equal(
+    resolveExecutable('agy', {
+      platform: 'win32',
+      env: { PATH: 'C:\\tools' },
+      exists: (filename) => filename === 'C:\\tools\\agy.cmd',
+    }),
+    'C:\\tools\\agy.cmd',
+  );
+});
+
 test('honors explicit executable paths and fails clearly when absent', () => {
   assert.equal(
     resolveExecutable('claude', {

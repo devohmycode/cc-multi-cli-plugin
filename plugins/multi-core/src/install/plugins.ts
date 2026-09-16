@@ -2,25 +2,7 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-function executableInvocation(
-  executable: string,
-  args: readonly string[],
-  platform: NodeJS.Platform,
-  env: NodeJS.ProcessEnv = process.env,
-) {
-  if (platform !== 'win32' || !/(?:\.cmd|\.bat)$/i.test(executable)) {
-    return { command: executable, args: [...args] };
-  }
-  const command = env.ComSpec ?? process.env.ComSpec ?? 'cmd.exe';
-  const quote = (value: string) =>
-    `"${value.replaceAll(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`;
-  const commandLine = [quote(executable), ...args.map(quote)].join(' ');
-  return {
-    command,
-    args: ['/d', '/s', '/c', `"${commandLine}"`],
-    options: { windowsVerbatimArguments: true },
-  };
-}
+import { executableInvocation } from '../gateway/executable.ts';
 
 const MARKETPLACE = 'cc-multi-cli-plugin';
 const PROVIDERS = ['openai', 'cursor', 'zen', 'antigravity'] as const;

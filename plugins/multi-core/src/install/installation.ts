@@ -198,10 +198,12 @@ async function writeRuntime(directory: string, bin: string, node: string, platfo
       await copyFile(origin, destination);
     }
   }
-  const processTreeOrigin = fileURLToPath(new URL('../gateway/process-tree.ts', import.meta.url));
-  const processTreeDestination = path.join(directory, '..', 'gateway', 'process-tree.ts');
-  await mkdir(path.dirname(processTreeDestination), { recursive: true });
-  await copyFile(processTreeOrigin, processTreeDestination);
+  const gatewayDirectory = path.join(directory, '..', 'gateway');
+  await mkdir(gatewayDirectory, { recursive: true });
+  for (const file of ['executable.ts', 'process-tree.ts']) {
+    const origin = fileURLToPath(new URL(`../gateway/${file}`, import.meta.url));
+    await copyFile(origin, path.join(gatewayDirectory, file));
+  }
   const shimNames = ['claude-multi', 'multi'];
   for (const name of shimNames) {
     const bootstrap = path.join(directory, 'bootstrap.ts');
@@ -281,6 +283,7 @@ export async function uninstall(directory = installationDirectory()) {
   for (const file of [
     ...files,
     'state.json',
+    '../gateway/executable.ts',
     '../gateway/process-tree.ts',
     ...shimFiles.map((name) => path.join('bin', name)),
   ]) {

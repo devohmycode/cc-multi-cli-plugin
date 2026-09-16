@@ -173,7 +173,8 @@ test('edited shell blocks and project-only executable cores fail explicitly', as
   const f = await fixture(t);
   await f.install();
   const current = await readFile(f.shell, 'utf8');
-  await writeFile(f.shell, current.replace('export PATH=', '# changed PATH='));
+  const pathMarker = f.windows ? '$env:Path =' : 'export PATH=';
+  await writeFile(f.shell, current.replace(pathMarker, '# changed PATH='));
   await assert.rejects(f.invoke('multi', ['uninstall']), /was edited/);
   await assert.rejects(f.install(), /was edited/);
   const entries = plugins(await core(f.directory, 'project-core'));
