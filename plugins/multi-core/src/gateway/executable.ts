@@ -26,7 +26,7 @@ export interface ExecutableInvocationOptions {
  * usually spelled `Path`. A plain object built by spreading `process.env`
  * keeps that spelling, so look the name up without regard to case.
  */
-export function environmentValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
+function environmentValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
   if (env[name] !== undefined) {
     return env[name];
   }
