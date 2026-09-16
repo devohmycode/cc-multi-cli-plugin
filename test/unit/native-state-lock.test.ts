@@ -169,3 +169,13 @@ test('recovers when a Windows delete-pending marker vanishes between open and st
   assert.equal(openAttempts, 2);
   await release();
 });
+
+test('an empty marker left by the previous flock-based lock is taken over', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'state-lock-legacy-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'state.lock');
+  await writeFile(file, '');
+  const release = await lockStateFile(file);
+  assert.match(await readFile(file, 'utf8'), /"pid"/);
+  await release();
+});

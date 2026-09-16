@@ -288,6 +288,16 @@ test('cleans an ignored-signal descendant when the CLI closes first', async (t) 
     (error: unknown) => isCliError(error) && error.code === 'no_terminal_result',
   );
   const pid = Number(await readFile(pidFile, 'utf8'));
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.throws(() => process.kill(pid, 0), /ESRCH/);
+  // Descendant cleanup is asynchronous; poll instead of assuming a fixed delay.
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      assert.match(String(error), /ESRCH/);
+      break;
+    }
+    assert(Date.now() < deadline, `descendant ${pid} is still alive`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 });

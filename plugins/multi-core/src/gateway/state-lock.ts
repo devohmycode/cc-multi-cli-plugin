@@ -117,7 +117,10 @@ async function takeOverStaleLock(
   if (!current) {
     throw new Error('State file is locked by another gateway (owner metadata is unavailable)');
   }
-  if (current.hostname !== hostname() || isProcessAlive(current.pid)) {
+  if (
+    current !== legacyEmptyMarker &&
+    (current.hostname !== hostname() || isProcessAlive(current.pid))
+  ) {
     throw new Error('State file is locked by another gateway');
   }
   const stale = `${file}.stale-${randomUUID()}`;
@@ -148,7 +151,12 @@ async function releaseLock(
   readFileContents: typeof readFile,
 ): Promise<void> {
   const current = await readOwner(file, platform, readFileContents);
-  if (current?.token !== owner.token || current.hostname !== owner.hostname) {
+  if (
+    !current ||
+    current === legacyEmptyMarker ||
+    current.token !== owner.token ||
+    current.hostname !== owner.hostname
+  ) {
     return;
   }
   await retryLockOperation(() => unlinkFile(file), platform, 'lock release').catch(
@@ -184,11 +192,14 @@ async function retryLockOperation<T>(
   throw new Error(`State file lock ${description} did not complete`);
 }
 
+/** Marker left by the pre-marker `flock` lock: it exists but never gets metadata. */
+const legacyEmptyMarker = Symbol('legacy-empty-marker');
+
 async function readOwner(
   file: string,
   platform: NodeJS.Platform,
   readFileContents: typeof readFile = readFile,
-): Promise<LockOwner | undefined> {
+): Promise<LockOwner | typeof legacyEmptyMarker | undefined> {
   let lastParseError: SyntaxError | undefined;
   for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
@@ -219,7 +230,10 @@ async function readOwner(
       cause: lastParseError,
     });
   }
-  throw new Error('State file is locked by another gateway (owner metadata is unavailable)');
+  // Still empty after the write-race window: an earlier release used an empty
+  // file held by `flock`, which nothing in this version can hold. Treat it as
+  // stale so an upgrade never leaves the state permanently locked.
+  return legacyEmptyMarker;
 }
 
 function delay(milliseconds: number): Promise<void> {

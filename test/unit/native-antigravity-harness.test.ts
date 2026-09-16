@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { readdirSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -46,6 +47,17 @@ async function setup() {
     };
   };
   return { stateDirectory, calls, run };
+}
+
+/** Bounded poll that sleeps between checks and fails with a reason. */
+async function until(condition: () => boolean, what: string) {
+  const deadline = Date.now() + 15_000;
+  while (!condition()) {
+    if (Date.now() > deadline) {
+      throw new Error(`Timed out waiting for ${what}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 test('Claude system content is never forwarded to the native prompt', async (t) => {
@@ -151,7 +163,10 @@ test('an interrupted run keeps its native conversation and resumes with a notice
   const controller = new AbortController();
   const request = { model: model.model, messages: [{ role: 'user', content: 'uncertain' }] };
   const first = harness.handle(request, 'session/worker', controller.signal, undefined, context);
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  // Abort only once the native run has started. Aborting earlier rejects the
+  // request before `run` is called, and the shared fake would then hand its
+  // never-settling first call to the resumed harness below.
+  await until(() => calls.length === 1, 'the first native run to start');
   controller.abort();
   await assert.rejects(first);
   await harness.close();
@@ -220,11 +235,13 @@ test('an init event durably saves the conversation id and interrupted state befo
     undefined,
     context,
   );
-  // Give the fire-and-forget durability write time to land before the harness closes.
-  await new Promise((resolve) => setTimeout(resolve, 50));
-
-  const files = await readdir(stateDirectory);
-  const sessionFile = files.find((name) => name.endsWith('.session.json'));
+  // The durability write is fire-and-forget; wait for it to land instead of
+  // assuming a fixed delay covers a loaded machine.
+  let sessionFile: string | undefined;
+  await until(() => {
+    sessionFile = readdirSync(stateDirectory).find((name) => name.endsWith('.session.json'));
+    return sessionFile !== undefined;
+  }, 'the durability write');
   assert(sessionFile, 'expected a persisted session file before the run settled');
   const saved = JSON.parse(await readFile(path.join(stateDirectory, sessionFile), 'utf8'));
   assert.equal(saved.conversationId, 'durable-conversation');
@@ -261,7 +278,10 @@ test('an aborted run without a native conversation id starts fresh next time', a
   const controller = new AbortController();
   const request = { model: model.model, messages: [{ role: 'user', content: 'never started' }] };
   const first = harness.handle(request, 'session/worker', controller.signal, undefined, context);
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  // Abort only once the native run has started. Aborting earlier rejects the
+  // request before `run` is called, and the shared fake would then hand its
+  // never-settling first call to the resumed harness below.
+  await until(() => calls.length === 1, 'the first native run to start');
   controller.abort();
   await assert.rejects(first);
   await harness.close();
