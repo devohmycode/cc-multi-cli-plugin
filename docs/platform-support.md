@@ -7,14 +7,22 @@ provider checks need a real login on the host and are run by hand.
 
 | Provider | Linux | WSL | macOS | Windows |
 | --- | --- | --- | --- | --- |
-| OpenAI | Live-verified | As Linux | CI offline | CI offline |
-| Cursor SDK | Live-verified | As Linux | CI offline | CI offline |
+| OpenAI | Live-verified | As Linux | CI offline | Live-verified |
+| Cursor SDK | Live-verified | As Linux | CI offline | Live-verified |
 | OpenCode Zen | Live-verified | As Linux | CI offline | CI offline |
-| Antigravity | Live-verified | As Linux | CI offline | CI offline |
+| Antigravity | Live-verified | As Linux | CI offline | Live-verified |
 
-"Live-verified" means the live checklist below has passed on that platform.
-"CI offline" means the unit suite passes there and live checks are still to run.
-WSL reads the Linux policy and config paths, so it behaves as Linux.
+"Live-verified" means the live checks for that provider have passed on that
+platform. "CI offline" means the unit suite passes there and live checks are
+still to run. WSL reads the Linux policy and config paths, so it behaves as Linux.
+
+Windows results on a real host (Windows 11, PowerShell 7, Node 24, Claude Code
+2.1.273): the unit suite, live install, Cursor, OpenAI reviewer, OpenAI
+approval worker and Antigravity checks pass. The permissions check skips its
+PTY cases, and the provider-approval check skips its dialog proof; its direct
+non-PTY path still needs its expectations adapted. The Zen, auto-mode and
+compaction checks fail on Windows and on Linux with the same assertions, so
+they are open gateway regressions rather than platform issues.
 
 ## Live checklist
 

@@ -556,8 +556,11 @@ try {
   }
   assert.equal(new Set(hookInputs.map((i) => i.tool_use_id)).size, expectedCalls);
   for (const kind of kinds) {
+    // Without a PTY there is no dialog, so on Windows only the kinds that
+    // need a manual answer produce nothing; rule and auto outcomes still run.
+    const needsDialog = process.platform === 'win32' && kind.startsWith('MANUAL_');
     const expectedOutput =
-      process.platform === 'win32' || ['MANUAL_DENY', 'RULE_DENY', 'REVIEW_DENY'].includes(kind)
+      needsDialog || ['MANUAL_DENY', 'RULE_DENY', 'REVIEW_DENY'].includes(kind)
         ? null
         : `${kind}\n`;
     assert.equal(
