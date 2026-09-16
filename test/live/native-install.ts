@@ -142,7 +142,12 @@ result(JSON.stringify(settings.modelPicker.options.map(x=>x.model)));}
 `;
 await writeFile(fakeSource, fakeScript);
 if (platform === 'win32') {
-  await writeFile(fake, `@"${process.execPath}" "${fakeSource}" %*\r\n`);
+  // The same layout npm writes for global installs, so the launcher's shim
+  // bypass runs the fixture through Node directly instead of cmd.exe.
+  await writeFile(
+    fake,
+    `endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\${path.basename(fakeSource)}" %*\r\n`,
+  );
 } else {
   await writeFile(fake, `#!${process.execPath}\n${fakeScript}`, { mode: 0o755 });
 }

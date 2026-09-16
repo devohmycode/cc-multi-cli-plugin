@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 export interface ExecutableOptions {
@@ -11,7 +11,13 @@ export interface ExecutableOptions {
 export interface ExecutableInvocation {
   command: string;
   args: string[];
+  viaComSpec: boolean;
   options?: { windowsVerbatimArguments?: boolean };
+}
+
+export interface ExecutableInvocationOptions {
+  readShim?: (filename: string) => string;
+  exists?: (filename: string) => boolean;
 }
 
 /** Find a configured executable or a platform-appropriate PATH entry. */
@@ -52,17 +58,57 @@ export function executableInvocation(
   args: readonly string[],
   platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
+  shimOptions: ExecutableInvocationOptions = {},
 ): ExecutableInvocation {
   if (platform !== 'win32' || !/\.(?:cmd|bat)$/i.test(executable)) {
-    return { command: executable, args: [...args] };
+    return { command: executable, args: [...args], viaComSpec: false };
+  }
+  const shimTarget = resolveNpmShimTarget(executable, shimOptions);
+  if (shimTarget) {
+    return {
+      command: process.execPath,
+      args: [shimTarget, ...args],
+      viaComSpec: false,
+    };
   }
   const command = env.ComSpec ?? process.env.ComSpec ?? 'cmd.exe';
   const commandLine = [quoteWindows(executable), ...args.map(quoteWindows)].join(' ');
   return {
     command,
     args: ['/d', '/s', '/c', `"${commandLine}"`],
+    viaComSpec: true,
     options: { windowsVerbatimArguments: true },
   };
+}
+
+const MAX_SHIM_SIZE = 32 * 1024;
+const SHIM_TARGET = /"%dp0%\\([^"\r\n]+\.(?:js|cjs|mjs))"[ \t]+%\*/gi;
+
+function resolveNpmShimTarget(
+  executable: string,
+  options: ExecutableInvocationOptions,
+): string | undefined {
+  const readShim = options.readShim ?? ((filename: string) => readFileSync(filename, 'utf8'));
+  const exists = options.exists ?? existsSync;
+  let contents: string;
+  try {
+    contents = readShim(executable);
+  } catch {
+    return undefined;
+  }
+  if (Buffer.byteLength(contents, 'utf8') > MAX_SHIM_SIZE) {
+    return undefined;
+  }
+  const matches = [...contents.matchAll(SHIM_TARGET)];
+  if (matches.length !== 1) {
+    return undefined;
+  }
+  const relativeTarget = matches[0]?.[1];
+  if (!relativeTarget || path.win32.isAbsolute(relativeTarget)) {
+    return undefined;
+  }
+  const target = path.win32.resolve(path.win32.dirname(executable), relativeTarget);
+  return exists(target) ? target : undefined;
 }
 
 function findOnPath(

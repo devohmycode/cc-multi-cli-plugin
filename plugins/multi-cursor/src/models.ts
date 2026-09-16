@@ -70,10 +70,13 @@ function modelVariants(item: ModelListItem): CursorModelOption[] {
         .join('-')
         .toLowerCase()
         .replace(/[^a-z0-9-]/g, '-');
+      const effort = params?.find(
+        (param) => param.id === 'effort' || param.id === 'reasoning_effort',
+      )?.value;
       return {
         model,
         label: `${label} via Cursor`,
-        description: 'Cursor SDK · native tools and persistent state',
+        description: `${label} via Cursor${effort ? ` · ${effort} effort` : ''}`,
         worker: `cursor-${slug}${!base && preset ? `-${preset}` : ''}`.slice(0, 90),
         nativeWorker,
         selection: { id: item.id, ...(params?.length ? { params } : {}) },

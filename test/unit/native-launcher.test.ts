@@ -7,6 +7,12 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { AgentCatalog } from '../../plugins/multi-core/src/gateway/agent-catalog.ts';
+import {
+  checkLauncherArgumentLimit,
+  workerDefinitions,
+} from '../../plugins/multi-core/src/launcher.ts';
+import { cursorModelOptions, cursorPickerOptions } from '../../plugins/multi-cursor/src/models.ts';
+import { ZEN_MODELS } from '../../plugins/multi-zen/src/models.ts';
 
 async function writeClaudeFixture(bin: string, source: string): Promise<void> {
   if (process.platform === 'win32') {
@@ -424,6 +430,84 @@ result(JSON.stringify({settings,agents}));
   assert.match(compacted, /- antigravity-gemini:/);
   assert.match(compacted, /- antigravity-sonnet-thinking:/);
   assert.doesNotMatch(compacted, /antigravity-gemini-(low|medium|high):/);
+});
+
+test('launcher registers only Cursor picker workers and keeps the representative catalog under 30 KB', () => {
+  const cursor = cursorModelOptions(
+    ['default', 'grok-4.6', 'composer-2.5', 'catalog-only'].map((id) => ({
+      id,
+      displayName: id,
+      variants: [{ displayName: 'Default', isDefault: true, params: [] }],
+    })),
+  );
+  const picker = cursorPickerOptions(cursor);
+  const antigravity = [
+    'gemini',
+    'claude',
+    'gpt',
+    'sonnet',
+    'opus',
+    'flash',
+    'thinking',
+    'gemini-low',
+    'gemini-medium',
+    'gemini-high',
+  ].map((id) => ({
+    id,
+    model: `multi/antigravity/${id}`,
+    label: `Antigravity · ${id}`,
+    worker: `antigravity-${id}`,
+  }));
+  const agents = workerDefinitions(true, picker, true, antigravity);
+  const definitions = JSON.stringify(agents);
+  const definitionBytes = Buffer.byteLength(definitions);
+  assert.equal(Object.keys(agents).filter((name) => name.startsWith('cursor-')).length, 3);
+  assert(!Object.keys(agents).some((name) => name.includes('catalog-only')));
+  assert(definitionBytes < 30000, `representative worker JSON was ${definitionBytes} bytes`);
+  assert.equal(ZEN_MODELS.length, 19);
+});
+
+test('launcher argument limits are platform-aware and identify largest providers', () => {
+  const agents = {
+    'openai-worker': {
+      model: 'multi/openai/model',
+      description: 'OpenAI',
+      prompt: 'Complete the delegated task.',
+      tools: ['Read'],
+    },
+    'cursor-worker': {
+      model: 'multi/cursor/model',
+      description: 'Cursor',
+      prompt: 'Complete the delegated task.',
+      tools: ['Read'],
+    },
+  };
+  const invocation = {
+    command: 'claude',
+    args: ['--settings', 'settings.json', '--agents', 'x'.repeat(32000)],
+  };
+  assert.throws(
+    () => checkLauncherArgumentLimit(agents, invocation, 'claude.exe', 'win32'),
+    /above the Windows limit of 32,000.*openai.*Disable providers or extra models/,
+  );
+  assert.doesNotThrow(() =>
+    checkLauncherArgumentLimit(
+      agents,
+      { command: 'cmd.exe', args: ['/c', 'claude.cmd', 'x'.repeat(7900)] },
+      'C:\\bin\\claude.cmd',
+      'win32',
+    ),
+  );
+  assert.throws(
+    () =>
+      checkLauncherArgumentLimit(
+        agents,
+        { command: 'cmd.exe', args: ['/c', 'claude.cmd', 'x'.repeat(8000)] },
+        'C:\\bin\\claude.cmd',
+        'win32',
+      ),
+    /through the Windows shim limit of 8,000/,
+  );
 });
 
 test('the Zen model listing is available without authentication', async () => {

@@ -6,6 +6,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Limit named Cursor workers to picker rows, shorten worker announcements, and reject Windows launcher command lines above the platform ceiling with provider size diagnostics. Representative four-provider worker definitions remain under 30,000 bytes; off-Windows command-line behavior is covered through injected platform tests.
+
 ### Documentation
 
 - Rewrite the README as a short install-and-use page and move provider detail into

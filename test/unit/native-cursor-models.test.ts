@@ -17,6 +17,7 @@ const options = cursorModelOptions([
 
 test('Cursor catalog preserves actual IDs and presets; effort never silently substitutes', () => {
   assert.equal(options[0].worker, 'cursor-test-model');
+  assert.equal(options[0].description, 'Test Model via Cursor · low effort');
   assert.deepEqual(cursorSelection(options[0], 'high'), {
     id: 'test-model',
     params: [{ id: 'effort', value: 'high' }],

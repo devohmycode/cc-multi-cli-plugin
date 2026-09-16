@@ -24,8 +24,8 @@ rows when available:
 
 Unavailable rows are omitted. `MULTI_CURSOR_EXTRA_MODELS` adds advertised
 `selection.id` values. `--cursor-models` prints full routes and worker names.
-The catalog also creates workers for advertised base models and effort or
-reasoning presets. Full catalog routes remain callable.
+Named workers follow the picker rows; full catalog routes remain callable through
+`/model multi/cursor/<id>` and do not multiply worker registrations for presets.
 
 ## Execution
 

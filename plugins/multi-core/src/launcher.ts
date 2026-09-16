@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { AntigravityHarness } from '../../multi-antigravity/src/harness.ts';
 import {
@@ -113,7 +114,7 @@ async function main() {
     args,
     callerSettings,
   );
-  const agents = workerDefinitions(codexSignedIn, cursorModels, Boolean(zenKey), antigravityModels);
+  const agents = workerDefinitions(codexSignedIn, cursorPicker, Boolean(zenKey), antigravityModels);
   const modBridge = new ModBridge();
   const settingsDir = await mkdtemp(path.join(os.tmpdir(), 'multi-native-settings-'));
   const callerSettingsFile = path.join(settingsDir, 'caller-settings.json');
@@ -172,23 +173,27 @@ async function main() {
   configureApproval(settings, approvalProviders, selectedModel, Boolean(antigravity), anthropic);
   await writeFile(settingsFile, JSON.stringify(settings), { mode: 0o600 });
   const definitions = JSON.stringify(agents);
-  if (Buffer.byteLength(definitions) > 120000) {
-    server.close();
-    await cursor?.close();
-    await antigravity?.close();
-    await rm(settingsDir, { recursive: true, force: true });
-    throw new Error(
-      'Cursor worker catalog exceeds the launcher argument limit. Worker registration needs a file-based Claude plugin.',
-    );
-  }
-  const ready = awaitModSessionStart();
   const childEnvironment = gatewayEnvironment(address.port, token, anthropic);
+  const claudePath = resolveExecutable('claude', {
+    configuredPath: claudeExecutable,
+    env: childEnvironment,
+  });
   const childInvocation = executableInvocation(
-    resolveExecutable('claude', { configuredPath: claudeExecutable, env: childEnvironment }),
+    claudePath,
     ['--settings', settingsFile, '--agents', definitions, ...args],
     process.platform,
     childEnvironment,
   );
+  try {
+    checkLauncherArgumentLimit(agents, childInvocation, claudePath, process.platform);
+  } catch (error) {
+    server.close();
+    await cursor?.close();
+    await antigravity?.close();
+    await rm(settingsDir, { recursive: true, force: true });
+    throw error;
+  }
+  const ready = awaitModSessionStart();
   const child = spawn(childInvocation.command, childInvocation.args, {
     stdio: 'inherit',
     env: childEnvironment,
@@ -229,10 +234,12 @@ async function main() {
   }
 }
 
-void main().catch((error) => {
-  console.error(`Native gateway: ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  void main().catch((error) => {
+    console.error(`Native gateway: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}
 
 function validateSessionLaunch(args: string[]) {
   if (
@@ -341,16 +348,31 @@ function parseAuthProbeOutput(stdout: string): boolean {
 
 async function assertFunctionHooksSupported(): Promise<void> {
   let stdout: string;
+  let executable = 'claude';
   try {
-    const invocation = claudeCommand(['--version']);
+    executable = resolveExecutable('claude', {
+      platform: process.platform,
+      env: process.env,
+      configuredPath: claudeExecutable,
+    });
+    const invocation = executableInvocation(
+      executable,
+      ['--version'],
+      process.platform,
+      process.env,
+    );
     ({ stdout } = await promisify(execFile)(invocation.command, invocation.args, {
       timeout: 10000,
       maxBuffer: 65536,
       ...invocation.options,
     }));
-  } catch {
+  } catch (error) {
+    const details = recordValue(error);
+    const code = typeof details?.code === 'string' ? ` (${details.code})` : '';
+    const firstLine = String(error).split('\n', 1)[0];
     throw new Error(
-      'Claude Code 2.1.272 or newer with function hooks is required; unable to read claude --version.',
+      `Claude Code 2.1.272 or newer with function hooks is required; unable to read ${executable} --version${code}: ${firstLine}.`,
+      { cause: error },
     );
   }
   const match = stdout.match(/\b(\d+)\.(\d+)\.(\d+)\b/);
@@ -446,9 +468,9 @@ async function discoverOpenAI(authFile: string) {
   return { codexSignedIn, openaiReview };
 }
 
-function workerDefinitions(
+export function workerDefinitions(
   codexSignedIn: boolean,
-  cursorModels: CursorModelOption[],
+  cursorPicker: CursorModelOption[],
   zen: boolean,
   antigravityModels: AntigravityModel[],
 ) {
@@ -464,9 +486,9 @@ function workerDefinitions(
       },
     ]),
   );
-  for (const option of cursorModels.filter((option) => option.nativeWorker)) {
+  for (const option of cursorPicker) {
     agents[option.worker] = {
-      description: `${option.label}. Native Cursor coding worker with its own tools, conversation state, and review.`,
+      description: option.description,
       prompt: WORKER_PROMPT,
       model: option.model,
       tools: ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write'],
@@ -492,6 +514,46 @@ function workerDefinitions(
     };
   }
   return agents;
+}
+
+interface LauncherInvocation {
+  command: string;
+  args: readonly string[];
+  viaComSpec?: boolean;
+}
+
+export function checkLauncherArgumentLimit(
+  agents: Record<string, AgentDefinition>,
+  invocation: LauncherInvocation,
+  executable: string,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (platform !== 'win32') {
+    return;
+  }
+  const viaComSpec = invocation.viaComSpec ?? /(?:^|[\\/])cmd\.exe$/i.test(invocation.command);
+  const limit = viaComSpec ? 8000 : 32000;
+  const commandLine = [invocation.command, ...invocation.args].join(' ');
+  if (commandLine.length <= limit) {
+    return;
+  }
+  const providers = new Map<string, number>();
+  for (const [name, agent] of Object.entries(agents)) {
+    const provider = agent.model.split('/')[1] ?? 'unknown';
+    providers.set(
+      provider,
+      (providers.get(provider) ?? 0) + Buffer.byteLength(JSON.stringify({ [name]: agent })),
+    );
+  }
+  const largest = [...providers.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 3)
+    .map(([provider, bytes]) => `${provider} (${bytes} B)`)
+    .join(', ');
+  const shim = viaComSpec ? ' through the Windows shim' : '';
+  throw new Error(
+    `Native worker registration needs ${commandLine.length.toLocaleString()} characters for ${executable}, above the Windows${shim} limit of ${limit.toLocaleString()}. Largest providers: ${largest || 'none'}. Disable providers or extra models to reduce the launcher arguments.`,
+  );
 }
 
 async function mergeSettings(args: string[], settings: LaunchSettings) {
