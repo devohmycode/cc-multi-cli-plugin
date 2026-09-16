@@ -33,9 +33,13 @@ Run from a fresh checkout after `npm ci`.
 | `npm run test:live:antigravity` | `agy` tools, continuation, and saved resume | `agy` login, `--antigravity-setup`, advertised model |
 | `npm run test:live:install` | Plugin install, startup, wrappers, and uninstall | Claude executable |
 
-On Windows, PTY checks require ConPTY and may skip. The remaining checks run from
-PowerShell or cmd when Node, Claude, Codex, `agy`, and the provider tools resolve
-through `PATH` and `PATHEXT`.
+On Windows, PTY checks require ConPTY and skip with an explicit message. The
+remaining checks run from PowerShell or cmd when Node, Claude, Codex, `agy`, and
+the provider tools resolve through `PATH` and `PATHEXT`. The `agy` login is
+visible only to interactive logon sessions on Windows: a check started over SSH
+reports "not logged in" even when the desktop session is signed in. Run the
+Antigravity check from the desktop session, or through a scheduled task
+registered with the interactive logon type.
 
 ## Fresh-host procedures
 
