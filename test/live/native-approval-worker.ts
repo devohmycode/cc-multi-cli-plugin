@@ -3,9 +3,11 @@ import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { hookCommand } from '../../plugins/multi-core/src/gateway/permission-hook.ts';
 import { OPENAI_WORKERS } from '../../plugins/multi-openai/src/models.ts';
+import { isolatedEnvironment } from './environment.ts';
 
 const { values } = parseArgs({
   options: {
@@ -47,7 +49,7 @@ await writeFile(
   JSON.stringify({
     sandbox: { enabled: false },
     hooks: {
-      PreToolUse: [{ hooks: [{ type: 'command', command: `${process.execPath} ${hookFile}` }] }],
+      PreToolUse: [{ hooks: [{ type: 'command', command: hookCommand(pathToFileURL(hookFile)) }] }],
     },
   }),
 );
@@ -77,14 +79,13 @@ const child = spawn(
   ],
   {
     cwd,
-    env: {
-      PATH: process.env.PATH,
+    env: isolatedEnvironment({
       HOME: os.homedir(),
       CODEX_HOME: process.env.CODEX_HOME,
       CLAUDE_CONFIG_DIR: `${cwd}/config`,
       MULTI_NATIVE_TRACE: '1',
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-    },
+    }),
     stdio: ['ignore', 'pipe', 'pipe'],
   },
 );

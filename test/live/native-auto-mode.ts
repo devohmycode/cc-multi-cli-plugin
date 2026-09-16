@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { terminateProcessTree } from '../../plugins/multi-core/src/gateway/process-tree.ts';
 import { OPENAI_WORKERS } from '../../plugins/multi-openai/src/models.ts';
+import { isolatedEnvironment } from './environment.ts';
 
 const args = process.argv.slice(2);
 if (args.includes('--help')) {
@@ -114,13 +115,12 @@ try {
     const child = spawn(process.execPath, [launcher, ...cliArgs], {
       cwd,
       detached: process.platform !== 'win32',
-      env: {
-        ...process.env,
+      env: isolatedEnvironment({
         MULTI_NATIVE_TRACE: '1',
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
         CLAUDE_CODE_MAX_RETRIES: '0',
         CLAUDE_CODE_MAX_TURNS: '8',
-      },
+      }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let output = '';

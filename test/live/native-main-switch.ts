@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { isolatedEnvironment } from './environment.ts';
 
 /** The Claude Code stream-json events this reproducer drives and inspects. */
 interface ClaudeEvent {
@@ -55,12 +56,11 @@ const child = spawn(
   {
     cwd,
     detached: true,
-    env: {
-      ...process.env,
+    env: isolatedEnvironment({
       MULTI_NATIVE_TRACE: '1',
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
       CLAUDE_CODE_MAX_RETRIES: '0',
-    },
+    }),
     stdio: ['pipe', 'pipe', 'pipe'],
   },
 );

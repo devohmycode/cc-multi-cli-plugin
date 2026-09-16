@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cursorModelOptions } from '../../plugins/multi-cursor/src/models.ts';
 import { OPENAI_WORKERS } from '../../plugins/multi-openai/src/models.ts';
+import { isolatedEnvironment } from './environment.ts';
 
 /** The Claude Code stream-json events this reproducer inspects. */
 interface ClaudeEvent {
@@ -79,13 +80,12 @@ try {
     {
       cwd,
       detached: true,
-      env: {
-        ...process.env,
+      env: isolatedEnvironment({
         MULTI_NATIVE_TRACE: '1',
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
         CLAUDE_CODE_MAX_RETRIES: '0',
         CLAUDE_CODE_MAX_TURNS: '8',
-      },
+      }),
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );

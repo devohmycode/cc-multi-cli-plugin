@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { isolatedEnvironment } from './environment.ts';
 
 const execute = promisify(execFile);
 
@@ -26,25 +27,6 @@ function windowsInvocation(pathname: string, args: string[], env: NodeJS.Process
     args: ['/d', '/s', '/c', `"${commandLine}"`],
     windowsVerbatimArguments: true,
   };
-}
-
-function windowsSystemEnvironment(): NodeJS.ProcessEnv {
-  const names = [
-    'SystemRoot',
-    'windir',
-    'SystemDrive',
-    'TEMP',
-    'TMP',
-    'APPDATA',
-    'LOCALAPPDATA',
-    'PATHEXT',
-    'ProgramFiles',
-    'ProgramData',
-    'NUMBER_OF_PROCESSORS',
-  ];
-  return Object.fromEntries(
-    names.filter((name) => process.env[name]).map((name) => [name, process.env[name]]),
-  );
 }
 
 const repository = fileURLToPath(new URL('../../', import.meta.url));
@@ -75,15 +57,13 @@ const profile =
   platform === 'win32'
     ? path.join(home, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1')
     : path.join(home, shell === 'zsh' ? '.zshrc' : '.bashrc');
-const env = {
-  PATH: process.env.PATH,
+const env = isolatedEnvironment({
   HOME: home,
   CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
   ...(platform === 'win32'
     ? {
         // npm, cmd.exe and the plugin manager need the Windows system variables;
         // without TEMP, APPDATA and PATHEXT the dependency install fails quietly.
-        ...windowsSystemEnvironment(),
         PSModulePath: process.env.PSModulePath ?? path.join(home, 'PowerShell', 'Modules'),
         ComSpec: process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
         USERPROFILE: home,
@@ -91,7 +71,7 @@ const env = {
       }
     : { SHELL: `/${shell}` }),
   npm_config_omit: 'dev',
-};
+});
 async function native(args: string[]) {
   return execute('claude', args, {
     cwd: directory,
@@ -154,12 +134,12 @@ if (platform === 'win32') {
 const launched = await execute(process.execPath, [launcher], {
   cwd: directory,
   timeout: 30000,
-  env: {
+  env: isolatedEnvironment({
     ...env,
     MULTI_REAL_CLAUDE: fake,
     MULTI_ENABLED_PROVIDERS: 'zen',
     OPENCODE_API_KEY: 'fixture-key',
-  },
+  }),
 });
 const models: string[] = JSON.parse(launched.stdout);
 assert(models.length > 0 && models.every((model) => model.startsWith('multi/zen/')));

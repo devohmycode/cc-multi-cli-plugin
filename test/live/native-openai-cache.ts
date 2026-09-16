@@ -10,6 +10,7 @@ import type { MessagesResponse } from '../../plugins/multi-core/src/gateway/mess
 import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 import type { ResponsesRequest } from '../../plugins/multi-openai/src/responses.ts';
 import { readSse } from '../../plugins/multi-openai/src/responses.ts';
+import { isolatedEnvironment } from './environment.ts';
 
 interface Sample {
   turn: number;
@@ -183,13 +184,12 @@ async function runClaude(port: number, turn: number) {
     ],
     {
       cwd,
-      env: {
-        ...process.env,
+      env: isolatedEnvironment({
         ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
         ANTHROPIC_CUSTOM_HEADERS: `x-multi-gateway-token: ${token}`,
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
         CLAUDE_CODE_MAX_RETRIES: '0',
-      },
+      }),
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );

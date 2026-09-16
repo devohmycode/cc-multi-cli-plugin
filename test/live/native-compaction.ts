@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { terminateProcessTree } from '../../plugins/multi-core/src/gateway/process-tree.ts';
 import { OPENAI_WORKERS } from '../../plugins/multi-openai/src/models.ts';
+import { isolatedEnvironment } from './environment.ts';
 
 interface Event {
   type: string;
@@ -92,13 +93,12 @@ async function turn(
   const first = attempted++ === 0;
   const started = Date.now();
   console.log(`RUN ${name} (${selectedModel})`);
-  const env = {
-    ...process.env,
+  const env = isolatedEnvironment({
     MULTI_NATIVE_TRACE: '1',
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     CLAUDE_CODE_MAX_RETRIES: '0',
     CLAUDE_CODE_MAX_TURNS: '8',
-  };
+  });
   // Isolate inherited compaction switches. The automatic case uses a real 50K
   // trigger (50% of a 100K window), never forged provider usage or a fake summary.
   for (const key of [

@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { isolatedEnvironment } from './environment.ts';
 
 const run = promisify(execFile);
 const root = await mkdtemp(path.join(os.tmpdir(), 'multi-session-lifecycle-'));
@@ -57,8 +58,7 @@ globalThis.fetch=async(url,init)=>{
  return new Response(events.map(e=>'event: '+e.type+'\\ndata: '+JSON.stringify(e)+'\\n\\n').join(''),{headers:{'content-type':'text/event-stream'}});
 };`,
 );
-const env = {
-  PATH: process.env.PATH,
+const env = isolatedEnvironment({
   HOME: root,
   CODEX_HOME: root,
   CLAUDE_CONFIG_DIR: path.join(root, 'config'),
@@ -67,7 +67,7 @@ const env = {
   ANTHROPIC_AUTH_TOKEN: 'fixture',
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
   NODE_OPTIONS: `--import=${fixture}`,
-};
+});
 async function launch(session?: string) {
   const { stdout, stderr } = await run(
     process.execPath,

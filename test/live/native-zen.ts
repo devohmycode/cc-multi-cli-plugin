@@ -15,6 +15,7 @@ import {
 import { readSse } from '../../plugins/multi-openai/src/responses.ts';
 import { readZenKey } from '../../plugins/multi-zen/src/auth.ts';
 import { zenModel } from '../../plugins/multi-zen/src/models.ts';
+import { isolatedEnvironment } from './environment.ts';
 
 interface UsageSample {
   stage: string;
@@ -277,14 +278,13 @@ async function runClaude(
     ],
     {
       cwd,
-      env: {
-        ...process.env,
+      env: isolatedEnvironment({
         ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
         ANTHROPIC_CUSTOM_HEADERS: `x-multi-gateway-token: ${gatewayToken}`,
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
         CLAUDE_CODE_MAX_RETRIES: '0',
         CLAUDE_CODE_MAX_TURNS: '8',
-      },
+      }),
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );

@@ -16,6 +16,7 @@ import type { GatewayEvent } from '../../plugins/multi-core/src/gateway/server.t
 import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
 import { readCodexAuth } from '../../plugins/multi-openai/src/auth.ts';
 import { readSse } from '../../plugins/multi-openai/src/responses.ts';
+import { isolatedEnvironment } from './environment.ts';
 import type { HookInput } from './native-events.ts';
 import { pty } from './native-pty.ts';
 
@@ -368,8 +369,7 @@ const child = spawn(
   {
     cwd: artifacts,
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: {
-      PATH: process.env.PATH,
+    env: isolatedEnvironment({
       TMPDIR: process.env.TMPDIR,
       HOME: os.homedir(),
       TERM: 'xterm-256color',
@@ -393,7 +393,7 @@ const child = spawn(
           }),
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
       CLAUDE_CODE_MAX_RETRIES: '0',
-    },
+    }),
   },
 );
 let output = '';

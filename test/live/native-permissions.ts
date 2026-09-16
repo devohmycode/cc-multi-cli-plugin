@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs, stripVTControlCharacters } from 'node:util';
 import { hookCommand } from '../../plugins/multi-core/src/gateway/permission-hook.ts';
+import { isolatedEnvironment } from './environment.ts';
 import type { HookInput, TranscriptEntry } from './native-events.ts';
 import { pty, skipIfPtyUnsupported } from './native-pty.ts';
 
@@ -96,8 +97,7 @@ for (const model of models) {
       {
         cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: {
-          PATH: process.env.PATH,
+        env: isolatedEnvironment({
           HOME: os.homedir(),
           CODEX_HOME: process.env.CODEX_HOME,
           TERM: 'xterm-256color',
@@ -105,7 +105,7 @@ for (const model of models) {
           MULTI_NATIVE_TRACE: '1',
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
           CLAUDE_CODE_MAX_RETRIES: '0',
-        },
+        }),
       },
     );
     let output = '';
