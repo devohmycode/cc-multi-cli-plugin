@@ -209,13 +209,11 @@ async function writeRuntime(directory: string, bin: string, node: string, platfo
     const bootstrap = path.join(directory, 'bootstrap.ts');
     if (platform === 'win32') {
       const suffix = name === 'multi' ? ' --multi' : '';
-      const cmd = [
-        '@echo off',
-        `"${node}" "${bootstrap}"${suffix} %*`,
-        'exit /b %ERRORLEVEL%',
-        '',
-      ].join('\r\n');
-      await writeFile(path.join(bin, `${name}.cmd`), `${cmd}\r\n`);
+      // cmd.exe reads a batch file line by line while it runs. `multi uninstall`
+      // deletes this shim before it finishes, so the whole script is one line:
+      // `exit /b` without a code keeps the child's ERRORLEVEL.
+      const cmd = `@"${node}" "${bootstrap}"${suffix} %* & exit /b\r\n`;
+      await writeFile(path.join(bin, `${name}.cmd`), cmd);
       await writeFile(
         path.join(bin, `${name}.ps1`),
         `& ${powershellQuote(node)} ${powershellQuote(bootstrap)}${suffix} @args\r\nexit $LASTEXITCODE\r\n`,

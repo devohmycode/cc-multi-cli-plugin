@@ -199,7 +199,8 @@ test('Windows installation writes quoted PowerShell and cmd shims and uninstalls
   const cmd = await readFile(path.join(bin, 'claude-multi.cmd'), 'utf8');
   const ps = await readFile(path.join(bin, 'claude-multi.ps1'), 'utf8');
   assert.match(cmd, /".*" ".*bootstrap\.ts"(?: --multi)? %\*/);
-  assert.match(cmd, /exit \/b %ERRORLEVEL%/);
+  assert.equal(cmd.split('\r\n').filter(Boolean).length, 1, 'single-line shim survives uninstall');
+  assert.match(cmd, / & exit \/b\r\n$/);
   assert.match(ps, /''quotes''|quotes/);
   assert.match(state.block, /\$env:Path/);
   await installUninstall(path.dirname(bin));
