@@ -190,7 +190,9 @@ async function preparePolicy(
   if (typeof started?.generation !== 'string') {
     return undefined;
   }
-  const deadline = Date.now() + 4000;
+  // Policy discovery runs `claude plugin list` and settings admission; on a
+  // cold Windows start that takes several seconds. Stay under the 10 s hook budget.
+  const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
     const result = await request($, '/multi/mod/policy', {
       sessionId,

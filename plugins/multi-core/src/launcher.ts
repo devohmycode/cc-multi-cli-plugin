@@ -425,6 +425,13 @@ function atLeastVersion(actual: number[], required: number[]): boolean {
   return true;
 }
 
+/**
+ * Claude Code has to start, load the plugin worker and run session.start before
+ * the mod can acknowledge. A cold start on Windows takes well over five seconds
+ * (large binary, antivirus scan), so the wait is generous and overridable.
+ */
+const modSessionStartTimeoutMs = Number(process.env.MULTI_MOD_START_TIMEOUT_MS ?? 30000);
+
 function awaitModSessionStart(): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -434,7 +441,7 @@ function awaitModSessionStart(): Promise<void> {
           'Claude Code 2.1.272 or newer with loaded function hooks is required; the Multi mod did not acknowledge session.start.',
         ),
       );
-    }, 5000);
+    }, modSessionStartTimeoutMs);
     const ready = () => {
       clearTimeout(timer);
       resolve();
