@@ -65,7 +65,6 @@ const env = isolatedEnvironment({
   MULTI_REAL_CLAUDE: wrapper,
   MULTI_ENABLED_PROVIDERS: 'openai',
   ANTHROPIC_AUTH_TOKEN: 'fixture',
-  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
   NODE_OPTIONS: `--import=${fixture}`,
 });
 async function launch(session?: string) {

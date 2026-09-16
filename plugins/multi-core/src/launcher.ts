@@ -845,8 +845,31 @@ function pickerSettings(
   return settings;
 }
 
+/**
+ * CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC also blocks the plugin worker's
+ * loopback call to this gateway, which the Mods control plane requires. Keep
+ * the user's intent (no updater, telemetry or error reports) with the narrower
+ * flags instead of silently running without the mod.
+ */
+function translateTrafficPolicy(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC === undefined) {
+    return env;
+  }
+  const { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: _flag, ...rest } = env;
+  process.stderr.write(
+    'Multi: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC would block the local gateway; using DISABLE_AUTOUPDATER, DISABLE_TELEMETRY, DISABLE_ERROR_REPORTING and DISABLE_BUG_COMMAND instead.\n',
+  );
+  return {
+    ...rest,
+    DISABLE_AUTOUPDATER: '1',
+    DISABLE_TELEMETRY: '1',
+    DISABLE_ERROR_REPORTING: '1',
+    DISABLE_BUG_COMMAND: '1',
+  };
+}
+
 function gatewayEnvironment(port: number, token: string, anthropic: boolean) {
-  const env = { ...process.env };
+  const env = translateTrafficPolicy({ ...process.env });
   delete env.OPENCODE_API_KEY;
   return {
     ...env,

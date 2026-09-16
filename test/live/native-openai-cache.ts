@@ -187,7 +187,6 @@ async function runClaude(port: number, turn: number) {
       env: isolatedEnvironment({
         ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
         ANTHROPIC_CUSTOM_HEADERS: `x-multi-gateway-token: ${token}`,
-        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
         CLAUDE_CODE_MAX_RETRIES: '0',
       }),
       stdio: ['ignore', 'pipe', 'pipe'],

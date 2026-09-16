@@ -3,7 +3,9 @@
 ## Requirements
 
 - Node 24.12 or newer from a persistent installation. Setup records its executable path.
-- Claude Code 2.1.272 or newer with function hooks.
+- Claude Code 2.1.272 or newer with function hooks. `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`
+  would block the local gateway, so the launcher replaces it for its session with
+  `DISABLE_AUTOUPDATER`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING` and `DISABLE_BUG_COMMAND`.
 - OpenAI: the official Codex CLI (`codex`) and a ChatGPT login.
 - Cursor: the official Cursor SDK login. No separate Cursor CLI is required.
 - OpenCode Zen: an OpenCode account or an `OPENCODE_API_KEY`.

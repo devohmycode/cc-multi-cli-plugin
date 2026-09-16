@@ -84,7 +84,6 @@ const child = spawn(
       CODEX_HOME: process.env.CODEX_HOME,
       CLAUDE_CONFIG_DIR: `${cwd}/config`,
       MULTI_NATIVE_TRACE: '1',
-      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     }),
     stdio: ['ignore', 'pipe', 'pipe'],
   },

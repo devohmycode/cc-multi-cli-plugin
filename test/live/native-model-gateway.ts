@@ -82,7 +82,6 @@ try {
       detached: true,
       env: isolatedEnvironment({
         MULTI_NATIVE_TRACE: '1',
-        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
         CLAUDE_CODE_MAX_RETRIES: '0',
         CLAUDE_CODE_MAX_TURNS: '8',
       }),
