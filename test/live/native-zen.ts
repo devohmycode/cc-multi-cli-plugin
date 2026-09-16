@@ -14,7 +14,7 @@ import {
 } from '../../plugins/multi-core/src/gateway/server.ts';
 import { readSse } from '../../plugins/multi-openai/src/responses.ts';
 import { readZenKey } from '../../plugins/multi-zen/src/auth.ts';
-import { zenModel } from '../../plugins/multi-zen/src/models.ts';
+import { zenModel, zenPickerOptions } from '../../plugins/multi-zen/src/models.ts';
 import { isolatedEnvironment } from './environment.ts';
 
 interface UsageSample {
@@ -101,6 +101,25 @@ assert(Number.isFinite(minCacheRatio) && minCacheRatio >= 0 && minCacheRatio <= 
 const artifacts = await mkdtemp(path.join(os.tmpdir(), 'native-zen-'));
 console.log(`Artifacts: ${artifacts}`);
 const cwd = artifacts;
+const settingsFile = path.join(artifacts, 'claude-settings.json');
+const pickerModels = [
+  ...new Set([model, switchedModel].filter((value): value is string => value !== undefined)),
+];
+await writeFile(
+  settingsFile,
+  JSON.stringify({
+    modelPicker: {
+      options: zenPickerOptions(pickerModels.join(',')).map(
+        ({ model: pickerModel, label, efforts }) => ({
+          model: pickerModel,
+          label: `Zen · ${label}`,
+          behavesAs: efforts?.length ? 'claude-sonnet-4-6' : 'claude-haiku-4-5',
+          description: `Zen API billing · Claude tools${efforts ? '' : ' · native reasoning; /effort not applicable'}`,
+        }),
+      ),
+    },
+  }),
+);
 const fixtureNonce = randomBytes(8).toString('hex');
 const finalLine = `Record 239: amber birch cedar delta elm fir grove hazel iris juniper. ${fixtureNonce}`;
 await writeFile(
@@ -184,6 +203,13 @@ async function observe(response: Response, sample: UsageSample) {
   }
 }
 
+function modelArguments(stage: string, selectedModel: string): string[] {
+  if (stage === 'resume') {
+    return [];
+  }
+  return ['--model', `multi/zen/${selectedModel}`];
+}
+
 function createGateway() {
   const fetchImpl: GatewayFetch = async (url, init) => {
     if (currentStage === 'cancel') {
@@ -264,11 +290,11 @@ async function runClaude(
       prompt,
       first ? '--session-id' : '--resume',
       sessionId,
-      '--model',
-      `multi/zen/${selectedModel}`,
+      ...modelArguments(stage, selectedModel),
       ...(zenModel(selectedModel)?.protocol === 'responses' ? ['--effort', 'low'] : []),
       ...(useTools ? ['--tools', 'Read', '--allowedTools', 'Read'] : ['--tools', '']),
       '--strict-mcp-config',
+      ...(first ? ['--settings', settingsFile] : []),
       '--setting-sources',
       '',
       ...(stage === 'compaction' ? [] : ['--disable-slash-commands']),

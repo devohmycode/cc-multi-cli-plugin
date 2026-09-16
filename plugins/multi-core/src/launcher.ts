@@ -948,6 +948,21 @@ function launcherArguments(
   pluginRoot: string,
 ): string[] {
   const pluginDirectory =
-    !inventory.multiCoreEnabled && !hasPluginDirectory(args) ? ['--plugin-dir', pluginRoot] : [];
+    !hasPluginDirectory(args) && (!inventory.multiCoreEnabled || hasEmptySettingSources(args))
+      ? ['--plugin-dir', pluginRoot]
+      : [];
   return ['--settings', settingsFile, '--agents', definitions, ...args, ...pluginDirectory];
+}
+
+function hasEmptySettingSources(args: readonly string[]): boolean {
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === '--setting-sources' && args[index + 1] === '') {
+      return true;
+    }
+    if (arg === '--setting-sources=') {
+      return true;
+    }
+  }
+  return false;
 }

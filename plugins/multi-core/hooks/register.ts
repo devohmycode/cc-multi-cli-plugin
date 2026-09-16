@@ -90,21 +90,25 @@ export const register: Register = (on, options) => {
       return next(event);
     }
     for (const [name, description] of displayTools) {
-      await $.tool.register({
-        name: `cursor_${name}`,
-        description,
-        inputSchema: {
-          type: 'object',
-          properties: {
-            description: { type: 'string', maxLength: 160 },
-            output: { type: 'string', maxLength: 4096 },
-            isError: { type: 'boolean' },
-            toolUseId: { type: 'string', maxLength: 512 },
+      try {
+        await $.tool.register({
+          name: `cursor_${name}`,
+          description,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              description: { type: 'string', maxLength: 160 },
+              output: { type: 'string', maxLength: 4096 },
+              isError: { type: 'boolean' },
+              toolUseId: { type: 'string', maxLength: 512 },
+            },
+            required: ['description', 'output', 'isError', 'toolUseId'],
+            additionalProperties: false,
           },
-          required: ['description', 'output', 'isError', 'toolUseId'],
-          additionalProperties: false,
-        },
-      });
+        });
+      } catch {
+        // Toolless slash-command sessions still need the gateway lifecycle hooks.
+      }
     }
     const response = await request($, '/multi/mod/session', {
       sessionId: await $.session.id(),

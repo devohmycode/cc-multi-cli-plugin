@@ -132,6 +132,8 @@ async function turn(
       '--strict-mcp-config',
       '--setting-sources',
       '',
+      '--debug-file',
+      path.join(artifacts, `${name}.debug.log`),
       ...(automatic ? ['--autocompact', '100k'] : []),
     ],
     { cwd, detached: process.platform !== 'win32', env, stdio: ['pipe', 'pipe', 'pipe'] },
