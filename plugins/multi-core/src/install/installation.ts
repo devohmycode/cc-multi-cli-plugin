@@ -230,10 +230,11 @@ async function writeRuntime(directory: string, bin: string, node: string, platfo
     const bootstrap = path.join(directory, 'bootstrap.ts');
     if (platform === 'win32') {
       const suffix = name === 'multi' ? ' --multi' : '';
-      // cmd.exe reads a batch file line by line while it runs. `multi uninstall`
-      // deletes this shim before it finishes, so the whole script is one line:
-      // `exit /b` without a code keeps the child's ERRORLEVEL.
-      const cmd = `@"${node}" "${bootstrap}"${suffix} %* & exit /b\r\n`;
+      // Same trick as npm's cmd shims: a goto to an undefined label ends batch
+      // processing, so the `||` branch runs Node as a top-level command. cmd.exe
+      // then returns Node's exit code directly (`exit /b` after `&` would return
+      // 0 under `cmd /c`) and no longer re-reads this file while Node runs.
+      const cmd = `@goto #_undefined_# 2>NUL || "${node}" "${bootstrap}"${suffix} %*\r\n`;
       await writeFile(path.join(bin, `${name}.cmd`), cmd);
       await writeFile(
         path.join(bin, `${name}.ps1`),
