@@ -36,7 +36,7 @@
       "name": "multi-antigravity",
       "source": "./plugins/multi-antigravity",
       "version": "0.2.0",
-      "description": "Experimental native Antigravity CLI harness"
+      "description": "Official Antigravity CLI harness"
     }
   ]
 }

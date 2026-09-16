@@ -6,7 +6,7 @@
   },
   "license": "Apache-2.0",
   "name": "multi-antigravity",
-  "description": "Experimental native Antigravity CLI harness",
+  "description": "Official Antigravity CLI harness",
   "dependencies": [
     {
       "name": "multi-core",

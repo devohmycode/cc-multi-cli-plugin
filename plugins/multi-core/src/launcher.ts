@@ -484,7 +484,7 @@ function workerDefinitions(
   for (const option of [...antigravityModels, ...antigravityPickerOptions(antigravityModels)]) {
     const effort = option.id.match(/-(low|medium|high)$/)?.[1] as Effort | undefined;
     agents[option.worker] = {
-      description: `${option.label}. Experimental native CLI coding worker.`,
+      description: `${option.label}. Native Antigravity CLI coding worker.`,
       prompt: WORKER_PROMPT,
       model: option.model,
       tools: ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write'],
@@ -630,7 +630,7 @@ async function handleCommand(command?: string) {
   }
   if (command === '--help') {
     console.log(
-      'Usage: node plugins/multi-core/src/launcher.ts [--cursor-login | --cursor-models | --zen-models | --antigravity-models | --antigravity-setup] [-- <claude arguments>]\nLaunch Claude with external models and native coding workers.\n--cursor-login: official Cursor SDK browser sign-in\n--cursor-models: list account model choices and worker names\n--zen-models: list supported Zen models and capabilities\nMULTI_ANTIGRAVITY=1: enable experimental native Antigravity models and workers\n--antigravity-setup: install the scoped native permission hook\n--antigravity-models: inspect the official Antigravity CLI catalog (native login required)\nOPENCODE_API_KEY: Zen key (or use OpenCode /connect)\nMULTI_ZEN_MODELS: comma-separated Zen model IDs to show, leaving other providers unchanged\nMULTI_MODELS: comma-separated full model IDs to show in /model (unset: defaults; empty: hide external rows)\nMULTI_CURSOR_EXTRA_MODELS: comma-separated Cursor model IDs to add to Auto, Grok 4.6, and Composer 2.5 in /model',
+      'Usage: node plugins/multi-core/src/launcher.ts [--cursor-login | --cursor-models | --zen-models | --antigravity-models | --antigravity-setup] [-- <claude arguments>]\nLaunch Claude with external models and native coding workers.\n--cursor-login: official Cursor SDK browser sign-in\n--cursor-models: list account model choices and worker names\n--zen-models: list supported Zen models and capabilities\nMULTI_ANTIGRAVITY=1: enable native Antigravity models and workers\n--antigravity-setup: install the scoped native permission hook\n--antigravity-models: inspect the official Antigravity CLI catalog (native login required)\nOPENCODE_API_KEY: Zen key (or use OpenCode /connect)\nMULTI_ZEN_MODELS: comma-separated Zen model IDs to show, leaving other providers unchanged\nMULTI_MODELS: comma-separated full model IDs to show in /model (unset: defaults; empty: hide external rows)\nMULTI_CURSOR_EXTRA_MODELS: comma-separated Cursor model IDs to add to Auto, Grok 4.6, and Composer 2.5 in /model',
     );
     process.exit(0);
   }
@@ -741,7 +741,7 @@ function pickerSettings(
           model,
           label,
           behavesAs: pickerProfile(true),
-          description: 'Experimental · native Antigravity CLI · cache reuse under validation',
+          description: 'Native Antigravity CLI',
         })),
         ...(zen ? zenPickerOptions(process.env.MULTI_ZEN_MODELS) : []).map(
           ({ model, label, efforts }) => ({

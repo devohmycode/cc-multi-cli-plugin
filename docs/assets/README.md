@@ -7,7 +7,7 @@ To add a provider:
 
 1. Edit `providers` at the top of [`scripts/banner.mjs`](../../scripts/banner.mjs).
 2. Choose an `icon` from the inline SVG marks, or add a vector mark to `icons`.
-   Only include implemented integrations; planned providers stay out of the banner.
+   Only include implemented integrations in the banner.
 3. Run `npm run banner:generate` and review `docs/assets/banner.svg` in a browser.
 
 The design follows the original README banner: monospace title, solid black

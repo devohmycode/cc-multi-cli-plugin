@@ -6,6 +6,14 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+### Documentation
+
+- Rewrite the README as a short install-and-use page and move provider detail into
+  `docs/openai.md`, `docs/cursor.md`, `docs/zen.md`, `docs/antigravity.md` and
+  `docs/permissions.md`. `ARCHITECTURE.md` and `AGENTS.md` describe the current
+  system without roadmap or history. Antigravity is no longer labelled experimental
+  in the picker, worker descriptions or plugin manifests.
+
 ### Cross-platform runtime
 
 - Replace the Linux-only `flock` state lock with a portable PID-aware state lock shared by native runs. Cross-platform process-tree cancellation now handles POSIX and Windows processes, and executable resolution honors `PATHEXT` and Windows `.cmd` shims.

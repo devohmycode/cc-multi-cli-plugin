@@ -1,21 +1,17 @@
 ---
 name: uninstall
-description: Remove the Multi shell wrapper while preserving provider logins.
+description: Remove Multi startup files while preserving provider credentials.
 disable-model-invocation: true
 allowed-tools: Bash
 ---
 
-Run the installed helper:
+Run:
 
 ```sh
 "$HOME/.local/share/multi-cli/bin/multi" uninstall
 ```
 
-It removes only Multi's marked shell block and its known wrapper files, including
-`claude-multi`. The plain `claude` command was never replaced or shadowed, so
-nothing needs restoring there. If the block was edited, report the conflict
-rather than deleting user content. Tell the user to open a new terminal and
-uninstall the Multi provider/core plugins through /plugin if they also want the
-packages removed. Provider credentials are retained.
-Antigravity's separately installed, environment-scoped native hook is retained;
-it is inert in ordinary agy runs.
+Tell the user that Multi startup files and its marked shell block were removed.
+Provider credentials remain in their provider stores. The command does not remove
+Claude plugins; tell the user to remove those through `/plugin` when needed.
+Never accept credentials in chat.

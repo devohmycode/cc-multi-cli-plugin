@@ -1,17 +1,16 @@
 ---
 name: status
-description: Show enabled Multi providers and the active runtime location.
+description: Show enabled Multi providers and the local runtime status.
 disable-model-invocation: true
 allowed-tools: Bash
 ---
 
-Run the installed helper below. It reports no credentials and performs no inference.
+Run:
 
 ```sh
 "$HOME/.local/share/multi-cli/bin/multi" status
 ```
 
-If missing, direct the user to /multi-core:setup. New logins and plugin changes
-apply when Claude is relaunched. Do not describe a listed provider as authenticated;
-this command reports enablement, not an inference test. `claude-multi` launches
-Multi; setup never replaces or shadows the plain `claude` command.
+Tell the user which providers are enabled and whether the helper is installed.
+This command does not test provider authentication or inference. If it is missing,
+tell the user to run `/multi-core:setup`. Never accept credentials in chat.

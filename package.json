@@ -14,7 +14,6 @@
     "test:live:compaction": "node test/live/native-compaction.ts",
     "test:live:zen": "node test/live/native-zen.ts",
     "test:live:cursor": "node test/live/native-cursor-harness.ts",
-    "test:live:cursor-harness": "node test/live/native-cursor-harness.ts",
     "test:live:auto-mode": "node test/live/native-auto-mode.ts",
     "test:live:provider-approval": "node test/live/native-provider-approval.ts",
     "test:live:reviewer": "node test/live/native-reviewer.ts",

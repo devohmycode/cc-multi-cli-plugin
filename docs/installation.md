@@ -1,131 +1,77 @@
 # Installing Multi
 
-## For humans
+## Requirements
 
-Use the [README's in-Claude installation steps](../README.md#for-humans), or run
-these equivalent terminal commands for the providers you want:
+- Node 24.12 or newer from a persistent installation. Setup records its executable path.
+- Claude Code 2.1.272 or newer with function hooks.
+- OpenAI: the official Codex CLI (`codex`) and a ChatGPT login.
+- Cursor: the official Cursor SDK login. No separate Cursor CLI is required.
+- OpenCode Zen: an OpenCode account or an `OPENCODE_API_KEY`.
+- Antigravity: the official `agy` CLI and its native login.
 
-```sh
-claude plugin marketplace add greenpolo/cc-multi-cli-plugin
-claude plugin install multi-openai@cc-multi-cli-plugin --scope user
-claude plugin install multi-cursor@cc-multi-cli-plugin --scope user
-claude plugin install multi-zen@cc-multi-cli-plugin --scope user
+## Install
+
+In Claude Code, add the marketplace and install the providers you want:
+
+```text
+/plugin marketplace add greenpolo/cc-multi-cli-plugin
+/plugin install multi-openai@cc-multi-cli-plugin
+/plugin install multi-cursor@cc-multi-cli-plugin
+/plugin install multi-zen@cc-multi-cli-plugin
+/plugin install multi-antigravity@cc-multi-cli-plugin
+/reload-plugins
+/multi-core:setup
 ```
 
-You can install any subset. Each provider declares a dependency on `multi-core`.
-Core requires user scope because its startup code runs before the workspace trust
-prompt. Provider enablement comes from `claude plugin list --json`, including its
-native scope/settings resolution. Multi forwards `--settings` and
-`--setting-sources` when querying that list.
-
-Open Claude, run `/reload-plugins`, then `/multi-core:setup`. Setup checks for Node
->=24.12 and a real Claude executable. Use a persistent Node installation, not a
-temporary npx download. Setup records its Node executable for the wrapper and
-supports Bash/Zsh on Linux/macOS. Cursor and Antigravity currently require Linux;
-this installer does not add Windows/WSL harness support.
-
-Setup adds one marked PATH block to `~/.bashrc` or `~/.zshrc` and writes its small
-bootstrap under `~/.local/share/multi-cli/`. It does not change global Claude model
-settings, log in to providers, or spend inference usage. It never replaces or
-shadows the `claude` command; the launch command is the new `claude-multi`. Open
-a new terminal after setup. `multi status` should list the installed core and
-your selected providers; this is an enablement check, not an authentication or
-inference test. Then run `claude-multi` to launch Multi, or `claude` normally for
-ordinary Claude Code.
+Each provider pulls in `multi-core`. Setup writes one marked PATH block to the
+applicable shell file: `~/.bashrc`, `~/.zshrc`, fish's config file, or the
+PowerShell profile. It writes wrappers and shims under Multi's platform data
+directory. It never shadows `claude`; `claude-multi` starts Multi. Open a new
+terminal after setup.
 
 ## Connect accounts
 
-| In-Claude command | Underlying flow |
-| --- | --- |
-| `/multi-openai:login` | Codex's official ChatGPT browser login |
-| `/multi-cursor:login` | Official Cursor SDK browser login |
-| `/multi-zen:connect` | Existing OpenCode auth or hidden API-key entry in your terminal |
-| `/multi-antigravity:connect` | Install the scoped native permission hook after official agy login |
+| Provider | Command | Account or credential |
+| --- | --- | --- |
+| OpenAI | `/multi-openai:login` | Codex's official ChatGPT login |
+| Cursor | `/multi-cursor:login` | Official Cursor SDK browser login |
+| OpenCode Zen | `/multi-zen:connect` | OpenCode auth or an API key |
+| Antigravity | `/multi-antigravity:connect` | The official `agy` login and scoped hook |
 
-The equivalent terminal commands are `multi login openai`, `multi login cursor`,
-`multi connect zen`, and `multi login antigravity`. OpenAI supports the additional
-`--device-auth` argument for remote hosts when enabled on the account. See
-[Codex authentication](https://developers.openai.com/codex/auth/).
+Run Zen key entry in a separate terminal. After connecting any provider, relaunch
+Claude so its models and workers are discovered. `multi status` reports installed
+and enabled providers; it does not authenticate accounts or run inference.
 
-OpenAI's current adapter reads Codex's `auth.json`. The login helper asks Codex to
-use its file store for that invocation; it does not change persistent Codex
-configuration or extract OS-keyring credentials. Codex retains token renewal.
-Cursor credentials remain owned by the official SDK.
+## Update
 
-Zen uses API keys, not OAuth. `multi connect zen` reuses `OPENCODE_API_KEY` or
-OpenCode's saved key. If missing, it directs you to https://opencode.ai/auth and
-accepts hidden key entry in a terminal, preserving other providers in OpenCode's
-`auth.json` and writing it with mode 0600. Never paste a key into Claude, a skill
-argument, or a shell command. The helper refuses key entry through a non-TTY.
+Use Claude's normal marketplace and plugin update commands. Re-running
+`/multi-core:setup` refreshes the startup files and wrappers.
 
-After login, relaunch Claude: credentials, models and workers are discovered at
-startup. Installing Antigravity enables its experimental route; its owned hook is
-refreshed at startup to match the active runtime path. Other native hooks and
-credentials are preserved.
+## Uninstall
 
-## Updates and removal
-
-Use Claude's normal marketplace/plugin update commands. The wrapper queries the
-installed core location on each new launch, so it does not pin a versioned cache
-path. Running sessions keep their original runtime until they exit. Re-running
-`/multi-core:setup` refreshes the bootstrap and is safe to repeat.
-
-`multi uninstall` removes our exact marked shell block and known bootstrap files.
-It preserves other shell content and provider credentials, and works even if the
-core package was already removed. If you edited the marked block, uninstall stops
-rather than overwriting it. Open a new terminal after removal, then remove the
-provider/core plugins with `/plugin` if desired. Antigravity's separately installed
-native hook remains; it is environment-scoped and inert in ordinary `agy` runs.
-
-Disabling all providers or disabling/removing core makes `claude-multi` pass
-every command through to the real `claude` executable unchanged. When a core and
-at least one provider stay enabled, `claude-multi` always launches the gateway,
-including for commands such as `plugin`, `auth`, or `--version`; use plain
-`claude` directly for those instead. Disabled provider routes also reject typed
-model IDs and workers, even when credentials still exist.
+Run `multi uninstall` before removing the plugins. It removes Multi's marked PATH
+block and known wrappers while retaining provider logins. Open a new terminal,
+then remove the provider and core plugins through `/plugin` if desired.
 
 ## For agents
 
-1. Read `AGENTS.md` and this guide. Check Node, npm, Claude, shell and platform.
-   Ask which providers the user wants if that is not already known.
-2. Use the native terminal installation commands above at user scope. Reuse the
-   existing marketplace when present. Do not manually edit Claude's plugin cache.
-3. Run the core setup helper from the installed core root:
-   `node <core-root>/plugins/multi-core/src/setup.ts`. Find that root in
-   `claude plugin list --json`; do not guess a versioned path. If needed, pass
-   `--shell bash` or `--shell zsh`, or `--claude /absolute/path/to/real/claude`.
-   Explain the marked shell change. Do not overwrite user aliases or functions.
-4. Reuse existing logins. The installed CLI is available immediately at
-   `~/.local/share/multi-cli/bin/multi` even before the user's shell reloads. Launch
-   requested browser-login flows and let the user complete them. Zen key entry
-   belongs in their own terminal, never an agent tool session or transcript.
-5. Run `multi status` using that absolute path, and tell the user to open a new
-   terminal, run `claude-multi`, and verify `/model`. Keep interactive Claude in
-   the user's terminal; do not nest it inside an agent tool session. Report
-   exactly what was tested.
+1. Check Node, Claude Code, the shell, the platform, and the requested providers.
+2. Install the selected plugins at user scope through Claude's plugin manager.
+3. Run `/multi-core:setup` and explain the marked PATH change.
+4. Hand browser sign-in to the human. Have the human enter Zen keys in a separate
+   terminal. Never accept credentials in chat or an agent tool session.
+5. Run `multi status`. Ask the human to open a new terminal, launch `claude-multi`,
+   and check `/model`.
 
-## Local development and package layout
-
-For an unpublished checkout, add its absolute path as a local marketplace instead
-of the GitHub URL, then install providers normally. Root `package.json` and
-`package-lock.json` are copied with core; Claude installs their Node dependencies.
-Run `npm run test:live:install` for verification using a temporary Claude home and the real plugin manager,
-including running the cached runtime after removing the source checkout.
-
-The core package deliberately ships the whole reviewed runtime. Provider packages
-supply opt-in identity and connection skills, rather than loading executable
-provider code from arbitrary cache paths before workspace trust. Source remains
-organized in `plugins/multi-core` and `plugins/multi-<provider>`. New providers still
-need a runtime adapter, a marketplace entry and an enablement identifier.
-
-Direct development launches remain available after root `npm ci`:
+## Run from a checkout
 
 ```sh
+npm install
 node plugins/multi-core/src/launcher.ts
+MULTI_ANTIGRAVITY=1 node plugins/multi-core/src/launcher.ts
+node plugins/multi-core/src/launcher.ts --antigravity-setup
 ```
 
-That entry uses credential-based discovery. The installed wrapper supplies an
-explicit provider allowlist and uses the real Claude executable to avoid recursion.
-The installation documentation structure follows
-[Claude HUD's human/agent setup flow](https://github.com/jarrodwatts/claude-hud/blob/main/CLAUDE.README.md);
-Multi's gateway startup implementation is separate.
+Antigravity is enabled by installing `multi-antigravity`. From a checkout, set
+`MULTI_ANTIGRAVITY=1` to show its models and workers. Run `--antigravity-setup`
+after the official `agy` login to install its scoped permission hook.

@@ -310,7 +310,7 @@ export function createNativeGateway({
       const unavailable = {
         cursor: 'Cursor SDK is not signed in. Run the launcher with --cursor-login first.',
         antigravity:
-          'Antigravity is unavailable. Enable its experimental CLI integration in the launcher.',
+          'Antigravity is unavailable. Install and connect the multi-antigravity plugin.',
       };
       throw new BadRequest(unavailable[provider]);
     }
