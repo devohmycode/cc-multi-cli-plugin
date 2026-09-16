@@ -33,12 +33,19 @@ const BUILTIN_WORKERS: Readonly<Record<string, WorkerPermissions>> = {
   'claude-code-guide': {},
 };
 
+export interface PluginPermissionInventory {
+  permissions: Record<string, WorkerPermissions>;
+  multiCoreEnabled: boolean;
+}
+
 export async function loadWorkerPermissions(
   cwd: string,
   supplied: Record<string, WorkerPermissions>,
   args: readonly string[] = [],
+  inventory?: PluginPermissionInventory,
 ): Promise<Record<string, WorkerPermissions>> {
-  const permissions = Object.assign(copy(BUILTIN_WORKERS), await pluginPermissions(cwd, args));
+  const pluginInventory = inventory ?? (await pluginPermissions(cwd, args));
+  const permissions = Object.assign(copy(BUILTIN_WORKERS), pluginInventory.permissions);
   const configDirectory = process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude');
   Object.assign(permissions, await loadScope(path.join(configDirectory, 'agents')));
   const root = await gitRoot(cwd);
@@ -172,7 +179,7 @@ export async function pluginPermissions(
   cwd: string,
   args: readonly string[],
   options: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv; executable?: string } = {},
-): Promise<Record<string, WorkerPermissions>> {
+): Promise<PluginPermissionInventory> {
   const environment = options.env ?? process.env;
   let executable: string;
   try {
@@ -214,6 +221,7 @@ export async function pluginPermissions(
     throw new Error('Invalid Claude plugin inventory');
   }
   const permissions: Record<string, WorkerPermissions> = Object.create(null);
+  let multiCoreEnabled = false;
   for (const plugin of plugins) {
     if (!plugin.enabled || (plugin.projectPath && !withinProject(cwd, plugin.projectPath))) {
       continue;
@@ -221,9 +229,10 @@ export async function pluginPermissions(
     if (typeof plugin.id !== 'string' || typeof plugin.installPath !== 'string') {
       throw new Error('Invalid enabled Claude plugin');
     }
+    multiCoreEnabled ||= plugin.id === 'multi-core@cc-multi-cli-plugin';
     Object.assign(permissions, await pluginAgents(plugin.installPath, plugin.id.split('@')[0]));
   }
-  return permissions;
+  return { permissions, multiCoreEnabled };
 }
 
 function pluginArguments(args: readonly string[]): string[] {

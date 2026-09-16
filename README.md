@@ -15,6 +15,10 @@ Multi brings external models and coding harnesses into one Claude Code session t
 
 [Quick start](#install) · [Providers](#providers) · [Documentation](#documentation) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
+![Claude Code: Fable 5.1 coordinating GPT-5.6 Luna, Grok 4.6, and Gemini 3.8 Flash workers](docs/assets/multi-provider-workers.svg)
+
+*Fable 5.1 coordinating GPT-5.6 Luna, Grok 4.6, and Gemini 3.8 Flash in one Claude Code session.*
+
 ## Why Multi?
 
 - **Choose your model in place.** Switch through `/model` and select supported reasoning effort with `/effort`.

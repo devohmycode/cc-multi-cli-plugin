@@ -49,12 +49,12 @@ test('launcher preserves native auth, disables unavailable auto mode, and merges
     path.join(cwd, 'bin'),
     `#!/usr/bin/env node
 const fs=require('node:fs');const args=process.argv.slice(2);
-if(args.includes('plugin')&&args.includes('list')){console.log('[]');process.exit(0)}
+if(args.includes('plugin')&&args.includes('list')){console.log(process.env.TEST_PLUGIN==='enabled'?JSON.stringify([{id:'multi-core@cc-multi-cli-plugin',enabled:true,installPath:process.cwd()}]):'[]');process.exit(0)}
 if(args[0]==='--version'){console.log(process.env.TEST_CLAUDE_VERSION??'2.1.272');process.exit(0)}
 const result=(value)=>{const base=process.env.MULTI_MOD_GATEWAY_URL;if(!base){console.log(value);return}const url=new URL(base+'/multi/mod/session');const req=require('node:http').request(url,{method:'POST',headers:{'content-type':'application/json','x-multi-gateway-token':process.env.MULTI_GATEWAY_TOKEN}},()=>console.log(value));req.on('error',()=>console.log(value));req.end(JSON.stringify({sessionId:'fixture',event:'start'}));};
 if(args[0]==='auth'){if(process.env.TEST_AUTH==='malformed'){console.log('not-json');process.exit(0)}if(process.env.TEST_AUTH==='error'){process.exit(2)}if(process.env.TEST_AUTH==='missing'){console.log('{}');process.exit(0)}process.stdout.write(JSON.stringify({loggedIn:process.env.TEST_AUTH==='yes'}));process.exitCode=process.env.TEST_AUTH==='yes'?0:1}else{
 const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'utf8'));
- result(JSON.stringify({agentView:process.env.CLAUDE_CODE_DISABLE_AGENT_VIEW,backgroundTasks:process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS,functionHooks:process.env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS,settings,models:args.filter(x=>x.startsWith('multi/')),settingsCount:args.filter(x=>x==='--settings').length,hasLocalToken:!!process.env.MULTI_GATEWAY_TOKEN,apiTimeout:process.env.API_TIMEOUT_MS,auth:process.env.ANTHROPIC_API_KEY?'api':process.env.ANTHROPIC_AUTH_TOKEN?'local':'native'}));}
+ result(JSON.stringify({agentView:process.env.CLAUDE_CODE_DISABLE_AGENT_VIEW,backgroundTasks:process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS,functionHooks:process.env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS,settings,models:args.filter(x=>x.startsWith('multi/')),args,settingsCount:args.filter(x=>x==='--settings').length,hasLocalToken:!!process.env.MULTI_GATEWAY_TOKEN,apiTimeout:process.env.API_TIMEOUT_MS,auth:process.env.ANTHROPIC_API_KEY?'api':process.env.ANTHROPIC_AUTH_TOKEN?'local':'native'}));}
 `,
   );
   const launcher = fileURLToPath(
@@ -92,6 +92,8 @@ const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'ut
       },
     );
     const result = JSON.parse(stdout);
+    assert.equal(result.args.at(-2), '--plugin-dir');
+    assert.equal(result.args.at(-1), path.resolve(path.dirname(launcher), '../../..'));
     assert.equal(result.settingsCount, 1);
     assert.equal(result.settings.disableAgentView, true);
     assert.equal(result.agentView, '1');
@@ -108,6 +110,33 @@ const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'ut
     assert.equal(result.auth, { no: 'local', api: 'api', yes: 'native' }[auth]);
     assert.equal(result.settings.hooks.PreToolUse?.length, 1);
   }
+  const baseEnvironment = {
+    PATH: path.join(cwd, 'bin') + path.delimiter + process.env.PATH,
+    HOME: cwd,
+    ...windowsHome(cwd),
+    CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
+    CODEX_HOME: cwd,
+  };
+  const enabled = JSON.parse(
+    (
+      await promisify(execFile)(process.execPath, [launcher], {
+        cwd,
+        timeout: 20000,
+        env: { ...baseEnvironment, TEST_PLUGIN: 'enabled' },
+      })
+    ).stdout,
+  );
+  assert(!enabled.args.includes('--plugin-dir'));
+  const supplied = JSON.parse(
+    (
+      await promisify(execFile)(
+        process.execPath,
+        [launcher, '--', '--plugin-dir', path.resolve(path.dirname(launcher), '../../..')],
+        { cwd, timeout: 20000, env: baseEnvironment },
+      )
+    ).stdout,
+  );
+  assert.equal(supplied.args.filter((arg: string) => arg === '--plugin-dir').length, 1);
   for (const auth of ['malformed', 'error', 'missing']) {
     await assert.rejects(
       promisify(execFile)(process.execPath, [launcher, '--', '--model', 'multi/cursor/auto'], {
@@ -373,7 +402,7 @@ console.log(rows.map(row=>row.join(String.fromCharCode(9))).join(String.fromChar
     bin,
     `#!/usr/bin/env node
 const fs=require('node:fs'); const {execFileSync}=require('node:child_process'); const args=process.argv.slice(2);
-if(args.includes('plugin')&&args.includes('list')){console.log('[]');process.exit(0)}
+if(args.includes('plugin')&&args.includes('list')){console.log(process.env.TEST_PLUGIN==='enabled'?JSON.stringify([{id:'multi-core@cc-multi-cli-plugin',enabled:true,installPath:process.cwd()}]):'[]');process.exit(0)}
 if(args[0]==='--version'){console.log(process.env.TEST_CLAUDE_VERSION??'2.1.272');process.exit(0)}
 const result=(value)=>{const base=process.env.MULTI_MOD_GATEWAY_URL;if(!base){console.log(value);return}const url=new URL(base+'/multi/mod/session');const req=require('node:http').request(url,{method:'POST',headers:{'content-type':'application/json','x-multi-gateway-token':process.env.MULTI_GATEWAY_TOKEN}},()=>console.log(value));req.on('error',()=>console.log(value));req.end(JSON.stringify({sessionId:'fixture',event:'start'}));};
 if(args[0]==='auth'){console.log('{"loggedIn":false}');process.exit(1)}

@@ -4,7 +4,10 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test, { mock } from 'node:test';
-import { loadWorkerPermissions } from '../../plugins/multi-core/src/gateway/agent-definitions.ts';
+import {
+  loadWorkerPermissions,
+  pluginPermissions,
+} from '../../plugins/multi-core/src/gateway/agent-definitions.ts';
 import { cursorPermissionPolicy } from '../../plugins/multi-cursor/src/permissions.ts';
 
 async function writeAgent(directory: string, name: string, source: string) {
@@ -107,6 +110,7 @@ test('discovers scoped plugin workers, manifest replacement paths and inherited 
     '---\nname: reader\ndescription: reader\ntools: Read, Grep\npermissionMode: bypassPermissions\n---\n',
   );
   inventory = [
+    { id: 'multi-core@cc-multi-cli-plugin', enabled: true, installPath: root, projectPath: root },
     { id: 'fixture@inline', enabled: true, installPath: root, projectPath: root },
     { id: 'disabled@test', enabled: false, installPath: '/does-not-exist' },
     {
@@ -116,6 +120,8 @@ test('discovers scoped plugin workers, manifest replacement paths and inherited 
       projectPath: '/elsewhere',
     },
   ];
+  const pluginInventory = await pluginPermissions(cwd, ['--plugin-dir', root]);
+  assert.equal(pluginInventory.multiCoreEnabled, true);
   const definitions = await loadWorkerPermissions(cwd, {}, ['--plugin-dir', root]);
   assert.deepEqual(definitions['fixture:reader'], {
     tools: ['Read', 'Grep'],

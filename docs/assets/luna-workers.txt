@@ -1,0 +1,24 @@
+ ▐▛███▛█   Claude Code v2.1.273
+▝▜██████▀  Fable 5.1 with high effort · Claude Max
+  ▝▝ ▝▝    ~/Software/cc-multi-cli-plugin
+
+
+❯ Use 4 openai-luna workers in parallel to review this repo: installation, provider isolation, session resume, and test
+  coverage. Read-only; each returns its top 2 findings. Then summarize.
+
+● Spawning four read-only openai-luna reviewers in parallel.
+
+● 2 background agents launched (↓ to manage)
+   ├ Review installation
+   └ Review provider isolation
+
+✢ Tomfoolering… (20s · ↓ 952 tokens)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on
+
+  ● main
+  ◯ openai-luna  Review installation                                                               9s · ↓ 11.0k tokens
+  ◯ openai-luna  Review provider isolation                                                         2s · ↑ 10.5k tokens

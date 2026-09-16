@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1504" height="792" viewBox="0 0 1504 792" role="img" aria-labelledby="title description">
+<title id="title">Fable 5.1 coordinating Luna, Grok, and Gemini workers</title>
+<desc id="description">Fable 5.1 coordinating two GPT-5.6 Luna workers alongside Grok 4.6 via Cursor and Gemini 3.8 Flash via Antigravity in one Claude Code session.</desc>
+<rect width="1504" height="792" fill="#161616"/>
+<g fill="#ededed" font-family="Source Code Pro, DejaVu Sans Mono, monospace" font-size="20" style="white-space:pre" xml:space="preserve">
+<text x="32" y="52" textLength="372" lengthAdjust="spacingAndGlyphs">&#160;▐▛███▛█&#160;&#160;&#160;Claude&#160;Code&#160;v2.1.273</text>
+<text x="32" y="78" textLength="600" lengthAdjust="spacingAndGlyphs">▝▜██████▀&#160;&#160;Fable&#160;5.1&#160;with&#160;high&#160;effort&#160;·&#160;Claude&#160;Max</text>
+<text x="32" y="104" textLength="492" lengthAdjust="spacingAndGlyphs">&#160;&#160;▝▝&#160;▝▝&#160;&#160;&#160;&#160;~/Software/cc-multi-cli-plugin</text>
+<text x="32" y="182" textLength="1140" lengthAdjust="spacingAndGlyphs">❯&#160;Use&#160;two&#160;GPT-5.6&#160;Luna&#160;workers,&#160;Grok&#160;4.6,&#160;and&#160;Gemini&#160;3.8&#160;Flash&#160;to&#160;review&#160;this&#160;repo&#160;in&#160;parallel.</text>
+<text x="32" y="208" textLength="1308" lengthAdjust="spacingAndGlyphs">&#160;&#160;Read-only:&#160;installation,&#160;provider&#160;isolation,&#160;session&#160;resume,&#160;and&#160;test&#160;coverage.&#160;Return&#160;your&#160;top&#160;2&#160;findings.</text>
+<text x="32" y="260" textLength="900" lengthAdjust="spacingAndGlyphs">●&#160;Spawning&#160;four&#160;read-only&#160;reviewers&#160;across&#160;OpenAI,&#160;Cursor,&#160;and&#160;Antigravity.</text>
+<text x="32" y="312" textLength="528" lengthAdjust="spacingAndGlyphs">●&#160;4&#160;background&#160;agents&#160;launched&#160;(↓&#160;to&#160;manage)</text>
+<text x="32" y="338" textLength="288" lengthAdjust="spacingAndGlyphs">&#160;&#160;&#160;├&#160;Review&#160;installation</text>
+<text x="32" y="364" textLength="360" lengthAdjust="spacingAndGlyphs">&#160;&#160;&#160;├&#160;Review&#160;provider&#160;isolation</text>
+<text x="32" y="390" textLength="312" lengthAdjust="spacingAndGlyphs">&#160;&#160;&#160;├&#160;Review&#160;session&#160;resume</text>
+<text x="32" y="416" textLength="300" lengthAdjust="spacingAndGlyphs">&#160;&#160;&#160;└&#160;Review&#160;test&#160;coverage</text>
+<text x="32" y="468" textLength="432" lengthAdjust="spacingAndGlyphs">✢&#160;Tomfoolering…&#160;(20s&#160;·&#160;↓&#160;952&#160;tokens)</text>
+<text x="32" y="520" textLength="1440" lengthAdjust="spacingAndGlyphs">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="32" y="546" textLength="24" lengthAdjust="spacingAndGlyphs">❯&#160;</text>
+<text x="32" y="572" textLength="1440" lengthAdjust="spacingAndGlyphs">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="32" y="598" textLength="216" lengthAdjust="spacingAndGlyphs">&#160;&#160;⏸&#160;manual&#160;mode&#160;on</text>
+<text x="32" y="650" textLength="96" lengthAdjust="spacingAndGlyphs">&#160;&#160;●&#160;main</text>
+<text x="32" y="676" textLength="1428" lengthAdjust="spacingAndGlyphs">&#160;&#160;◯&#160;openai-luna&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;Review&#160;installation&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;9s&#160;·&#160;↓&#160;11.0k&#160;tokens</text>
+<text x="32" y="702" textLength="1428" lengthAdjust="spacingAndGlyphs">&#160;&#160;◯&#160;openai-luna&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;Review&#160;provider&#160;isolation&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;2s&#160;·&#160;↑&#160;10.5k&#160;tokens</text>
+<text x="32" y="728" textLength="1428" lengthAdjust="spacingAndGlyphs">&#160;&#160;◯&#160;cursor-grok-4-6&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;Review&#160;session&#160;resume&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;2s</text>
+<text x="32" y="754" textLength="1428" lengthAdjust="spacingAndGlyphs">&#160;&#160;◯&#160;antigravity-gemini-3.8-flash&#160;&#160;Review&#160;test&#160;coverage&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;1s</text>
+</g>
+</svg>

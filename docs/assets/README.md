@@ -23,3 +23,29 @@ Other marks are editable vector interpretations for this banner, not official br
 
 The accent is Anthropic orange `#d97757`, with `#faf9f5` light text from [Anthropic’s brand guidelines](https://github.com/anthropics/skills/blob/main/skills/brand-guidelines/SKILL.md).
 The background is pure black (`#000000`), with no gradient or texture.
+
+## Luna worker showcase
+
+`luna-workers.png` is a rendered capture of a real Claude Code 2.1.273 terminal
+session on September 16, 2026, using this repository's launcher, native Claude
+Fable 5.1, and `openai-luna` workers backed by GPT-5.6 Luna.
+
+The frame shows the first two workers starting during a four-worker read-only
+request. The demo was stopped after capture to limit usage; the image does not
+claim completed reviews. Terminal text and counters are unchanged. The captured
+session used monochrome output; the PNG uses Source Code Pro on a dark background
+with unused terminal rows trimmed. No model-generated UI or invented results.
+
+`luna-workers.txt` preserves the visible terminal text used for the image.
+
+## Multi-provider worker showcase
+
+`multi-provider-workers.svg` is the README's editable illustration, based on the
+real Luna capture above. It adds Grok 4.6 through Cursor and Gemini 3.8 Flash
+through Antigravity alongside two GPT-5.6 Luna workers. The prompt, launch list,
+worker rows, and additional elapsed times are edited to illustrate the combined
+workflow; they are not evidence of a live mixed-provider run. No extra inference
+was used to create this version. The README caption describes the multi-provider workflow.
+
+Edit the SVG text elements directly. The asset is self-contained, with accessible
+title and description, no scripts, and no external fonts or image requests.

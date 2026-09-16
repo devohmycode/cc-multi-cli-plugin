@@ -10,6 +10,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ### Documentation
 
+- Feature an editable SVG demo of Fable 5.1 coordinating GPT-5.6 Luna, Grok 4.6,
+  and Gemini 3.8 Flash workers, retaining its original live Luna terminal capture
+  and recording the editing details in the asset notes.
+
 - Add README navigation, CI status, feature highlights, provider documentation links,
   and expandable setup details. Add a contributor quick start and pull-request
   template; refresh issue forms for all four integrations and remove outdated

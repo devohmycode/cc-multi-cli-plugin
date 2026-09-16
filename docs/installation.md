@@ -72,10 +72,10 @@ MULTI_ANTIGRAVITY=1 node plugins/multi-core/src/launcher.ts
 node plugins/multi-core/src/launcher.ts --antigravity-setup
 ```
 
-The launcher relies on the installed `multi-core` plugin for its Claude Mods
-hooks, so install the plugins from the checkout first:
-`/plugin marketplace add /path/to/checkout` followed by the plugin installs
-above. Antigravity is enabled by installing `multi-antigravity`. From a
-checkout, set `MULTI_ANTIGRAVITY=1` to show its models and workers. Run
-`--antigravity-setup` after the official `agy` login to install its scoped
-permission hook.
+The launcher loads the checkout's `multi-core` plugin itself when the plugins
+are not installed, so the Claude Mods hooks work immediately from a checkout.
+You can still install the plugins from the checkout with `/plugin marketplace add
+/path/to/checkout` followed by the plugin installs above. Antigravity is enabled
+by installing `multi-antigravity`. From a checkout, set `MULTI_ANTIGRAVITY=1` to
+show its models and workers. Run `--antigravity-setup` after the official `agy`
+login to install its scoped permission hook.

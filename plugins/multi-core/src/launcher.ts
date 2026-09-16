@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,7 +29,11 @@ import type { Effort } from '../../multi-openai/src/responses.ts';
 import { readZenKey } from '../../multi-zen/src/auth.ts';
 import { ZEN_MODELS, ZEN_WORKERS, zenPickerOptions } from '../../multi-zen/src/models.ts';
 import { AgentCatalog } from './gateway/agent-catalog.ts';
-import { loadWorkerPermissions } from './gateway/agent-definitions.ts';
+import {
+  loadWorkerPermissions,
+  type PluginPermissionInventory,
+  pluginPermissions,
+} from './gateway/agent-definitions.ts';
 import { checkCursorSettings } from './gateway/cursor-settings.ts';
 import { executableInvocation, resolveExecutable } from './gateway/executable.ts';
 import { ModBridge } from './gateway/mod-bridge.ts';
@@ -86,6 +90,8 @@ async function main() {
     args.shift();
   }
   validateSessionLaunch(args);
+  const pluginInventory = await pluginPermissions(process.cwd(), args);
+  const pluginRoot = await findPluginRoot(fileURLToPath(import.meta.url));
   await assertFunctionHooksSupported();
   const anthropic = await anthropicSignedIn();
   const cursorPicker = cursorPickerOptions(
@@ -120,7 +126,13 @@ async function main() {
   const callerSettingsFile = path.join(settingsDir, 'caller-settings.json');
   await writeFile(callerSettingsFile, JSON.stringify(callerSettings), { mode: 0o600 });
   const permissionModes = new PermissionModes(
-    (cwd) => loadWorkerPermissions(cwd, agents, [...args, '--settings', callerSettingsFile]),
+    (cwd) =>
+      loadWorkerPermissions(
+        cwd,
+        agents,
+        [...args, '--settings', callerSettingsFile],
+        pluginInventory,
+      ),
     async (cwd) => {
       if (!cursor && !antigravity) {
         return {};
@@ -178,9 +190,16 @@ async function main() {
     configuredPath: claudeExecutable,
     env: childEnvironment,
   });
+  const childArguments = launcherArguments(
+    args,
+    settingsFile,
+    definitions,
+    pluginInventory,
+    pluginRoot,
+  );
   const childInvocation = executableInvocation(
     claudePath,
-    ['--settings', settingsFile, '--agents', definitions, ...args],
+    childArguments,
     process.platform,
     childEnvironment,
   );
@@ -871,4 +890,34 @@ async function discoverAntigravity() {
 
 function isMissingExecutable(error: unknown): boolean {
   return recordValue(error)?.code === 'ENOENT';
+}
+
+async function findPluginRoot(file: string): Promise<string> {
+  for (let directory = path.dirname(path.resolve(file)); ; directory = path.dirname(directory)) {
+    try {
+      await stat(path.join(directory, '.claude-plugin', 'plugin.json'));
+      return directory;
+    } catch {
+      const parent = path.dirname(directory);
+      if (parent === directory) {
+        throw new Error(`Could not find the Multi plugin root above ${file}`);
+      }
+    }
+  }
+}
+
+function hasPluginDirectory(args: readonly string[]): boolean {
+  return args.some((arg) => arg === '--plugin-dir' || arg.startsWith('--plugin-dir='));
+}
+
+function launcherArguments(
+  args: readonly string[],
+  settingsFile: string,
+  definitions: string,
+  inventory: PluginPermissionInventory,
+  pluginRoot: string,
+): string[] {
+  const pluginDirectory =
+    !inventory.multiCoreEnabled && !hasPluginDirectory(args) ? ['--plugin-dir', pluginRoot] : [];
+  return ['--settings', settingsFile, '--agents', definitions, ...args, ...pluginDirectory];
 }
