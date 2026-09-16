@@ -7,10 +7,8 @@
     "test/live/*.ts",
     "plugins/multi-core/src/setup.ts",
     "plugins/multi-core/src/account.ts",
-    "plugins/multi-core/src/install/bootstrap.ts",
-    "test/watchdog.ts"
+    "plugins/multi-core/src/install/bootstrap.ts"
   ],
   "project": ["plugins/*/src/**/*.ts", "test/**/*.ts"],
-  "ignore": ["plugins/multi-core/hooks/**/*.ts"],
-  "ignoreBinaries": ["codex"]
+  "ignore": ["plugins/multi-core/hooks/**/*.ts"]
 }
