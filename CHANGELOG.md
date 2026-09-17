@@ -6,6 +6,31 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Restore missing parent permission context from the next Claude tool call. The
+  gateway now re-runs its settings-policy admission with the hook's current mode
+  and workspace, so worker spawning recovers when prompt admission was missed.
+  Recovery waits only within the hook budget and remains unavailable when the
+  real settings policy cannot be loaded; it never invents unrestricted tools or
+  falls back to bypass mode (#20).
+
+- Recover the policy generation after a hooks-module reload. The module kept
+  the gateway's mode generation in memory only; a reload (or any desync) left
+  it behind the gateway's, so `/multi/mod/policy` refused every later prompt as
+  stale and each submission was blocked with `Multi policy is not ready; submit
+  the prompt again.` with nothing able to resync it. A refused begin now reads
+  the gateway's own mode generation once and retries; a matching generation
+  still never re-reads it, and admission still fails closed when the gateway
+  holds no generation to adopt.
+
+- Report the gateway's own reason when a worker is refused. Worker admission
+  replies that were not 2xx were discarded, so every refusal reached the user as
+  the generic `Multi worker policy was not acknowledged.` and hid recoverable
+  causes such as `Claude permission mode is unavailable; submit a new prompt`.
+  Spawn denials, worker-start blocks, and prompt-snapshot blocks now carry the
+  gateway message, and a non-JSON body reports its status instead. A refused
+  reply contributes only that reason, so a non-2xx status still fails closed
+  whatever its body claims (#20).
+
 - Add a session-only quota-aware model selection toggle to `/multi-usage`.
   An optional main-agent hook suggests the least-used suitable subscription
   on main-agent `Agent`/`Task` calls before tool execution. Guidance is advisory: no model overrides, spawn

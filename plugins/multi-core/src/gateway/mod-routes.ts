@@ -193,6 +193,8 @@ function sessionRoute(
   if (generation !== undefined && generation !== bridge.mode(key)?.generation) {
     return reply(res, { accepted: false, stale: true }, 409);
   }
+  // A snapshot without a mode admits no policy and never blocks the prompt: the
+  // next tool call restores the parent context through `recoverPolicy`.
   if (permissionModes && typeof effective.permissionMode === 'string') {
     const context: PermissionContext = {
       ...effective,

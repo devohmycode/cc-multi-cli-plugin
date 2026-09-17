@@ -597,11 +597,19 @@ export function createNativeGateway({
     }
     retainContext(scope, external, body, identity, agentId);
   }
-  function sendPermissionDecision({ req, res, parsed }: ProviderRequest) {
+  async function sendPermissionDecision({ req, res, parsed }: ProviderRequest) {
     if (req.method !== 'POST') {
       throw new BadRequest('Permission hook requires POST');
     }
     const decision = permissionHook(parsed);
+    if (
+      permissionModes &&
+      typeof parsed.session_id === 'string' &&
+      typeof parsed.cwd === 'string' &&
+      path.isAbsolute(parsed.cwd)
+    ) {
+      await permissionModes.recoverPolicy(parsed.session_id, parsed.cwd, parsed.permission_mode);
+    }
     res.writeHead(200, { 'content-type': 'application/json' });
     return res.end(JSON.stringify(decision));
   }

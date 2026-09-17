@@ -23,6 +23,8 @@ type DisplayInput = {
 };
 
 type GatewayResponse = {
+  refused?: true;
+  error?: string;
   output?: string;
   isError?: boolean;
   terminal?: boolean;
@@ -130,12 +132,13 @@ export const register: Register = (on, options) => {
     if (!(await active($))) {
       return next(event);
     }
-    const policyGeneration = await preparePolicy($, event.session_id, event.cwd, generation);
-    if (!policyGeneration) {
+    const prepared = await preparePolicy($, event.session_id, event.cwd, generation);
+    if (!prepared) {
       return { block: 'Multi policy is not ready; submit the prompt again.' };
     }
+    generation = prepared.generation;
     const response = await request($, '/multi/mod/session', {
-      policyGeneration,
+      policyGeneration: prepared.policyGeneration,
       sessionId: event.session_id,
       cwd: event.cwd,
       model: await $.session.model(),
@@ -144,8 +147,11 @@ export const register: Register = (on, options) => {
       permissionMode: event.permission_mode,
     });
     if (!response?.accepted) {
+      const reason = response?.error;
       return {
-        block: 'Multi permission snapshot was not acknowledged; native execution is unavailable.',
+        block: reason
+          ? `Multi permission snapshot was not acknowledged: ${reason}`
+          : 'Multi permission snapshot was not acknowledged; native execution is unavailable.',
       };
     }
     generation = typeof response.generation === 'number' ? response.generation : undefined;
@@ -159,12 +165,13 @@ export const register: Register = (on, options) => {
     if (typeof permissionMode !== 'string') {
       return next(event);
     }
-    const policyGeneration = await preparePolicy($, event.session_id, event.cwd, generation);
-    if (!policyGeneration) {
+    const prepared = await preparePolicy($, event.session_id, event.cwd, generation);
+    if (!prepared) {
       return next(event);
     }
+    generation = prepared.generation;
     const response = await request($, '/multi/mod/session', {
-      policyGeneration,
+      policyGeneration: prepared.policyGeneration,
       sessionId: event.session_id,
       cwd: event.cwd,
       model: await $.session.model(),
@@ -195,7 +202,7 @@ async function request($: EngineInterface, route: string, payload: Record<string
   if (encodeURIComponent(body).replace(/%[A-F\d]{2}/gi, 'x').length > maxBody) {
     return undefined;
   }
-  const isGet = route.startsWith('/multi/mod/display?');
+  const isGet = route.startsWith('/multi/mod/display?') || route.startsWith('/multi/mod/mode?');
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const response = $.http.fetch(`${base}${route}`, {
@@ -207,7 +214,7 @@ async function request($: EngineInterface, route: string, payload: Record<string
       timer = setTimeout(() => reject(new Error('gateway request timeout')), 1500);
     });
     const result = await Promise.race([response, timeout]);
-    return result.ok ? (JSON.parse(result.text) as GatewayResponse) : undefined;
+    return result.ok ? (JSON.parse(result.text) as GatewayResponse) : refusal(result);
   } catch {
     return undefined;
   } finally {
@@ -217,31 +224,70 @@ async function request($: EngineInterface, route: string, payload: Record<string
   }
 }
 
-async function preparePolicy(
+// A refused reply keeps the gateway's reason; `refused` stops polling callers.
+function refusal(result: { text: string; status: number }): GatewayResponse {
+  let error: string | undefined;
+  try {
+    const parsed: unknown = JSON.parse(result.text);
+    if (parsed && typeof parsed === 'object') {
+      error = (parsed as { error?: unknown }).error as string | undefined;
+    }
+  } catch {
+    // A non-JSON body still names the status below.
+  }
+  return { refused: true, error: error ?? `gateway ${result.status}` };
+}
+
+type PolicyHandoff = { policyGeneration: string; generation: number | undefined };
+
+/** Exported for offline coverage of the stale-generation resync. */
+export async function preparePolicy(
   $: EngineInterface,
   sessionId: string,
   cwd: string,
   sourceGeneration: number | undefined,
-) {
-  const started = await request($, '/multi/mod/policy', { sessionId, cwd, sourceGeneration });
-  if (typeof started?.generation !== 'string') {
+): Promise<PolicyHandoff | undefined> {
+  let generation = sourceGeneration;
+  let started = await request($, '/multi/mod/policy', { sessionId, cwd, sourceGeneration });
+  if (started?.refused) {
+    // A reloaded hooks module forgets the mode generation the gateway still holds,
+    // and every later prompt would read stale. Adopt the gateway's own value once.
+    const resynced = await modeGeneration($, sessionId);
+    if (resynced === undefined || resynced === generation) {
+      return undefined;
+    }
+    generation = resynced;
+    started = await request($, '/multi/mod/policy', {
+      sessionId,
+      cwd,
+      sourceGeneration: generation,
+    });
+  }
+  if (started?.refused || typeof started?.generation !== 'string') {
     return undefined;
   }
+  const policyGeneration = await awaitPolicy($, sessionId, started.generation);
+  return policyGeneration === undefined ? undefined : { policyGeneration, generation };
+}
+
+async function awaitPolicy($: EngineInterface, sessionId: string, generation: string) {
   // Policy discovery runs `claude plugin list` and settings admission; on a
   // cold Windows start that takes several seconds. Stay under the 10 s hook budget.
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
-    const result = await request($, '/multi/mod/policy', {
-      sessionId,
-      generation: started.generation,
-    });
+    const result = await request($, '/multi/mod/policy', { sessionId, generation });
     if (result?.status === 'ready') {
-      return started.generation;
+      return generation;
     }
-    if (!result || result.status === 'failed') {
+    if (!result || result.refused || result.status === 'failed') {
       return undefined;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return undefined;
+}
+
+async function modeGeneration($: EngineInterface, sessionId: string) {
+  const mode = await request($, `/multi/mod/mode?sessionId=${encodeURIComponent(sessionId)}`, {});
+  return typeof mode?.generation === 'number' ? mode.generation : undefined;
 }

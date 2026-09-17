@@ -9,6 +9,23 @@ type GatewayResponse = {
   isOffered?: boolean;
 };
 
+// A refused reply keeps only the reason: a non-2xx status never carries an
+// acknowledgement, so every caller still fails closed on the HTTP status alone.
+function refusal(text: string, status: number): GatewayResponse {
+  let reason: string | undefined;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed && typeof parsed === 'object') {
+      const value = (parsed as { error?: unknown }).error;
+      reason = typeof value === 'string' && value ? value : undefined;
+    }
+  } catch {
+    // A non-JSON body still names the status below.
+  }
+  const detail = text.trim().slice(0, 200);
+  return { error: reason ?? (detail ? `gateway ${status}: ${detail}` : `gateway ${status}`) };
+}
+
 export const register: Register = (on) => {
   on('agent.offer', async ($, event, next) => {
     if (!(await active($))) {
@@ -96,7 +113,9 @@ async function request(
       timer = setTimeout(() => reject(new Error('gateway request timeout')), 1500);
     });
     const result = await Promise.race([response, timeout]);
-    return result.ok ? (JSON.parse(result.text) as GatewayResponse) : undefined;
+    return result.ok
+      ? (JSON.parse(result.text) as GatewayResponse)
+      : refusal(result.text, result.status);
   } catch {
     return undefined;
   } finally {

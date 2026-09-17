@@ -9,12 +9,14 @@ async function start(
   t: test.TestContext,
   permissionModes?: PermissionModes,
   antigravity?: Parameters<typeof createNativeGateway>[0]['antigravity'],
+  guardAuto?: boolean,
 ) {
   const server = createNativeGateway({
     token: 'mod-token',
     authFile: 'unused',
     permissionModes,
     antigravity,
+    guardAuto,
     modBridge: new ModBridge(),
   });
   t.after(() => {
@@ -65,6 +67,61 @@ test('PermissionModes refuses native resolution until an acknowledged prompt sna
   assert.throws(() => modes.resolve('missing'), /permission mode is unavailable/);
   modes.recordModSession('session', { permissionMode: 'plan', cwd: '/tmp' });
   assert.equal(modes.resolve('session').permissionMode, 'plan');
+});
+
+test('permission tool calls recover the same settings-admitted parent policy', async (t) => {
+  const restrictions = { tools: ['Read'], disallowedTools: ['Bash'] };
+  const definitions = { worker: { tools: ['Read'] } };
+  const modes = new PermissionModes(
+    async () => definitions,
+    async () => restrictions,
+  );
+  const normalPolicy = modes.beginPolicy('normal', '/workspace');
+  await setImmediate();
+  modes.admitPolicy('normal', normalPolicy.generation, {
+    permissionMode: 'plan',
+    cwd: '/workspace',
+  });
+  const base = await start(t, modes, undefined, true);
+  const recovered = await request(base, '/multi/permission', {
+    hook_event_name: 'PreToolUse',
+    session_id: 'recovered',
+    cwd: '/workspace',
+    permission_mode: 'plan',
+    tool_name: 'Read',
+    tool_use_id: 'tool-1',
+  });
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(modes.resolve('recovered'), modes.resolve('normal'));
+  assert.deepEqual(modes.resolve('recovered'), {
+    permissionMode: 'plan',
+    cwd: '/workspace',
+    tools: ['Read'],
+    disallowedTools: ['Bash'],
+    nativePermissionError: undefined,
+  });
+  await modes.prepareModWorker('recovered', {
+    subagentType: 'worker',
+    permissionMode: 'plan',
+    cwd: '/workspace',
+  });
+});
+
+test('permission recovery keeps the parent absent until real policy admission completes', async () => {
+  let finish: ((value: { tools: string[] }) => void) | undefined;
+  const modes = new PermissionModes(
+    async () => ({}),
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  assert.equal(await modes.recoverPolicy('session', '/workspace', 'bypassPermissions', 0), false);
+  assert.throws(() => modes.resolve('session'), /permission mode is unavailable/i);
+  finish?.({ tools: ['Read'] });
+  await setImmediate();
+  assert.equal(await modes.recoverPolicy('session', '/workspace', 'bypassPermissions', 100), true);
+  assert.deepEqual(modes.resolve('session').tools, ['Read']);
 });
 
 test('PermissionModes retains a tool-free compaction boundary and acknowledges workers', async () => {
@@ -310,4 +367,32 @@ test('two-phase compaction invokes the native fixture once without tools or orig
     undefined,
     'ready summary does not poison normal dispatch',
   );
+});
+
+test('a prompt snapshot without a permission mode admits no policy but never blocks', async (t) => {
+  const modes = new PermissionModes(async () => ({}));
+  const base = await start(t, modes);
+  const accepted = await request(base, '/multi/mod/session', {
+    sessionId: 'prompt',
+    event: 'prompt',
+    cwd: '/workspace',
+    policyGeneration: 'policy-1',
+  });
+  // The prompt is never refused over a missing mode; the user keeps working.
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.body.accepted, true);
+  // No mode means no admitted policy: the next tool call recovers it instead.
+  assert.throws(() => modes.resolve('prompt'), /permission mode is unavailable/i);
+});
+
+test('a session start snapshot still records without carrying a permission mode', async (t) => {
+  const modes = new PermissionModes(async () => ({}));
+  const base = await start(t, modes);
+  const started = await request(base, '/multi/mod/session', {
+    sessionId: 'start-only',
+    event: 'start',
+    cwd: '/workspace',
+  });
+  assert.equal(started.status, 200);
+  assert.equal(started.body.accepted, true);
 });

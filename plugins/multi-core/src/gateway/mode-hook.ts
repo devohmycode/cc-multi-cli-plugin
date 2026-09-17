@@ -78,6 +78,37 @@ export class PermissionModes {
     });
   }
 
+  async recoverPolicy(
+    session: string,
+    cwd: string,
+    observedMode: unknown,
+    timeoutMs = 4000,
+  ): Promise<boolean> {
+    if (this.parents.has(session)) {
+      return false;
+    }
+    const admittedCwd = requiredString(cwd, 'cwd');
+    const context: PermissionContext = {
+      permissionMode: permissionMode(observedMode),
+      cwd: admittedCwd,
+    };
+    const started = this.beginPolicy(requiredString(session, 'session_id'), admittedCwd);
+    const deadline = Date.now() + timeoutMs;
+    let status = this.policies.status(session, started.generation);
+    while (status.status === 'pending' && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      status = this.policies.status(session, started.generation);
+    }
+    if (this.parents.has(session)) {
+      return false;
+    }
+    if (status.status !== 'ready') {
+      return false;
+    }
+    this.admitPolicy(session, started.generation, context);
+    return true;
+  }
+
   async precompute(cwd: string): Promise<void> {
     const catalog = await this.definitions(cwd);
     remember(this.catalogs, cwd, structuredClone(catalog));
