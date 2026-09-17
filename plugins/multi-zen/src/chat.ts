@@ -1,3 +1,4 @@
+import { isDirectToolAvailable } from '../../multi-core/src/gateway/direct-tools.ts';
 import type {
   ContentBlock,
   Emit,
@@ -272,9 +273,8 @@ function toolResult(block: ContentBlock): string | ChatContent[] {
     throw new Error('Invalid tool result');
   }
   const content = blocks(block.content ?? '');
-  if (content.every((item) => item.type === 'text')) {
-    const value = content.map((item) => item.text as string).join('');
-    return block.is_error ? `Tool error:\n${value}` : value;
+  if (content.every((item) => item.type === 'text' || item.type === 'tool_reference')) {
+    return plainToolResult(content, block.is_error);
   }
   const result: ChatContent[] = [];
   if (block.is_error) {
@@ -285,11 +285,30 @@ function toolResult(block: ContentBlock): string | ChatContent[] {
       result.push({ type: 'text', text: string(item.text, 'tool result text') });
     } else if (item.type === 'image') {
       result.push(image(item));
+    } else if (item.type === 'tool_reference' && item.tool_name) {
+      result.push({ type: 'text', text: `Available tool: ${toolName(item.tool_name)}` });
     } else {
       throw new Error(`Unsupported tool result content: ${item.type}`);
     }
   }
   return result;
+}
+
+function plainToolResult(content: ContentBlock[], isError: boolean | undefined): string {
+  const value = content
+    .filter((item) => item.type === 'text')
+    .map((item) => item.text as string)
+    .join('');
+  const references = content
+    .filter((item) => item.type === 'tool_reference')
+    .map((item) => {
+      if (!item.tool_name) {
+        throw new Error('Missing referenced tool name');
+      }
+      return `Available tool: ${toolName(item.tool_name)}`;
+    });
+  const combined = [...references, value].filter(Boolean).join('\n');
+  return isError ? `Tool error:\n${combined}` : combined;
 }
 
 function toolChoice(body: MessagesRequest, tools: ChatTool[]) {
@@ -321,6 +340,8 @@ export function toChat(body: MessagesRequest, model: string): ChatRequest {
     throw new Error('tools must be an array');
   }
   const messages = chatMessages(body, model);
+  // Claude's tool-search flow keeps deferred schemas out of the initial model
+  // request. A loaded tool is resent without defer_loading on the next turn.
   const tools = chatTools(body);
   validateStops(body.stop_sequences);
   const result: ChatRequest = {
@@ -389,25 +410,37 @@ function lowerUserBlocks(content: ContentBlock[], messages: ChatMessage[]) {
 }
 
 function chatTools(body: MessagesRequest): ChatTool[] {
-  return (body.tools ?? []).map((tool) => {
-    if (!record(tool) || (tool.type !== undefined && tool.type !== 'custom')) {
-      throw new Error('Invalid tool');
-    }
-    if (typeof tool.name !== 'string' || !tool.name.trim() || !record(tool.input_schema)) {
-      throw new Error('Invalid function tool');
-    }
-    if (tool.description !== undefined && typeof tool.description !== 'string') {
-      throw new Error('Invalid tool description');
-    }
-    return {
-      type: 'function',
-      function: {
-        name: toolName(tool.name),
-        description: tool.description ?? '',
-        parameters: tool.input_schema,
-      },
-    };
-  });
+  return (body.tools ?? [])
+    .filter(
+      (tool) =>
+        !isDeferredTool(tool) ||
+        (record(tool) && typeof tool.name === 'string' && isDirectToolAvailable(body, tool.name)),
+    )
+    .map(chatTool);
+}
+
+function isDeferredTool(tool: unknown): boolean {
+  return record(tool) && tool.defer_loading === true;
+}
+
+function chatTool(tool: unknown): ChatTool {
+  if (!record(tool) || (tool.type !== undefined && tool.type !== 'custom')) {
+    throw new Error('Invalid tool');
+  }
+  if (typeof tool.name !== 'string' || !tool.name.trim() || !record(tool.input_schema)) {
+    throw new Error('Invalid function tool');
+  }
+  if (tool.description !== undefined && typeof tool.description !== 'string') {
+    throw new Error('Invalid tool description');
+  }
+  return {
+    type: 'function',
+    function: {
+      name: toolName(tool.name),
+      description: tool.description ?? '',
+      parameters: tool.input_schema,
+    },
+  };
 }
 
 function validateStops(stops: unknown) {

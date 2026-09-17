@@ -99,7 +99,10 @@ globalThis.fetch = async (url, init) => {
         },
       );
       const settings = JSON.parse(stdout);
-      assert.equal(settings.permissions?.disableAutoMode, review === 'yes' ? undefined : 'disable');
+      assert.equal(
+        settings.permissions?.disableAutoMode,
+        review === 'yes' || auth !== 'no' ? undefined : 'disable',
+      );
       assert.equal(settings.hooks.PreToolUse.length, 1);
     }
   }

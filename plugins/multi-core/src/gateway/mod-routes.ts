@@ -166,9 +166,15 @@ async function handlePostRoute(
       return sessionRoute(res, parsed, key, bridge, permissionModes);
     case '/multi/mod/offer':
       return reply(res, {
+        ...permissionModes?.workerSelection({ ...parsed, subagentType: parsed.agent }),
         isOffered:
           permissionModes?.offered(text(parsed.cwd, 'cwd'), text(parsed.agent, 'agent')) ?? false,
       });
+    case '/multi/mod/worker-model':
+      if (!permissionModes) {
+        throw new Error('Worker catalog is unavailable');
+      }
+      return reply(res, permissionModes.workerSelection(parsed));
     case '/multi/mod/worker':
       return await workerRoute(res, parsed, key, bridge, permissionModes);
     default:
@@ -193,8 +199,7 @@ function sessionRoute(
   if (generation !== undefined && generation !== bridge.mode(key)?.generation) {
     return reply(res, { accepted: false, stale: true }, 409);
   }
-  // A snapshot without a mode admits no policy and never blocks the prompt: the
-  // next tool call restores the parent context through `recoverPolicy`.
+  // A snapshot without a mode admits no policy and never blocks Claude's prompt.
   if (permissionModes && typeof effective.permissionMode === 'string') {
     const context: PermissionContext = {
       ...effective,
@@ -202,7 +207,15 @@ function sessionRoute(
       model: value.model === undefined ? undefined : text(value.model, 'model'),
       cwd: optionalText(value.cwd),
     };
-    permissionModes.admitPolicy(session, text(value.policyGeneration, 'policyGeneration'), context);
+    if (value.policyGeneration !== undefined) {
+      permissionModes.admitPolicy(
+        session,
+        text(value.policyGeneration, 'policyGeneration'),
+        context,
+      );
+    } else {
+      permissionModes.recordHostSession(session, context);
+    }
   }
   const snapshot = bridge.recordSession(key, {
     effective,
@@ -234,11 +247,16 @@ async function workerRoute(
       text(value.subagentType, 'subagentType'),
       text(value.cwd, 'cwd'),
     );
-    return reply(res, { accepted: true });
+    return reply(res, {
+      accepted: true,
+      model: permissionModes.resolve(session, value.agentId).model,
+    });
   }
-  const snapshot = bridge.mode(sessionKey(session, undefined));
-  if (!snapshot || value.generation !== snapshot.generation) {
-    throw new Error('Worker policy generation is unavailable or stale');
+  if (permissionModes.workerSelection(value).execution === 'harness') {
+    const snapshot = bridge.mode(sessionKey(session, undefined));
+    if (!snapshot || value.generation !== snapshot.generation) {
+      throw new Error('Worker policy generation is unavailable or stale');
+    }
   }
   const workerToken = await permissionModes.prepareModWorker(session, value);
   return reply(res, { accepted: true, workerToken });

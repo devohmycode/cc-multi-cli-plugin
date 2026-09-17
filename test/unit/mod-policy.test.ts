@@ -62,7 +62,7 @@ test('worker admission rejects inconsistent identity and native dispatch awaits 
   for (const change of [
     { subagentType: 'unknown' },
     { model: 'wrong' },
-    { parentModel: 'wrong' },
+    { parentModel: 'multi/cursor/wrong' },
     { parentAgentId: 'unknown' },
     { permissionMode: 'bypassPermissions' },
     { cwd: '/other' },
@@ -74,6 +74,97 @@ test('worker admission rejects inconsistent identity and native dispatch awaits 
   modes.startPreparedModWorker('s', 'worker', 'cursor', '/workspace');
   assert.deepEqual(modes.resolve('s', 'worker').tools, ['Read']);
   assert.throws(() => modes.startPreparedModWorker('s', 'other', 'cursor', '/workspace'), /unique/);
+});
+
+test('host-only snapshots cannot authorize harness workers until policy admission', async () => {
+  const modes = new PermissionModes(
+    async () => ({
+      cursor: { model: 'multi/cursor/auto', tools: ['Read'] },
+      native: { model: 'claude-sonnet-5', disallowedTools: ['Edit'] },
+    }),
+    async () => ({ disallowedTools: ['Bash'] }),
+  );
+  await modes.precompute('/workspace');
+  modes.recordHostSession('s', {
+    permissionMode: 'auto',
+    cwd: '/workspace',
+    model: 'multi/cursor/auto',
+  });
+  assert.throws(() => modes.resolveHarness('s'), /settings policy has not been admitted/);
+  assert.throws(() => modes.authorizeModCompaction('s'), /settings policy has not been admitted/);
+  await assert.rejects(
+    modes.prepareModWorker('s', {
+      subagentType: 'cursor',
+      cwd: '/workspace',
+      permissionMode: 'auto',
+      model: 'multi/cursor/auto',
+      parentModel: 'multi/cursor/auto',
+    }),
+    /settings policy has not been admitted/,
+  );
+
+  const pending = modes.beginPolicy('s', '/workspace');
+  await setImmediate();
+  modes.admitPolicy('s', pending.generation, {
+    permissionMode: 'auto',
+    cwd: '/workspace',
+    model: 'multi/cursor/auto',
+  });
+  const parentToken = await modes.prepareModWorker('s', {
+    subagentType: 'native',
+    cwd: '/workspace',
+    permissionMode: 'auto',
+    model: 'multi/cursor/auto',
+    parentModel: 'multi/cursor/auto',
+  });
+  modes.startPreparedModWorker('s', 'parent', 'native', '/workspace');
+  assert.deepEqual(
+    new Set(modes.resolve('s', 'parent').disallowedTools),
+    new Set(['Bash', 'Edit']),
+  );
+  assert.throws(() => modes.resolveHarness('s', 'parent', 'multi/cursor/other'), /inconsistent/);
+  const childToken = await modes.prepareModWorker('s', {
+    subagentType: 'cursor',
+    cwd: '/workspace',
+    permissionMode: 'auto',
+    model: 'multi/cursor/auto',
+    parentModel: 'claude-sonnet-5',
+    parentAgentId: 'parent',
+  });
+  modes.startPreparedModWorker('s', 'child', 'cursor', '/workspace');
+  assert.deepEqual(
+    new Set(modes.resolveHarness('s', 'child', 'multi/cursor/auto').disallowedTools),
+    new Set(['Bash', 'Edit']),
+  );
+  assert.equal(typeof parentToken, 'string');
+  assert.equal(typeof childToken, 'string');
+});
+
+test('Claude-loop workers use the prompt snapshot without settings-policy admission', async () => {
+  const modes = new PermissionModes(async () => ({
+    'openai-native': { model: 'multi/openai/gpt-6-astra' },
+    custom: { tools: ['Read'] },
+  }));
+  await modes.precompute('/workspace');
+  modes.recordHostSession('s', {
+    permissionMode: 'default',
+    cwd: '/workspace',
+    model: 'claude-sonnet-4-6',
+  });
+  const token = await modes.prepareModWorker('s', {
+    subagentType: 'openai-native',
+    cwd: '/workspace',
+    model: 'multi/openai/gpt-6-astra',
+    permissionMode: 'default',
+    parentModel: 'claude-sonnet-4-6',
+  });
+  modes.startPreparedModWorker('s', 'worker', 'openai-native', '/workspace');
+  assert.equal(modes.resolve('s', 'worker').model, 'multi/openai/gpt-6-astra');
+  assert.equal(
+    modes.workerSelection({ subagentType: 'custom', cwd: '/workspace' }).execution,
+    'claude',
+  );
+  assert.equal(typeof token, 'string');
 });
 
 test('ambiguous simultaneous worker starts fail closed and catalog filtering preserves known workers', async () => {

@@ -1,4 +1,11 @@
 import type { EngineInterface, Register } from 'claude-code';
+import {
+  ensureHarnessPolicy,
+  type PolicyClient,
+  type PolicyResponse,
+  type PolicyState,
+} from './policy.ts';
+import { isHarnessModel } from './provider.ts';
 
 const maxBody = 32000;
 const issues =
@@ -15,11 +22,13 @@ function reportable(reason: string) {
   return `${reason}\n\nIf this reads like a defect in the multi-cli plugin rather than a permission the user chose, tell them so and offer to open an issue at ${issues}, quoting the reason above.`;
 }
 
-type GatewayResponse = {
+type GatewayResponse = PolicyResponse & {
   accepted?: boolean;
   error?: string;
-  generation?: number;
   isOffered?: boolean;
+  execution?: 'claude' | 'harness';
+  known?: boolean;
+  model?: string;
 };
 
 // A refused reply keeps only the reason: a non-2xx status never carries an
@@ -36,10 +45,19 @@ function refusal(text: string, status: number): GatewayResponse {
     // A non-JSON body still names the status below.
   }
   const detail = text.trim().slice(0, 200);
-  return { error: reason ?? (detail ? `gateway ${status}: ${detail}` : `gateway ${status}`) };
+  return {
+    refused: true,
+    httpStatus: status,
+    error: reason ?? (detail ? `gateway ${status}: ${detail}` : `gateway ${status}`),
+  };
 }
 
-export const register: Register = (on) => {
+export const register = (
+  on: Parameters<Register>[0],
+  _options: Parameters<Register>[1],
+  agentModels: Map<string, string> = new Map(),
+  policyState: PolicyState = {},
+) => {
   on('agent.offer', async ($, event, next) => {
     if (!(await active($))) {
       return next(event);
@@ -50,10 +68,15 @@ export const register: Register = (on) => {
         sessionId: await $.session.id(),
         cwd: await $.session.cwd(),
         agent: event.agent,
+        parentModel: await $.session.model(),
       },
       '/multi/mod/offer',
     );
-    return response?.isOffered ? next(event) : { isOffered: false };
+    // Claude owns its own catalog. Only a positively identified harness worker
+    // is subject to Multi's settings-translation compatibility filter.
+    return response?.execution === 'harness' && response.isOffered === false
+      ? { isOffered: false }
+      : next(event);
   });
   on('classic.SubagentStart', async ($, event, next) => {
     if (!(await active($))) {
@@ -65,35 +88,63 @@ export const register: Register = (on) => {
       subagentType: event.agent_type,
       cwd: event.cwd,
     });
-    if (!response?.accepted) {
-      return { block: reportable(response?.error ?? 'Multi worker start was not acknowledged.') };
+    if (response?.accepted && response.model) {
+      agentModels.set(event.agent_id, response.model);
     }
+    // Registration is observational for Claude-loop workers. An unregistered
+    // harness worker still cannot dispatch: resolveHarness rejects its scope.
     return next(event);
   });
   on('agent.spawn', async ($, event, next) => {
     if (!(await active($))) {
       return next(event);
     }
-    const sessionId = await $.session.id();
-    const mode = await request($, {}, `/multi/mod/mode?sessionId=${encodeURIComponent(sessionId)}`);
-    const snapshot = await request($, {
-      generation: mode?.generation,
-      sessionId,
+    const payload = {
+      sessionId: await $.session.id(),
       parentAgentId: event.parentAgentId,
       permissionMode: event.permissionMode,
       subagentType: event.subagentType,
       cwd: event.cwd ?? (await $.session.cwd()),
       model: event.model,
       parentModel: event.parentModel,
+      fork: event.fork,
       background: event.background,
-    });
-    if (!snapshot?.accepted) {
-      return { deny: reportable(snapshot?.error ?? 'Multi worker policy was not acknowledged.') };
+    };
+    const selection = await request($, payload, '/multi/mod/worker-model');
+    const harness = harnessSpawn(event, selection);
+    if (harness) {
+      await prepareHarness($, policyState);
+      const mode = await request(
+        $,
+        {},
+        `/multi/mod/mode?sessionId=${encodeURIComponent(payload.sessionId)}`,
+      );
+      const response = await request($, { ...payload, generation: mode?.generation });
+      if (!response?.accepted) {
+        return {
+          deny: reportable(response?.error ?? 'Multi harness worker policy was not acknowledged.'),
+        };
+      }
+    } else {
+      // Keep context for a possible later harness child, but never veto the
+      // engine's native worker because Multi could not reconstruct its policy.
+      await request($, payload);
     }
-    // The child-start hook correlates its engine ID before the first native request.
-    return next(event);
+    const result = await next(event);
+    if (result.agentId && result.model) {
+      agentModels.set(result.agentId, result.model);
+    }
+    return result;
   });
 };
+
+function harnessSpawn(
+  event: { fork?: boolean; model?: string; parentModel?: string },
+  selection: GatewayResponse | undefined,
+): boolean {
+  const inferred = event.fork ? event.parentModel : (event.model ?? event.parentModel);
+  return selection?.execution === 'harness' || (!selection?.known && isHarnessModel(inferred));
+}
 
 async function active($: EngineInterface): Promise<boolean> {
   const base = await $.env.get('MULTI_MOD_GATEWAY_URL');
@@ -135,5 +186,18 @@ async function request(
     if (timer) {
       clearTimeout(timer);
     }
+  }
+}
+
+async function policyClient($: EngineInterface): Promise<PolicyClient> {
+  return {
+    model: await $.session.model(),
+    request: (route, payload) => request($, payload, route),
+  };
+}
+
+async function prepareHarness($: EngineInterface, state: PolicyState) {
+  if (state.prompt && !state.harnessReady) {
+    await ensureHarnessPolicy(await policyClient($), state);
   }
 }

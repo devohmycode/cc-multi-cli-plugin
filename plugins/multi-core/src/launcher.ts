@@ -719,13 +719,15 @@ function configureApproval(
 ) {
   const provider = approvalProvider(selectedModel);
   const nativeAntigravity = antigravityAvailable && selectedModel?.startsWith('multi/antigravity/');
-  const nativeClaude =
-    anthropic && (!selectedModel?.startsWith('multi/') || selectedModel.startsWith('multi/zen/'));
-  if (!nativeClaude && !nativeAntigravity && (!provider || !providers.includes(provider))) {
+  // Auto mode is a Claude session capability. Keep it available when Claude is
+  // authenticated, even if the initial model has no external reviewer; the
+  // gateway still rejects unsupported external review requests, while a later
+  // switch back to Claude can use its native reviewer.
+  if (!anthropic && !nativeAntigravity && (!provider || !providers.includes(provider))) {
     settings.permissions = { ...settings.permissions, disableAutoMode: 'disable' };
   }
-  // --settings is fixed for the session. A per-tool capability guard also covers
-  // /model changes and workers, without calling a model or classifying commands.
+  // Observe tool workspace information for reviewer attribution. This hook never
+  // vetoes execution; Claude's checks and the actual reviewer request decide.
   const command = hookCommand(new URL('./gateway/permission-hook.ts', import.meta.url));
   const hooks = settings.hooks as Record<string, unknown[]> | undefined;
   settings.hooks = {
@@ -913,6 +915,9 @@ function gatewayEnvironment(port: number, token: string, anthropic: boolean) {
     // API timer; preserve explicit user limits.
     API_TIMEOUT_MS: process.env.API_TIMEOUT_MS ?? '2147483647',
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
+    // A custom base URL disables Claude's on-demand tool loading unless opted in.
+    // We forward Claude tool references; preserve an explicit user preference.
+    ENABLE_TOOL_SEARCH: process.env.ENABLE_TOOL_SEARCH ?? 'auto',
     MULTI_GATEWAY_TOKEN: token,
     CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1',
     MULTI_MOD_GATEWAY_URL: `http://127.0.0.1:${port}`,

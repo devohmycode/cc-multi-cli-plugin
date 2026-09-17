@@ -6,6 +6,24 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Keep provider boundaries aligned with execution. Claude, OpenAI, and Zen
+  workers record prompt identity while Cursor and Antigravity load full managed
+  settings policy at harness prompts or when a harness worker is requested.
+  Multi's permission observation hook no longer vetoes Claude tools. OpenAI
+  actions still use their originating account for automatic review. Deferred
+  schemas are sent to direct providers only after discovery or use, with tool
+  references preserved across turns.
+
+- Restore on-demand tool loading when launching through Multi's local gateway.
+  Claude otherwise disables tool search for a custom API address and can fill
+  most of a helper's context with unused tool descriptions, causing repeated
+  compaction and stalled work. Explicit `ENABLE_TOOL_SEARCH` preferences remain
+  respected.
+
+- Leave Claude, OpenAI, and Zen compaction to Claude Code without consulting Multi's
+  gateway. Child conversations use their own observed model, never the parent's
+  provider. Cursor and Antigravity compaction retains its tool-free authorization.
+
 - Invite a bug report when a worker refusal looks like a defect. Worker spawn
   and start refusals now carry the issue-template link alongside the gateway's
   own reason, conditioned on the refusal not being a permission the user chose,

@@ -211,10 +211,11 @@ test('Zen native tools cannot acquire OpenAI review; explicit bypass stays expli
       assert.deepEqual(decision, {});
       continue;
     }
-    assert(decision && typeof decision === 'object' && 'hookSpecificOutput' in decision);
-    const output = decision.hookSpecificOutput;
-    assert(output && typeof output === 'object' && 'permissionDecision' in output);
-    assert.equal(output.permissionDecision, 'deny');
+    assert.deepEqual(
+      decision,
+      {},
+      'Zen keeps Claude native permission behavior when gateway attribution is unavailable',
+    );
   }
   assert.equal(reviewed, 0);
 });

@@ -5,6 +5,7 @@ import { ModPolicies } from './mod-policy.ts';
 
 const MODES = ['default', 'acceptEdits', 'auto', 'dontAsk', 'bypassPermissions', 'plan'] as const;
 type PermissionMode = (typeof MODES)[number];
+type WorkerExecution = 'claude' | 'harness';
 export interface PermissionContext extends WorkerPermissions {
   permissionMode: PermissionMode;
   cwd?: string;
@@ -26,11 +27,21 @@ function requiredString(value: unknown, name: string): string {
   return value;
 }
 
+function executionForModel(model: unknown): WorkerExecution {
+  if (typeof model !== 'string') {
+    return 'claude';
+  }
+  return model.startsWith('multi/cursor/') || model.startsWith('multi/antigravity/')
+    ? 'harness'
+    : 'claude';
+}
+
 /** Prompt-time snapshots: the existing selector takes effect at the next prompt. */
 export class PermissionModes {
   readonly policies: ModPolicies;
   private readonly compactions = new Map<string, { id: string; previous: PermissionContext }>();
   private readonly parents = new Map<string, PermissionContext>();
+  private readonly hostOnly = new Set<string>();
   private readonly workers = new Map<
     string,
     WorkerPermissions & { cwd: string; compaction?: string }
@@ -78,37 +89,6 @@ export class PermissionModes {
     });
   }
 
-  async recoverPolicy(
-    session: string,
-    cwd: string,
-    observedMode: unknown,
-    timeoutMs = 4000,
-  ): Promise<boolean> {
-    if (this.parents.has(session)) {
-      return false;
-    }
-    const admittedCwd = requiredString(cwd, 'cwd');
-    const context: PermissionContext = {
-      permissionMode: permissionMode(observedMode),
-      cwd: admittedCwd,
-    };
-    const started = this.beginPolicy(requiredString(session, 'session_id'), admittedCwd);
-    const deadline = Date.now() + timeoutMs;
-    let status = this.policies.status(session, started.generation);
-    while (status.status === 'pending' && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-      status = this.policies.status(session, started.generation);
-    }
-    if (this.parents.has(session)) {
-      return false;
-    }
-    if (status.status !== 'ready') {
-      return false;
-    }
-    this.admitPolicy(session, started.generation, context);
-    return true;
-  }
-
   async precompute(cwd: string): Promise<void> {
     const catalog = await this.definitions(cwd);
     remember(this.catalogs, cwd, structuredClone(catalog));
@@ -121,8 +101,26 @@ export class PermissionModes {
 
   recordModSession(session: string, context: PermissionContext): void {
     this.parents.delete(session);
+    this.hostOnly.delete(session);
     permissionMode(context.permissionMode);
     remember(this.parents, session, structuredClone(context));
+  }
+
+  /** A Claude-loop snapshot records identity, but grants no external harness execution. */
+  recordHostSession(session: string, context: PermissionContext): void {
+    this.recordModSession(session, context);
+    this.hostOnly.add(session);
+  }
+
+  resolveHarness(session: string, agent?: string, model?: string): PermissionContext {
+    if (this.hostOnly.has(session)) {
+      throw new Error('Native harness settings policy has not been admitted');
+    }
+    const context = this.resolve(session, agent);
+    if (model && context.model && context.model !== model) {
+      throw new Error('Harness model is inconsistent with its admitted permission context');
+    }
+    return context;
   }
 
   recordModWorker(
@@ -150,50 +148,56 @@ export class PermissionModes {
       session,
       typeof input.parentAgentId === 'string' ? input.parentAgentId : undefined,
     );
-    if (permissionMode(input.permissionMode) !== parent.permissionMode) {
-      throw new Error('Worker parent permission mode is inconsistent');
-    }
-    if (parent.model && input.parentModel !== parent.model) {
-      throw new Error('Worker parent model is inconsistent');
-    }
-    if (parent.cwd && parent.cwd !== cwd) {
-      throw new Error('Worker workspace has no acknowledged policy');
-    }
-    const definitions = this.catalogs.get(cwd);
-    if (!definitions) {
-      throw new Error('Worker catalog has not been precomputed for this workspace');
-    }
-    const definition = Object.hasOwn(definitions, type) ? definitions[type] : undefined;
+    validateWorkerRequest(input, parent, cwd);
+    const selection = this.workerSelection(input);
+    const definition = input.fork === true ? {} : this.catalogs.get(cwd)?.[type];
     if (!definition) {
       throw new Error(`Cannot resolve permissions for Claude worker ${type}`);
     }
-    if (definition.nativePermissionError) {
-      throw new Error(definition.nativePermissionError);
-    }
-    if (
-      definition.model &&
-      definition.model !== 'inherit' &&
-      input.model !== undefined &&
-      input.model !== definition.model
-    ) {
-      throw new Error('Worker model is inconsistent with its catalog definition');
+    const model = selection.model;
+    if (selection.execution === 'harness') {
+      this.resolveHarness(session);
+      validateWorkerDefinition(definition, input);
+      if (parent.nativePermissionError) {
+        throw new Error(parent.nativePermissionError);
+      }
     }
     this.prunePendingWorkers();
     const token = randomUUID();
+    const inherited = input.parentAgentId ? mergeCursorPermissions(parent, definition) : definition;
     remember(this.pendingWorkers, JSON.stringify([session, token]), {
+      ...inherited,
       cwd,
       type,
       expiresAt: Date.now() + 15000,
-      model: definition.model === 'inherit' ? parent.model : (definition.model ?? parent.model),
-      // A definition without a mode inherits the parent's at resolve time.
-      permissionMode: definition.permissionMode,
-      tools: definition.tools?.slice(),
-      disallowedTools: definition.disallowedTools?.slice(),
-      ...(definition.nativePermissionError
-        ? { nativePermissionError: definition.nativePermissionError }
-        : {}),
+      model,
+      permissionMode: definition.permissionMode ?? parent.permissionMode,
+      nativePermissionError: definition.nativePermissionError,
     });
     return token;
+  }
+
+  /** Classify from the catalog and pinned parent model, never from a worker name. */
+  workerSelection(input: Record<string, unknown>): {
+    model?: string;
+    execution: WorkerExecution;
+    known: boolean;
+  } {
+    const type = requiredString(input.subagentType, 'subagentType');
+    const cwd = requiredString(input.cwd, 'cwd');
+    const explicit = input.model === undefined ? undefined : requiredString(input.model, 'model');
+    const parent =
+      input.parentModel === undefined
+        ? undefined
+        : requiredString(input.parentModel, 'parentModel');
+    const definition = this.catalogs.get(cwd)?.[type];
+    if (input.fork === true) {
+      return { model: parent, execution: executionForModel(parent), known: true };
+    }
+    const fixed =
+      definition?.model && definition.model !== 'inherit' ? definition.model : undefined;
+    const model = fixed ?? (explicit === 'inherit' ? parent : explicit) ?? parent;
+    return { model, execution: executionForModel(model), known: definition !== undefined };
   }
 
   private prunePendingWorkers() {
@@ -235,7 +239,7 @@ export class PermissionModes {
   }
 
   authorizeModCompaction(session: string, agent?: string): void {
-    const current = this.resolve(session, agent);
+    const current = this.resolveHarness(session, agent);
     const key = JSON.stringify([session, agent ?? 'main']);
     const previous = this.compactions.get(key)?.previous ?? current;
     const context = { ...current, tools: [], compaction: randomUUID() };
@@ -297,6 +301,10 @@ export class PermissionModes {
     }
     remember(this.workers, key, {
       cwd,
+      model:
+        definition.model === 'inherit'
+          ? this.parents.get(session)?.model
+          : (definition.model ?? this.parents.get(session)?.model),
       // A definition without a mode inherits the parent's at resolve time.
       permissionMode: definition.permissionMode,
       tools: definition.tools?.slice(),
@@ -309,6 +317,7 @@ export class PermissionModes {
 
   forgetSession(session: string): void {
     this.parents.delete(session);
+    this.hostOnly.delete(session);
     this.policies.forget(session);
     for (const entries of [this.workers, this.pendingWorkers, this.compactions]) {
       for (const key of entries.keys()) {
@@ -343,6 +352,41 @@ export class PermissionModes {
       },
       parent,
     );
+  }
+}
+
+function validateWorkerDefinition(definition: WorkerPermissions, input: Record<string, unknown>) {
+  if (definition.nativePermissionError) {
+    throw new Error(definition.nativePermissionError);
+  }
+  if (
+    definition.model &&
+    definition.model !== 'inherit' &&
+    input.model !== undefined &&
+    input.model !== definition.model
+  ) {
+    throw new Error('Worker model is inconsistent with its catalog definition');
+  }
+}
+
+function validateWorkerRequest(
+  input: Record<string, unknown>,
+  parent: PermissionContext,
+  cwd: string,
+) {
+  if (permissionMode(input.permissionMode) !== parent.permissionMode) {
+    throw new Error('Worker parent permission mode is inconsistent');
+  }
+  if (
+    parent.model &&
+    input.parentModel !== parent.model &&
+    (executionForModel(parent.model) === 'harness' ||
+      executionForModel(input.parentModel) === 'harness')
+  ) {
+    throw new Error('Worker parent model is inconsistent');
+  }
+  if (parent.cwd && parent.cwd !== cwd) {
+    throw new Error('Worker workspace has no acknowledged policy');
   }
 }
 

@@ -36,7 +36,6 @@ import { ModCompactions } from './mod-compaction.ts';
 import { handleModRoute } from './mod-routes.ts';
 import type { PermissionContext, PermissionModes } from './mode-hook.ts';
 import type { PendingApprovalTool } from './permission-hook.ts';
-import { approvalCapabilityGuard } from './permission-hook.ts';
 import { codexQuotaView, ProviderUsageDashboard } from './provider-usage.ts';
 import { ReceiptLedger } from './receipts.ts';
 import { estimateInputTokens } from './tokens.ts';
@@ -135,6 +134,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function providerOwnedReview(model: string): boolean {
+  return (
+    model.startsWith('multi/openai/') ||
+    model.startsWith('multi/cursor/') ||
+    model.startsWith('multi/antigravity/')
+  );
+}
+
 function authenticated(actual: string | string[] | undefined, expected: string): boolean {
   const a = Buffer.from(String(actual ?? ''));
   const b = Buffer.from(expected);
@@ -173,7 +180,7 @@ export function createNativeGateway({
   antigravity,
   zen,
   approvalBridge,
-  approvalProviders = approvalBridge ? ['openai'] : [],
+  approvalProviders: _approvalProviders = approvalBridge ? ['openai'] : [],
   blockAnthropic,
   guardAuto,
   permissionModes,
@@ -235,12 +242,18 @@ export function createNativeGateway({
     if (blockAnthropic || typeof session !== 'string' || !session) {
       return false;
     }
-    const contexts = [...approvalContexts.values()].filter(
-      (context) => JSON.parse(context.scope)[0] === session,
-    );
-    // Headerless worker reviews need origin matching only when this session has
-    // external execution. Native Claude owns its classifier format and retries.
-    return contexts.length > 0 && contexts.every((context) => !context.model.startsWith('multi/'));
+    const contexts = [...approvalContexts.values()].filter((context) => {
+      try {
+        return JSON.parse(context.scope)[0] === session;
+      } catch {
+        return false;
+      }
+    });
+    // A native classifier may pass through only when this session has no
+    // provider-owned review context. Per-action routing below handles mixed
+    // sessions; this fallback covers native Claude's classifier retries that
+    // carry no correlatable tool action.
+    return contexts.length > 0 && contexts.every((context) => !providerOwnedReview(context.model));
   }
   const matchesBashAction = (
     candidate: { tool: PendingApprovalTool; context: ApprovalContext },
@@ -283,10 +296,10 @@ export function createNativeGateway({
         reviewCandidates.set(id, { tool: pending, context: { ...context, cwd: parsed.cwd } });
       }
     }
-    if (nativeReviewSession(parsed.session_id)) {
-      return {};
-    }
-    return approvalCapabilityGuard(parsed, pending, approvalProviders, !blockAnthropic);
+    // Permission hooks only enrich attribution. Provider review is enforced
+    // when Claude sends the actual classifier request, where its origin can be
+    // matched against the observed action and retained provider context.
+    return {};
   }
   function retainContext(
     approvalScope: string,
@@ -313,15 +326,18 @@ export function createNativeGateway({
         : undefined,
     });
   }
-  function pendingReview(parsed: Record<string, unknown>, sourceSession: string) {
+  function reviewCandidatesFor(parsed: Record<string, unknown>, sourceSession: string) {
     const { action } = parseApprovalRequest(parsed);
     const name = Object.keys(action)[0];
-    const candidates = [...reviewCandidates.values()].filter(
+    return [...reviewCandidates.values()].filter(
       (candidate) =>
         candidate.tool.session === sourceSession &&
         candidate.tool.name === name &&
         (name !== 'Bash' || matchesBashAction(candidate, action[name])),
     );
+  }
+  function pendingReview(parsed: Record<string, unknown>, sourceSession: string) {
+    const candidates = reviewCandidatesFor(parsed, sourceSession);
     if (candidates.length !== 1) {
       throw new BadRequest('Missing or ambiguous pending review action');
     }
@@ -602,16 +618,39 @@ export function createNativeGateway({
       throw new BadRequest('Permission hook requires POST');
     }
     const decision = permissionHook(parsed);
-    if (
-      permissionModes &&
-      typeof parsed.session_id === 'string' &&
-      typeof parsed.cwd === 'string' &&
-      path.isAbsolute(parsed.cwd)
-    ) {
-      await permissionModes.recoverPolicy(parsed.session_id, parsed.cwd, parsed.permission_mode);
-    }
     res.writeHead(200, { 'content-type': 'application/json' });
     return res.end(JSON.stringify(decision));
+  }
+  async function dispatchNativeClassification(
+    exchange: ProviderRequest,
+    metadata: ReturnType<typeof requestIdentity>,
+  ) {
+    let candidates: ReturnType<typeof reviewCandidatesFor>;
+    try {
+      candidates = reviewCandidatesFor(exchange.parsed, metadata.session);
+    } catch (error) {
+      if (nativeReviewSession(metadata.session)) {
+        return handleAnthropic(exchange);
+      }
+      throw error;
+    }
+    if (candidates.length === 1) {
+      const context = candidates[0].context;
+      if (providerOwnedReview(context.model)) {
+        return dispatchReview(exchange, metadata, null);
+      }
+      return handleAnthropic(exchange);
+    }
+    if (
+      candidates.length > 1 &&
+      candidates.some(({ context }) => context.model.startsWith('multi/openai/'))
+    ) {
+      return dispatchReview(exchange, metadata, null);
+    }
+    if (nativeReviewSession(metadata.session)) {
+      return handleAnthropic(exchange);
+    }
+    return dispatchReview(exchange, metadata, null);
   }
   async function dispatch(
     exchange: ProviderRequest,
@@ -621,8 +660,8 @@ export function createNativeGateway({
     const { parsed } = exchange;
     const classification = isApprovalRequest(parsed);
     if (classification) {
-      if (!external && nativeReviewSession(metadata.session)) {
-        return handleAnthropic(exchange);
+      if (!external) {
+        return dispatchNativeClassification(exchange, metadata);
       }
       return dispatchReview(exchange, metadata, external);
     }
@@ -700,7 +739,11 @@ export function createNativeGateway({
       url.pathname === '/v1/messages'
     ) {
       try {
-        permissionContext = permissionModes.resolve(exchange.identity.session, agentId);
+        permissionContext = permissionModes.resolveHarness(
+          exchange.identity.session,
+          agentId,
+          body.model,
+        );
         exchange.permissionContext = permissionContext;
       } catch (error) {
         throw new BadRequest(reason(error));
@@ -748,6 +791,22 @@ export function createNativeGateway({
         input: tool.input,
         scope: sourceScope,
       });
+      if (sourceScope) {
+        const context = approvalContexts.get(sourceScope);
+        if (context?.model === sourceModel) {
+          evictOldest(reviewCandidates, 512);
+          reviewCandidates.set(tool.id, {
+            tool: {
+              model: sourceModel,
+              session: sourceSession,
+              name: tool.name,
+              input: tool.input,
+              scope: sourceScope,
+            },
+            context,
+          });
+        }
+      }
     };
     const emit: Emit = (type, value) => {
       if (guardAuto) {
@@ -1030,6 +1089,7 @@ function authorizeRequest(
       '/api/hello',
       '/multi/mod/session',
       '/multi/mod/worker',
+      '/multi/mod/worker-model',
       '/multi/mod/mode',
       '/multi/mod/policy',
       '/multi/mod/offer',

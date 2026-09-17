@@ -1,4 +1,5 @@
 import type { EngineInterface, Register } from 'claude-code';
+import { isHarnessModel } from './provider.ts';
 import { forgetUsageSession } from './usage.ts';
 
 type Status = {
@@ -13,13 +14,14 @@ export const register = (
   on: Parameters<Register>[0],
   _options: Parameters<Register>[1],
   onDetach: () => void = () => {},
+  models: Map<string, string> = new Map(),
 ) => {
   const running = new Map<string, object>();
   on('turn.step', async function* ($, event, next) {
     // Observability only: forward every core chunk unchanged, without serving inference.
     const key = event.agentId ?? 'main';
-    const native =
-      event.model.startsWith('multi/cursor/') || event.model.startsWith('multi/antigravity/');
+    models.set(key, event.model);
+    const native = isHarnessModel(event.model);
     if (native && !running.has(key) && running.size < 128) {
       const token = {};
       running.set(key, token);
@@ -29,23 +31,31 @@ export const register = (
     return yield* next(event);
   });
   on('turn.complete', async ($, event, next) => {
-    await request($, '/multi/mod/usage/complete', {
-      sessionId: await $.session.id(),
-      agentId: event.agentId,
-      turnId: event.turnId,
-      outcome: event.reason,
-    });
-    running.delete(event.agentId ?? 'main');
-    if (event.isAborted) {
+    const key = event.agentId ?? 'main';
+    const model = models.get(key);
+    if (model?.startsWith('multi/')) {
+      await request($, '/multi/mod/usage/complete', {
+        sessionId: await $.session.id(),
+        agentId: event.agentId,
+        turnId: event.turnId,
+        outcome: event.reason,
+      });
+    }
+    const wasRunning = running.delete(key);
+    // Retain a child's identity between turns: compaction can precede its next step.
+    if (event.isAborted && isHarnessModel(model)) {
       void cancelCompaction($, event.agentId);
     }
-    void $.ui.status(undefined);
+    if (wasRunning && running.size === 0) {
+      void $.ui.status(undefined);
+    }
     return next(event);
   });
   on('session.detach', async ($, event, next) => {
     onDetach();
     forgetUsageSession(await $.session.id());
     running.clear();
+    models.clear();
     void detach($);
     return next(event);
   });

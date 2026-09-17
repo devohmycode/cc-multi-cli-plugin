@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { isDirectToolAvailable } from '../../multi-core/src/gateway/direct-tools.ts';
 import type {
   ContentBlock,
   Emit,
@@ -624,7 +625,15 @@ export function toResponses(
   validateRequestOptions(body);
   const format = outputFormat(body);
   const input = body.messages.flatMap((message) => messageInput(message, signaturePrefix));
-  const tools = (body.tools ?? []).map(inputTool);
+  // Claude's tool-search flow keeps deferred schemas out of the initial model
+  // request. A loaded tool is resent without defer_loading on the next turn.
+  const tools = (body.tools ?? [])
+    .filter(
+      (tool) =>
+        !isDeferredTool(tool) ||
+        (typeof tool.name === 'string' && isDirectToolAvailable(body, tool.name)),
+    )
+    .map(inputTool);
   const choice = toolChoice(body.tool_choice, tools);
   const effort = reasoningEffort(body);
   return {
@@ -652,6 +661,10 @@ export function toResponses(
     store: false,
     stream: true,
   };
+}
+
+function isDeferredTool(tool: unknown): boolean {
+  return isRecord(tool) && tool.defer_loading === true;
 }
 
 export async function* readSse(stream: AsyncIterable<Uint8Array>): AsyncGenerator<unknown> {

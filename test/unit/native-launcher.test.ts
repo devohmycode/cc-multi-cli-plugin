@@ -54,7 +54,7 @@ if(args[0]==='--version'){console.log(process.env.TEST_CLAUDE_VERSION??'2.1.272'
 const result=(value)=>{const base=process.env.MULTI_MOD_GATEWAY_URL;if(!base){console.log(value);return}const url=new URL(base+'/multi/mod/session');const req=require('node:http').request(url,{method:'POST',headers:{'content-type':'application/json','x-multi-gateway-token':process.env.MULTI_GATEWAY_TOKEN}},()=>console.log(value));req.on('error',()=>console.log(value));req.end(JSON.stringify({sessionId:'fixture',event:'start'}));};
 if(args[0]==='auth'){if(process.env.TEST_AUTH==='malformed'){console.log('not-json');process.exit(0)}if(process.env.TEST_AUTH==='error'){process.exit(2)}if(process.env.TEST_AUTH==='missing'){console.log('{}');process.exit(0)}process.stdout.write(JSON.stringify({loggedIn:process.env.TEST_AUTH==='yes'}));process.exitCode=process.env.TEST_AUTH==='yes'?0:1}else{
 const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'utf8'));
- result(JSON.stringify({agentView:process.env.CLAUDE_CODE_DISABLE_AGENT_VIEW,backgroundTasks:process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS,functionHooks:process.env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS,settings,models:args.filter(x=>x.startsWith('multi/')),args,settingsCount:args.filter(x=>x==='--settings').length,hasLocalToken:!!process.env.MULTI_GATEWAY_TOKEN,apiTimeout:process.env.API_TIMEOUT_MS,auth:process.env.ANTHROPIC_API_KEY?'api':process.env.ANTHROPIC_AUTH_TOKEN?'local':'native'}));}
+ result(JSON.stringify({agentView:process.env.CLAUDE_CODE_DISABLE_AGENT_VIEW,backgroundTasks:process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS,functionHooks:process.env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS,settings,models:args.filter(x=>x.startsWith('multi/')),args,settingsCount:args.filter(x=>x==='--settings').length,hasLocalToken:!!process.env.MULTI_GATEWAY_TOKEN,apiTimeout:process.env.API_TIMEOUT_MS,toolSearch:process.env.ENABLE_TOOL_SEARCH,auth:process.env.ANTHROPIC_API_KEY?'api':process.env.ANTHROPIC_AUTH_TOKEN?'local':'native'}));}
 `,
   );
   const launcher = fileURLToPath(
@@ -87,6 +87,7 @@ const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'ut
           TEST_AUTH: auth,
           CLAUDE_CODE_DISABLE_AGENT_VIEW: '0',
           API_TIMEOUT_MS: auth === 'api' ? '1000' : undefined,
+          ENABLE_TOOL_SEARCH: auth === 'api' ? 'false' : undefined,
           ...(auth === 'api' ? { ANTHROPIC_API_KEY: 'fake-test-key' } : {}),
         },
       },
@@ -100,8 +101,12 @@ const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'ut
     assert.equal(result.backgroundTasks, undefined);
     assert.equal(result.functionHooks, '1');
     assert.equal(result.apiTimeout, auth === 'api' ? '1000' : '2147483647');
+    assert.equal(result.toolSearch, auth === 'api' ? 'false' : 'auto');
     assert.deepEqual(result.settings.permissions.deny, ['Bash(denied)']);
-    assert.equal(result.settings.permissions.disableAutoMode, 'disable');
+    assert.equal(
+      result.settings.permissions.disableAutoMode,
+      auth === 'no' ? 'disable' : undefined,
+    );
     assert.equal(
       result.hasLocalToken,
       true,

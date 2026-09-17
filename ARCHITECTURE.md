@@ -44,9 +44,12 @@ time, streamed progress, completion, failure, and cancellation.
 | Cursor | Cursor SDK loop | Cursor native review | Cursor SDK, scoped by run | Cursor SDK login |
 | Antigravity | `agy` CLI loop | No reviewer | Antigravity native history and cache | `agy` login |
 
-OpenAI and Zen are direct model integrations. Claude Code executes their tools
-and retains permission control. OpenAI review stays with the originating OpenAI
-account. Zen never borrows Codex review. Missing GPT review fails explicitly.
+OpenAI and Zen are direct model integrations. Their worker hooks record prompt
+identity and let Claude Code run the tool loop. Full settings translation runs
+at Cursor and Antigravity prompts, or when a direct-model conversation requests
+a harness worker. OpenAI
+review stays with the originating OpenAI account. Zen never borrows Codex
+review. Missing GPT review fails explicitly.
 
 Cursor and Antigravity are harness integrations. Their SDK or CLI executes tools,
 keeps native state, and applies provider authentication. Claude displays external
@@ -64,8 +67,14 @@ explicitly. Plan denies shell and edit capabilities. Bypass disables Cursor nati
 Auto review while retaining explicit restrictions. See [docs/permissions.md](docs/permissions.md).
 
 Native harness actions do not enter Claude's PreToolUse or PermissionRequest
-admission path. Those hooks observe native activity. Antigravity native children
-and MCP stay denied. Explicit native workspace selection is required.
+admission path. Their worker admission loads the selected settings and managed
+policy sources, while those hooks observe native activity. Antigravity native
+children and MCP stay denied. Explicit native workspace selection is required.
+
+Claude's launcher enables on-demand tool discovery for the local gateway. Direct
+provider adapters omit deferred tool schemas until Claude discovers or uses
+them; tool references and loaded declarations survive later turns and provider
+switches.
 
 ## Isolation
 
@@ -78,7 +87,9 @@ operations retain external permissions.
 
 `state-lock.ts` serializes native state with a portable marker-file lock that survives crashes. Durable
 run IDs support terminal-result recovery. A recoverable run resumes its native
-record; an uncertain run does not rerun actions blindly. Follow-ups forward the
+record; an uncertain run does not rerun actions blindly. Claude, OpenAI, and Zen
+conversations use Claude Code's compaction without Multi's harness checks;
+Cursor and Antigravity compaction remains provider-owned and policy-bound. Follow-ups forward the
 newest turn after the last assistant response. Outer history changes continue
 only with a matching prompt hash or unique saved-response anchor. Native state is
 never rewound. Compaction summarizes authenticated context while preserving the

@@ -1,63 +1,53 @@
-import type { EngineInterface } from 'claude-code';
 import { expect, test } from 'claude-code/testing';
-import { admitPrompt, preparePolicy } from '../register.ts';
+import {
+  admitPrompt,
+  ensureHarnessPolicy,
+  type PolicyClient,
+  type PolicyState,
+  preparePolicy,
+  recordPrompt,
+} from '../policy.ts';
 
 type Call = { url: string; body: Record<string, unknown> };
 
-/** A gateway holding `held` as its mode generation, refusing every other source. */
-function gateway(held: number | undefined, calls: Call[]) {
+/** The HTTP adapter has already parsed success and refusal replies. */
+function gateway(held: number | undefined, calls: Call[]): PolicyClient {
   return {
-    session: { model: async () => 'multi/cursor/auto' },
-    env: {
-      get: async (name: string) =>
-        name === 'MULTI_MOD_GATEWAY_URL' ? 'http://127.0.0.1:4000' : 'test-token',
+    model: 'multi/cursor/auto',
+    request: async (route, body) => {
+      calls.push({ url: route, body });
+      if (route.startsWith('/multi/mod/mode?')) {
+        return held === undefined ? { refused: true, httpStatus: 409 } : { generation: held };
+      }
+      if (route === '/multi/mod/session') {
+        return { accepted: true, generation: 11 };
+      }
+      if (typeof body.generation === 'string') {
+        return { generation: body.generation, status: 'ready' };
+      }
+      if (body.sourceGeneration !== held) {
+        return { refused: true, httpStatus: 400, error: 'Policy source generation is stale' };
+      }
+      return { generation: 'policy-1', status: 'pending' };
     },
-    http: {
-      fetch: async (url: string, init: { body?: string }) => {
-        const route = url.replace('http://127.0.0.1:4000', '');
-        const body = init.body ? (JSON.parse(init.body) as Record<string, unknown>) : {};
-        calls.push({ url: route, body });
-        const ok = (value: unknown) => ({ ok: true, status: 200, text: JSON.stringify(value) });
-        if (route.startsWith('/multi/mod/mode?')) {
-          // The real route answers 409 when it holds no snapshot for the session.
-          return held === undefined
-            ? { ok: false, status: 409, text: JSON.stringify({ accepted: false, stale: true }) }
-            : ok({ generation: held });
-        }
-        if (route === '/multi/mod/session') {
-          return ok({ accepted: true, generation: 11 });
-        }
-        if (body.generation !== undefined) {
-          return ok({ generation: body.generation, status: 'ready' });
-        }
-        if (body.sourceGeneration !== held) {
-          return {
-            ok: false,
-            status: 400,
-            text: JSON.stringify({ error: 'Policy source generation is stale' }),
-          };
-        }
-        return ok({ generation: 'policy-1', status: 'pending' });
-      },
-    },
-  } as unknown as EngineInterface;
+  };
+}
+function unreachable(): PolicyClient {
+  return { model: 'multi/cursor/auto', request: async () => undefined };
 }
 
-/** A gateway that answers nothing, so no generation can be adopted. */
-function unreachable() {
-  return {
-    session: { model: async () => 'multi/cursor/auto' },
-    env: {
-      get: async (name: string) =>
-        name === 'MULTI_MOD_GATEWAY_URL' ? 'http://127.0.0.1:4000' : 'test-token',
-    },
-    http: {
-      fetch: async () => {
-        throw new Error('connection refused');
-      },
-    },
-  } as unknown as EngineInterface;
-}
+test('concurrent harness helpers share admission and later helpers reuse it', async () => {
+  const calls: Call[] = [];
+  const client = gateway(undefined, calls);
+  const state: PolicyState = {
+    prompt: { sessionId: 'session', cwd: '/workspace', permissionMode: 'plan' },
+  };
+  await Promise.all([ensureHarnessPolicy(client, state), ensureHarnessPolicy(client, state)]);
+  await ensureHarnessPolicy(client, state);
+  expect(calls.filter((call) => call.url === '/multi/mod/session').length).toBe(1);
+  expect(state.harnessReady).toBe(true);
+  expect(state.generation).toBe(11);
+});
 
 test('a reloaded hooks module adopts the mode generation the gateway still holds', async () => {
   const calls: Call[] = [];
@@ -102,3 +92,15 @@ test('a prompt whose policy cannot be admitted carries no generation and is neve
   expect(await admitPrompt(gateway(undefined, calls), snapshot, 3)).toBe(11);
   expect(calls.some((call) => call.url === '/multi/mod/session')).toBe(true);
 });
+
+for (const model of ['claude-sonnet-5', 'multi/openai/gpt-6-astra', 'multi/zen/glm-5']) {
+  test(`${model} prompts record identity without preparing harness policy`, async () => {
+    const calls: Call[] = [];
+    const client = { ...gateway(undefined, calls), model };
+    const snapshot = { sessionId: 'session', cwd: '/workspace', permissionMode: 'plan' };
+    expect(await recordPrompt(client, snapshot, 7)).toBe(11);
+    expect(calls.map((call) => call.url)).toEqual(['/multi/mod/session']);
+    expect(calls[0].body.policyGeneration).toBe(undefined);
+    expect(calls[0].body.permissionMode).toBe('plan');
+  });
+}

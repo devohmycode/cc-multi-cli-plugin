@@ -532,6 +532,44 @@ test('Claude subscription requests retain their raw body, OAuth and beta headers
   assert.equal(await response.text(), 'original stream');
 });
 
+test('Claude on-demand tools and tool references pass through the gateway unchanged', async (t) => {
+  const request = {
+    model: 'claude-sonnet-5',
+    tools: [
+      { name: 'ToolSearch', input_schema: { type: 'object' } },
+      { name: 'example_lookup', input_schema: { type: 'object' }, defer_loading: true },
+    ],
+    messages: [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'search', name: 'ToolSearch', input: { query: 'example' } },
+        ],
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'search',
+            content: [{ type: 'tool_reference', tool_name: 'example_lookup' }],
+          },
+        ],
+      },
+    ],
+  };
+  const raw = JSON.stringify(request);
+  let forwarded = false;
+  const call = await gateway(t, async (_url, options) => {
+    assert.equal(String(options.body), raw);
+    forwarded = true;
+    return Response.json({ content: [{ type: 'text', text: 'ok' }] });
+  });
+  const response = await call(raw);
+  assert.equal(response.status, 200);
+  assert.equal(forwarded, true);
+});
+
 test('OpenAI cache keys survive history changes and restart, isolating sessions, workers and models', async (t) => {
   const keys: string[] = [];
   const upstream: GatewayFetch = async (_url, options) => {

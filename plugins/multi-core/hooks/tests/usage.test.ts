@@ -69,6 +69,9 @@ test('worker completion awaits accounting and preserves the engine answer', asyn
   on('session.id', () => ({ value: 'session' }));
   let recorded = false;
   on('http.fetch', (_$, event) => {
+    if (event.url.endsWith('/multi/mod/telemetry')) {
+      return { value: { ok: true, status: 200, headers: {}, text: '{}' } };
+    }
     expect(event.url).toBe('http://127.0.0.1:4000/multi/mod/usage/complete');
     expect(JSON.parse(event.init?.body ?? '{}')).toEqual({
       sessionId: 'session',
@@ -84,6 +87,26 @@ test('worker completion awaits accounting and preserves the engine answer', asyn
     expect(recorded).toBe(true);
     return { text: event.answer };
   });
+  on('turn.step', async function* (_$, event) {
+    yield { kind: 'text', index: 0, text: 'done' };
+    return {
+      turnId: event.turnId,
+      index: 0,
+      answer: 'done',
+      toolUses: [],
+      stopReason: 'end_turn',
+      usage: null,
+    };
+  });
+  for await (const _chunk of $.turn.step({
+    turnId: 'turn',
+    index: 0,
+    agentId: 'worker',
+    model: 'multi/openai/gpt-6-astra',
+    messageCount: 1,
+  })) {
+    // Let the model step complete before the engine emits turn.complete.
+  }
   const result = await $.turn.complete({
     turnId: 'turn',
     agentId: 'worker',

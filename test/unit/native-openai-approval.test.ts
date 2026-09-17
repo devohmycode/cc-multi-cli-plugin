@@ -5,7 +5,6 @@ import path from 'node:path';
 import type { TestContext } from 'node:test';
 import test from 'node:test';
 import type { GatewayFetch } from '../../plugins/multi-core/src/gateway/fetch.ts';
-import { approvalCapabilityGuard } from '../../plugins/multi-core/src/gateway/permission-hook.ts';
 import {
   createOpenAIApproval,
   discoverOpenAIReviewer,
@@ -114,67 +113,6 @@ test('runtime reviewer investigates with bounded read-only tools and uses provid
   assert.equal(requests.length, 2);
   assert.equal(requests[0].input[0].role, 'user');
   assert.deepEqual(JSON.parse(requests[0].input[0].content).original_request, context.request);
-});
-
-test('capability guard follows exact tool origin across model switches and workers', () => {
-  const input = {
-    permission_mode: 'auto',
-    session_id: 'session',
-    tool_name: 'Bash',
-    tool_input: { command: 'pwd' },
-  };
-  const pending = {
-    session: 'session',
-    model: 'multi/openai/gpt-5.6-luna',
-    name: 'Bash',
-    input: input.tool_input,
-  };
-  assert.deepEqual(approvalCapabilityGuard(input, pending, ['openai']), {});
-  assert.deepEqual(
-    approvalCapabilityGuard(input, { ...pending, model: 'multi/cursor/composer-2.5' }, ['cursor']),
-    {},
-  );
-  for (const model of ['claude-sonnet-5', 'multi/zen/gpt-5.6-luna']) {
-    assert.deepEqual(approvalCapabilityGuard(input, { ...pending, model }, ['openai'], true), {});
-    assert.equal(
-      approvalCapabilityGuard(input, { ...pending, model }, ['openai'], false).hookSpecificOutput
-        ?.permissionDecision,
-      'deny',
-    );
-  }
-  for (const result of [
-    approvalCapabilityGuard(input, pending, [], true),
-    approvalCapabilityGuard(input, pending, []),
-    approvalCapabilityGuard(input, { ...pending, model: 'multi/cursor/composer' }, ['openai']),
-  ]) {
-    assert.equal(result.hookSpecificOutput?.permissionDecision, 'deny');
-    assert.match(
-      result.hookSpecificOutput?.permissionDecisionReason ?? '',
-      /Auto mode is unavailable/,
-    );
-  }
-  for (const permission_mode of [
-    'default',
-    'acceptEdits',
-    'plan',
-    'dontAsk',
-    'bypassPermissions',
-  ]) {
-    assert.deepEqual(approvalCapabilityGuard({ ...input, permission_mode }, undefined, []), {});
-  }
-  assert.deepEqual(
-    approvalCapabilityGuard(
-      { ...input, tool_input: { ...input.tool_input, run_in_background: false } },
-      pending,
-      ['openai'],
-    ),
-    {},
-  );
-  assert.equal(
-    approvalCapabilityGuard({ ...input, session_id: 'another-worker' }, pending, ['openai'])
-      .hookSpecificOutput?.permissionDecision,
-    'deny',
-  );
 });
 
 test('reviewer errors, invalid output, foreign providers, and exhausted investigation cannot approve', async (t) => {

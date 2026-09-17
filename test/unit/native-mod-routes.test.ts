@@ -69,59 +69,48 @@ test('PermissionModes refuses native resolution until an acknowledged prompt sna
   assert.equal(modes.resolve('session').permissionMode, 'plan');
 });
 
-test('permission tool calls recover the same settings-admitted parent policy', async (t) => {
-  const restrictions = { tools: ['Read'], disallowedTools: ['Bash'] };
-  const definitions = { worker: { tools: ['Read'] } };
-  const modes = new PermissionModes(
-    async () => definitions,
-    async () => restrictions,
-  );
-  const normalPolicy = modes.beginPolicy('normal', '/workspace');
-  await setImmediate();
-  modes.admitPolicy('normal', normalPolicy.generation, {
-    permissionMode: 'plan',
-    cwd: '/workspace',
+test('permission observations neither prepare settings nor grant harness admission', async (t) => {
+  let discoveries = 0;
+  const modes = new PermissionModes(async () => {
+    discoveries++;
+    return {};
   });
   const base = await start(t, modes, undefined, true);
-  const recovered = await request(base, '/multi/permission', {
+  const response = await request(base, '/multi/permission', {
     hook_event_name: 'PreToolUse',
-    session_id: 'recovered',
+    session_id: 'native',
     cwd: '/workspace',
     permission_mode: 'plan',
     tool_name: 'Read',
     tool_use_id: 'tool-1',
   });
-  assert.equal(recovered.status, 200);
-  assert.deepEqual(modes.resolve('recovered'), modes.resolve('normal'));
-  assert.deepEqual(modes.resolve('recovered'), {
-    permissionMode: 'plan',
-    cwd: '/workspace',
-    tools: ['Read'],
-    disallowedTools: ['Bash'],
-    nativePermissionError: undefined,
-  });
-  await modes.prepareModWorker('recovered', {
-    subagentType: 'worker',
-    permissionMode: 'plan',
-    cwd: '/workspace',
-  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body, {});
+  assert.equal(discoveries, 0);
+  assert.throws(() => modes.resolveHarness('native'), /unavailable/);
 });
 
-test('permission recovery keeps the parent absent until real policy admission completes', async () => {
-  let finish: ((value: { tools: string[] }) => void) | undefined;
-  const modes = new PermissionModes(
-    async () => ({}),
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-  );
-  assert.equal(await modes.recoverPolicy('session', '/workspace', 'bypassPermissions', 0), false);
-  assert.throws(() => modes.resolve('session'), /permission mode is unavailable/i);
-  finish?.({ tools: ['Read'] });
-  await setImmediate();
-  assert.equal(await modes.recoverPolicy('session', '/workspace', 'bypassPermissions', 100), true);
-  assert.deepEqual(modes.resolve('session').tools, ['Read']);
+test('Claude-loop worker route does not require a settings-policy generation', async (t) => {
+  const modes = new PermissionModes(async () => ({
+    worker: { model: 'multi/zen/deepseek-v4-pro' },
+  }));
+  await modes.precompute('/workspace');
+  modes.recordHostSession('session', {
+    permissionMode: 'default',
+    cwd: '/workspace',
+    model: 'multi/openai/gpt-5.6-luna',
+  });
+  const base = await start(t, modes);
+  const result = await request(base, '/multi/mod/worker', {
+    sessionId: 'session',
+    subagentType: 'worker',
+    cwd: '/workspace',
+    permissionMode: 'default',
+    model: 'multi/zen/deepseek-v4-pro',
+    parentModel: 'multi/openai/gpt-5.6-luna',
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.accepted, true);
 });
 
 test('PermissionModes retains a tool-free compaction boundary and acknowledges workers', async () => {

@@ -1,4 +1,5 @@
 import type { EngineInterface, Register } from 'claude-code';
+import { isHarnessModel } from './provider.ts';
 
 const maxBody = 32000;
 
@@ -11,8 +12,18 @@ type GatewayResponse = {
   messages?: readonly import('claude-code').SessionMessage[];
 };
 
-export const register: Register = (on) => {
+export const register = (
+  on: Parameters<Register>[0],
+  _options: Parameters<Register>[1],
+  agentModels: ReadonlyMap<string, string> = new Map(),
+) => {
   on('session.compact', async ($, event, next) => {
+    // session.model() describes only the main loop. A Claude child must never
+    // inherit its external parent's compaction policy (or the reverse).
+    const model = await compactionModel($, event.agentId, agentModels);
+    if (!isHarnessModel(model)) {
+      return next(event);
+    }
     if (!(await active($))) {
       return next(event);
     }
@@ -112,4 +123,13 @@ async function request(
       clearTimeout(timer);
     }
   }
+}
+
+/** The main model is never evidence of a child's provider. */
+export async function compactionModel(
+  $: EngineInterface,
+  agentId: string | undefined,
+  agentModels: ReadonlyMap<string, string>,
+): Promise<string | undefined> {
+  return agentId ? agentModels.get(agentId) : $.session.model();
 }

@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   type ApprovalContext,
   approvalCwdForComparison,
@@ -49,6 +51,36 @@ test('classifier policy is retained as admitted review evidence and cache identi
   assert.throws(() => parseApprovalRequest(malformed), /Malformed approval policy/);
 });
 const signal = () => new AbortController().signal;
+
+test('permission hook keeps native admission when gateway attribution is unreachable', async () => {
+  const hook = fileURLToPath(
+    new URL('../../plugins/multi-core/src/gateway/permission-hook.ts', import.meta.url),
+  );
+  const result = await new Promise<string>((resolve, reject) => {
+    const child = spawn(process.execPath, [hook], {
+      env: {
+        ...process.env,
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:1',
+        MULTI_GATEWAY_TOKEN: 'unavailable',
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let output = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    child.once('error', reject);
+    child.once('close', (code) => {
+      if (code === 0) {
+        resolve(output.trim());
+      } else {
+        reject(new Error(`permission hook exited with ${code}`));
+      }
+    });
+    child.stdin.end(JSON.stringify({ permission_mode: 'auto', tool_name: 'Read' }));
+  });
+  assert.deepEqual(JSON.parse(result), {});
+});
 
 test('native review preserves context, names actual provider, and never caches an allow', async () => {
   let calls = 0;
@@ -565,6 +597,26 @@ async function mixedReviewGateway(t: TestContext, reviewer = true, blockAnthropi
       '/multi/permission',
     );
   };
+  const infer = async (model: string, command: string, worker?: string) => {
+    next = { id: `tool-${worker ?? 'main'}-${reviews.length}`, command, stream: false };
+    const response = await send(
+      {
+        model,
+        metadata: { user_id: JSON.stringify({ session_id: 'mixed' }) },
+        messages: [{ role: 'user', content: command }],
+        tools: [
+          {
+            name: 'Bash',
+            input_schema: { type: 'object', properties: { command: { type: 'string' } } },
+          },
+        ],
+      },
+      '/v1/messages',
+      worker,
+    );
+    assert.equal(response.status, 200);
+    await response.arrayBuffer();
+  };
   const classify = (command: string, stage = 1, model = 'claude-sonnet-5', session = 'mixed') =>
     send({ ...request(stage, JSON.stringify({ session_id: session }), command), model });
   return {
@@ -574,6 +626,7 @@ async function mixedReviewGateway(t: TestContext, reviewer = true, blockAnthropi
     reviews,
     nativeReviews,
     nativeRequests,
+    infer,
     deny: () => {
       outcome = 'deny';
     },
@@ -639,13 +692,36 @@ test('Claude-only Auto passes native classifier formats and fallback models thro
   );
 });
 
+test('native Claude classifier retries survive an unrelated Zen context', async (t) => {
+  const gateway = await mixedReviewGateway(t);
+  await gateway.prepare('claude-sonnet-5', 'node claude-worker.js', 'claude-worker');
+  await gateway.prepare('multi/zen/gpt-5.6-luna', 'node zen.js');
+  const body = request(1, JSON.stringify({ session_id: 'mixed' }), 'node claude-worker.js');
+  const instruction = body.messages[0].content.at(-1);
+  assert(instruction);
+  instruction.text = 'A native classifier format unknown to the gateway.';
+  const response = await gateway.send(body);
+  assert.equal(response.status, 200);
+  await response.arrayBuffer();
+  assert.deepEqual(gateway.nativeReviews, ['claude-sonnet-5']);
+  assert.deepEqual(gateway.reviews, []);
+});
+
+test('observed tools seed review without a permission roundtrip', async (t) => {
+  const gateway = await mixedReviewGateway(t);
+  await gateway.infer('multi/openai/gpt-6-astra', 'node gpt.js', 'gpt-worker');
+  await gateway.infer('claude-sonnet-5', 'node claude.js', 'claude-worker');
+  assert.equal((await gateway.classify('node claude.js')).status, 200);
+  assert.deepEqual(gateway.nativeReviews, ['claude-sonnet-5']);
+  assert.equal((await gateway.classify('node gpt.js')).status, 200);
+  assert.equal(gateway.reviews.length, 1, 'OpenAI action keeps its originating reviewer');
+});
+
 test('mixed-provider review rejects missing, cross-session, ambiguous, and unavailable GPT origins', async (t) => {
   const gateway = await mixedReviewGateway(t, false);
   const gpt = 'multi/openai/gpt-6-astra';
   const guard = await gateway.prepare(gpt, 'node unavailable.js');
-  assert.partialDeepStrictEqual(await guard.json(), {
-    hookSpecificOutput: { permissionDecision: 'deny' },
-  });
+  assert.deepEqual(await guard.json(), {});
   assert.equal((await gateway.classify('node unavailable.js')).status, 400);
   assert.equal((await gateway.classify('node missing.js')).status, 400);
   assert.equal(
