@@ -9,7 +9,11 @@ type Status = {
   startedAt?: number;
 };
 
-export const register: Register = (on) => {
+export const register = (
+  on: Parameters<Register>[0],
+  _options: Parameters<Register>[1],
+  onDetach: () => void = () => {},
+) => {
   const running = new Map<string, object>();
   on('turn.step', async function* ($, event, next) {
     // Observability only: forward every core chunk unchanged, without serving inference.
@@ -39,6 +43,7 @@ export const register: Register = (on) => {
     return next(event);
   });
   on('session.detach', async ($, event, next) => {
+    onDetach();
     forgetUsageSession(await $.session.id());
     running.clear();
     void detach($);

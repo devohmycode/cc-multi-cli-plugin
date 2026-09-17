@@ -6,6 +6,25 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Stop blocking prompts on permission admission. A prompt whose policy could not
+  be admitted was rejected outright, which was unrecoverable by anything the user
+  could type: no engine hook fires on a permission-mode change, so toggling modes
+  could not re-admit either, and the mode only travels on the next prompt — the
+  blocked one. Admission now passes the prompt through. The permission hook
+  already rebuilds the parent context from the live mode on the turn's first tool
+  call, and until it does every native worker spawn is denied with the gateway's
+  own reason, and a spawn whose mode no longer matches an older snapshot is still
+  refused as inconsistent. Nothing runs under an unadmitted or stale policy (#20).
+
+- Recover policy admission after `/clear`. Detaching a session makes the gateway
+  forget its mode, but the hooks module kept the old generation, so every later
+  prompt was refused as stale and blocked with `Multi policy is not ready; submit
+  the prompt again.` with nothing able to resync it. The module now forgets the
+  generation on `session.detach`, and a refused begin adopts the gateway's own
+  answer even when that answer is that it holds no generation at all. An
+  unreachable gateway still fails closed, and a matching generation is still
+  never re-read (#20).
+
 - Draw the `/multi-usage` pane again. Its provider tabs passed
   `autoFocus: false` for every unselected tab, but the prop is typed
   `true | absent`, so the whole client tree failed validation and the pane

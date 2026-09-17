@@ -24,6 +24,7 @@ type DisplayInput = {
 
 type GatewayResponse = {
   refused?: true;
+  httpStatus?: number;
   error?: string;
   output?: string;
   isError?: boolean;
@@ -48,7 +49,11 @@ type GatewayResponse = {
 export const register: Register = (on, options) => {
   let generation: number | undefined;
   registerUsage(on, options);
-  registerLifecycle(on, options);
+  // Detaching makes the gateway forget this session's mode; keeping its generation
+  // here would leave every later prompt stale against a gateway holding nothing.
+  registerLifecycle(on, options, () => {
+    generation = undefined;
+  });
   registerCompaction(on, options);
   registerWorkers(on, options);
   for (const [name, _description] of displayTools) {
@@ -129,58 +134,14 @@ export const register: Register = (on, options) => {
     return next(event);
   });
   on('classic.UserPromptSubmit', async ($, event, next) => {
-    if (!(await active($))) {
-      return next(event);
+    if (await active($)) {
+      generation = await admitPrompt($, snapshotOf(event), generation);
     }
-    const prepared = await preparePolicy($, event.session_id, event.cwd, generation);
-    if (!prepared) {
-      return { block: 'Multi policy is not ready; submit the prompt again.' };
-    }
-    generation = prepared.generation;
-    const response = await request($, '/multi/mod/session', {
-      policyGeneration: prepared.policyGeneration,
-      sessionId: event.session_id,
-      cwd: event.cwd,
-      model: await $.session.model(),
-      event: 'prompt',
-      generation,
-      permissionMode: event.permission_mode,
-    });
-    if (!response?.accepted) {
-      const reason = response?.error;
-      return {
-        block: reason
-          ? `Multi permission snapshot was not acknowledged: ${reason}`
-          : 'Multi permission snapshot was not acknowledged; native execution is unavailable.',
-      };
-    }
-    generation = typeof response.generation === 'number' ? response.generation : undefined;
     return next(event);
   });
   on('classic.SessionStart', async ($, event, next) => {
-    if (!(await active($))) {
-      return next(event);
-    }
-    const permissionMode = event.permission_mode;
-    if (typeof permissionMode !== 'string') {
-      return next(event);
-    }
-    const prepared = await preparePolicy($, event.session_id, event.cwd, generation);
-    if (!prepared) {
-      return next(event);
-    }
-    generation = prepared.generation;
-    const response = await request($, '/multi/mod/session', {
-      policyGeneration: prepared.policyGeneration,
-      sessionId: event.session_id,
-      cwd: event.cwd,
-      model: await $.session.model(),
-      event: 'prompt',
-      generation,
-      permissionMode,
-    });
-    if (response?.accepted) {
-      generation = typeof response.generation === 'number' ? response.generation : undefined;
+    if ((await active($)) && typeof event.permission_mode === 'string') {
+      generation = await admitPrompt($, snapshotOf(event), generation);
     }
     return next(event);
   });
@@ -235,7 +196,53 @@ function refusal(result: { text: string; status: number }): GatewayResponse {
   } catch {
     // A non-JSON body still names the status below.
   }
-  return { refused: true, error: error ?? `gateway ${result.status}` };
+  return {
+    refused: true,
+    httpStatus: result.status,
+    error: error ?? `gateway ${result.status}`,
+  };
+}
+
+type PromptSnapshot = { sessionId: string; cwd: string; permissionMode: unknown };
+
+function snapshotOf(event: { session_id: string; cwd: string; permission_mode?: string }) {
+  return { sessionId: event.session_id, cwd: event.cwd, permissionMode: event.permission_mode };
+}
+
+/**
+ * Records the prompt's permission snapshot and answers the generation to carry
+ * forward, or `undefined` when nothing was admitted.
+ *
+ * Admission never blocks the prompt. A failure leaves the gateway holding no
+ * parent context for this session, which the permission hook rebuilds from the
+ * live mode on the turn's first tool call; until then every native worker spawn
+ * is denied with the gateway's own reason, and a spawn whose mode no longer
+ * matches an older snapshot is refused as inconsistent.
+ *
+ * Exported for offline coverage of that admission.
+ */
+export async function admitPrompt(
+  $: EngineInterface,
+  snapshot: PromptSnapshot,
+  sourceGeneration: number | undefined,
+): Promise<number | undefined> {
+  const prepared = await preparePolicy($, snapshot.sessionId, snapshot.cwd, sourceGeneration);
+  if (!prepared) {
+    return undefined;
+  }
+  const response = await request($, '/multi/mod/session', {
+    policyGeneration: prepared.policyGeneration,
+    sessionId: snapshot.sessionId,
+    cwd: snapshot.cwd,
+    model: await $.session.model(),
+    event: 'prompt',
+    generation: prepared.generation,
+    permissionMode: snapshot.permissionMode,
+  });
+  if (!response?.accepted || typeof response.generation !== 'number') {
+    return undefined;
+  }
+  return response.generation;
 }
 
 type PolicyHandoff = { policyGeneration: string; generation: number | undefined };
@@ -250,13 +257,15 @@ export async function preparePolicy(
   let generation = sourceGeneration;
   let started = await request($, '/multi/mod/policy', { sessionId, cwd, sourceGeneration });
   if (started?.refused) {
-    // A reloaded hooks module forgets the mode generation the gateway still holds,
-    // and every later prompt would read stale. Adopt the gateway's own value once.
+    // A reloaded hooks module keeps a mode generation the gateway no longer agrees
+    // with, and `/clear` detaches the session so the gateway holds none at all;
+    // either way every later prompt reads stale. Adopt the gateway's own value once,
+    // including the absence of one, which begins a fresh session.
     const resynced = await modeGeneration($, sessionId);
-    if (resynced === undefined || resynced === generation) {
+    if (!resynced || resynced.generation === generation) {
       return undefined;
     }
-    generation = resynced;
+    generation = resynced.generation;
     started = await request($, '/multi/mod/policy', {
       sessionId,
       cwd,
@@ -287,7 +296,16 @@ async function awaitPolicy($: EngineInterface, sessionId: string, generation: st
   return undefined;
 }
 
+/** The gateway's own mode generation, or `{ generation: undefined }` when it holds none. */
 async function modeGeneration($: EngineInterface, sessionId: string) {
   const mode = await request($, `/multi/mod/mode?sessionId=${encodeURIComponent(sessionId)}`, {});
-  return typeof mode?.generation === 'number' ? mode.generation : undefined;
+  if (typeof mode?.generation === 'number') {
+    return { generation: mode.generation };
+  }
+  // A 409 is the gateway answering that it holds no mode for this session, as after
+  // `/clear` detaches it. An unreachable gateway leaves the truth unknown instead.
+  if (mode && (!mode.refused || mode.httpStatus === 409)) {
+    return { generation: undefined };
+  }
+  return undefined;
 }
