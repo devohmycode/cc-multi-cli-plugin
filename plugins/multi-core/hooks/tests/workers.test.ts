@@ -78,7 +78,7 @@ test('a refused spawn shows the gateway reason instead of the generic denial', a
     return { model: 'm', agentId: 'worker' };
   });
   const result = await $.agent.spawn({ prompt: 'task', subagentType: 'cursor' });
-  expect(result.deny).toBe('Claude permission mode is unavailable; submit a new prompt');
+  expect(result.deny).toContain('Claude permission mode is unavailable; submit a new prompt');
   expect(started).toBe(false);
 });
 
@@ -91,7 +91,7 @@ test('a non-JSON gateway refusal still names the status in the denial', async ($
   }));
   on('agent.spawn', () => ({ model: 'm', agentId: 'worker' }));
   const result = await $.agent.spawn({ prompt: 'task', subagentType: 'cursor' });
-  expect(result.deny).toBe('gateway 502: upstream failure');
+  expect(result.deny).toContain('gateway 502: upstream failure');
 });
 
 test('a refused reply cannot acknowledge a spawn through its body', async ($, on) => {
@@ -115,7 +115,8 @@ test('a refused reply cannot acknowledge a spawn through its body', async ($, on
     return { model: 'm', agentId: 'worker' };
   });
   const result = await $.agent.spawn({ prompt: 'task', subagentType: 'cursor' });
-  expect(result.deny).toBe('policy refused');
+  expect(result.deny).toContain('policy refused');
+  expect(result.deny).toContain('issues/new?template=bug_report.yml');
   expect(started).toBe(false);
 });
 

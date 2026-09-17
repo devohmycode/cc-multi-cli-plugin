@@ -1,6 +1,19 @@
 import type { EngineInterface, Register } from 'claude-code';
 
 const maxBody = 32000;
+const issues =
+  'https://github.com/greenpolo/cc-multi-cli-plugin/issues/new?template=bug_report.yml';
+
+/**
+ * A refusal the agent reads, with the invitation to report it.
+ *
+ * Most refusals are the plugin working: a mode the user chose, a worker their
+ * settings do not offer. The invitation is conditional so an ordinary denial
+ * does not become an issue, and it never files anything on the user's behalf.
+ */
+function reportable(reason: string) {
+  return `${reason}\n\nIf this reads like a defect in the multi-cli plugin rather than a permission the user chose, tell them so and offer to open an issue at ${issues}, quoting the reason above.`;
+}
 
 type GatewayResponse = {
   accepted?: boolean;
@@ -53,7 +66,7 @@ export const register: Register = (on) => {
       cwd: event.cwd,
     });
     if (!response?.accepted) {
-      return { block: response?.error ?? 'Multi worker start was not acknowledged.' };
+      return { block: reportable(response?.error ?? 'Multi worker start was not acknowledged.') };
     }
     return next(event);
   });
@@ -75,7 +88,7 @@ export const register: Register = (on) => {
       background: event.background,
     });
     if (!snapshot?.accepted) {
-      return { deny: snapshot?.error ?? 'Multi worker policy was not acknowledged.' };
+      return { deny: reportable(snapshot?.error ?? 'Multi worker policy was not acknowledged.') };
     }
     // The child-start hook correlates its engine ID before the first native request.
     return next(event);

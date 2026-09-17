@@ -6,6 +6,12 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Invite a bug report when a worker refusal looks like a defect. Worker spawn
+  and start refusals now carry the issue-template link alongside the gateway's
+  own reason, conditioned on the refusal not being a permission the user chose,
+  so an ordinary denial does not turn into an issue and nothing is filed on the
+  user's behalf.
+
 - Stop blocking prompts on permission admission. A prompt whose policy could not
   be admitted was rejected outright, which was unrecoverable by anything the user
   could type: no engine hook fires on a permission-mode change, so toggling modes
