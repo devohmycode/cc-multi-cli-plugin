@@ -6,6 +6,12 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Draw the `/multi-usage` pane again. Its provider tabs passed
+  `autoFocus: false` for every unselected tab, but the prop is typed
+  `true | absent`, so the whole client tree failed validation and the pane
+  showed `JSX element <Button key="openai"> autoFocus is true or absent`
+  instead of usage. The flag is now present only on the selected tab.
+
 - Restore missing parent permission context from the next Claude tool call. The
   gateway now re-runs its settings-policy admission with the hook's current mode
   and workspace, so worker spawning recovers when prompt admission was missed.

@@ -59,7 +59,8 @@ const view: ClientModule<UsagePaneProps, State> = (props, surface) => {
           Button({
             key: tab.id,
             label: tab.id === state.selected ? `[${tab.name}]` : tab.name,
-            autoFocus: tab.id === 'all',
+            // `autoFocus` is typed `true | absent`; passing `false` fails tree validation.
+            ...(tab.id === state.selected ? { autoFocus: true as const } : {}),
             onPress: () => choose(tab.id),
           }),
         ),
