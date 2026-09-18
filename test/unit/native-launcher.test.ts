@@ -265,9 +265,9 @@ result(JSON.stringify({settings,agents:Object.keys(agents),models:args.filter(x=
   );
   assert(!pickerModels.includes('multi/zen/gpt-5.6-luna'));
   assert(!pickerModels.includes('multi/zen/big-pickle'));
-  assert(result.agents.includes('zen-gpt-5.6-luna'));
-  assert(result.agents.includes('zen-gpt-5.6-luna-high'));
-  assert(result.agents.includes('zen-big-pickle'));
+  assert(!result.agents.includes('zen-gpt-5.6-luna'));
+  assert(!result.agents.includes('zen-gpt-5.6-luna-high'));
+  assert(!result.agents.includes('zen-big-pickle'));
   assert(!result.agents.includes('zen-big-pickle-medium'));
   assert.equal(result.zenKeyInChild, undefined);
   assert.equal(result.settings.permissions.disableAutoMode, 'disable');
@@ -315,11 +315,33 @@ result(JSON.stringify({settings,agents:Object.keys(agents),models:args.filter(x=
     ['multi/zen/big-pickle', 'multi/zen/glm-5.2'],
   );
   assert.deepEqual(filtered.models, ['multi/zen/big-pickle']);
-  assert(filtered.agents.includes('zen-gpt-5.6-luna-high'));
+  assert.deepEqual(filtered.agents.sort(), ['zen-big-pickle', 'zen-glm-5.2']);
+  const outsideDefaults = JSON.parse((await launchFiltered('multi/zen/kimi-k2.7-code')).stdout);
+  assert.deepEqual(
+    outsideDefaults.settings.modelPicker.options.map((option: { model: string }) => option.model),
+    ['multi/zen/kimi-k2.7-code'],
+  );
+  assert.deepEqual(outsideDefaults.agents, ['zen-kimi-k2.7-code']);
+  const all = JSON.parse((await launchFiltered('all')).stdout);
+  assert(all.settings.modelPicker.options.length >= ZEN_MODELS.length);
+  assert(all.agents.includes('zen-kimi-k2.7-code'));
+  const plus = JSON.parse((await launchFiltered('+multi/zen/kimi-k2.7-code')).stdout);
+  assert(
+    plus.settings.modelPicker.options.some(
+      (option: { model: string }) => option.model === 'multi/zen/kimi-k2.7-code',
+    ),
+  );
+  assert(
+    plus.settings.modelPicker.options.some(
+      (option: { model: string }) => option.model === 'multi/zen/big-pickle',
+    ),
+  );
+  assert(plus.agents.includes('zen-kimi-k2.7-code'));
   const hidden = JSON.parse(
     (await launchFiltered('', ['--model', 'multi/zen/gpt-5.6-luna'])).stdout,
   );
   assert.deepEqual(hidden.settings.modelPicker.options, []);
+  assert.deepEqual(hidden.agents, []);
   assert.deepEqual(hidden.models, ['multi/zen/gpt-5.6-luna']);
   await assert.rejects(launchFiltered('multi/zen/typo'), /MULTI_MODELS: model is not available/);
 });
@@ -522,6 +544,39 @@ test('launcher registers only Cursor picker workers and keeps the representative
   assert(!Object.keys(agents).some((name) => name.includes('catalog-only')));
   assert(definitionBytes < 30000, `representative worker JSON was ${definitionBytes} bytes`);
   assert.equal(ZEN_MODELS.length, 19);
+});
+
+test('worker registration follows selected models and retains their effort aliases', () => {
+  const selected = ['multi/openai/gpt-5.6-luna', 'multi/zen/gpt-5.6-sol'];
+  const agents = workerDefinitions(true, [], true, [], selected);
+  assert.deepEqual(new Set(Object.values(agents).map((worker) => worker.model)), new Set(selected));
+  assert.equal(Object.keys(agents).length, 12);
+  assert.equal(agents['openai-luna-high'].effort, 'high');
+  assert.equal(agents['zen-gpt-5.6-sol-max'].effort, 'max');
+  assert.deepEqual(workerDefinitions(true, [], true, [], []), {});
+});
+
+test('selected synthesized Antigravity rows retain variants without selecting independent rows', () => {
+  const models = ['gemini-low', 'gemini-high', 'claude', 'claude-high'].map((id) => ({
+    id,
+    model: `multi/antigravity/${id}`,
+    worker: `antigravity-${id}`,
+    label: id,
+  }));
+  const agents = workerDefinitions(false, [], false, models, [
+    'multi/antigravity/gemini',
+    'multi/antigravity/claude',
+  ]);
+  assert.deepEqual(Object.keys(agents).sort(), [
+    'antigravity-claude',
+    'antigravity-gemini',
+    'antigravity-gemini-high',
+    'antigravity-gemini-low',
+  ]);
+  assert.deepEqual(
+    Object.keys(workerDefinitions(false, [], false, models, ['multi/antigravity/claude-high'])),
+    ['antigravity-claude-high'],
+  );
 });
 
 test('launcher argument limits are platform-aware and identify largest providers', () => {

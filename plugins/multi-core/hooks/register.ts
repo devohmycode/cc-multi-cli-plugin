@@ -114,7 +114,8 @@ export const register: Register = (on, options) => {
       description: 'Open provider quotas, spend, and session receipts.',
       immediate: true,
     });
-    for (const [name, description] of displayTools) {
+    const cursorAvailable = (await $.env.get('MULTI_CURSOR_DISPLAY_TOOLS')) === '1';
+    for (const [name, description] of cursorAvailable ? displayTools : []) {
       try {
         await $.tool.register({
           name: `cursor_${name}`,

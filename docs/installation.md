@@ -39,7 +39,7 @@ re-running setup without them keeps your choices.
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--command <name>` | `claude-multi` | Name of the launch command placed on PATH. `multi` is reserved. |
-| `--models <selection>` | `all` | External rows in `/model`: `all`, `none`, or comma-separated full IDs such as `multi/openai/gpt-6-astra,multi/cursor/grok-4.6`. Claude's own models always stay listed. |
+| `--models <selection>` | Curated provider defaults | External rows in `/model` and their workers: `all` for the full connected catalog, `none`, comma-separated full IDs, or `+<ids>` to add models to the saved selection. Claude's own models always stay listed. |
 
 ```text
 /multi-core:setup --command multiclaude --models multi/openai/gpt-6-astra,multi/zen/kimi-k2.5
@@ -53,6 +53,19 @@ Multi session pass through to plain Claude. Setup prints a warning when you pick
 that name; re-run with `--command claude-multi` to restore the default. Setting
 `MULTI_MODELS` in the environment overrides the saved model selection for one
 launch. Model IDs are listed in each provider's documentation.
+
+The default picker shows four OpenAI, three Cursor, and six Zen models when those
+providers are connected. A model absent from these defaults can be selected with
+its full ID using `--models`; the full connected catalog remains available for
+explicit selection. Use `--cursor-models` or `--zen-models` to inspect IDs. To add
+one model, run `/multi-core:setup --models +multi/zen/kimi-k2.7-code`. With no
+saved selection, this extends the curated defaults. Re-running setup without
+`--models` preserves your selection;
+existing installations with no saved selection keep the curated defaults. The
+selected rows also bound Multi's registered workers. If a requested worker is
+unavailable, add its model to the displayed selection and relaunch. Effort aliases for each
+selected model remain available, though Claude's worker announcement lists the
+model only once.
 
 ## Connect accounts
 
@@ -85,7 +98,7 @@ then remove the provider and core plugins through `/plugin` if desired.
 3. Ask two optional questions, offering the defaults: what to name the launch
    command (default `claude-multi`; explain that only the name differs from a
    plain launch, and that `claude` would shadow the plain command), and which
-   external models to show in `/model` (default all; full IDs are in the provider
+   external models to show in `/model` (curated defaults; full IDs are in the provider
    docs). Run `/multi-core:setup` with `--command` and `--models` as chosen and
    explain the marked PATH change.
 4. Hand browser sign-in to the human. Have the human enter Zen keys in a separate

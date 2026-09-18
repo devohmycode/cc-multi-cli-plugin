@@ -6,6 +6,19 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Let explicit model selections reach the full connected Cursor and Zen catalogs,
+  including models outside the curated picker defaults. `--models all` now saves
+  an explicit full-catalog choice; existing installs without a saved selection
+  keep the compact provider defaults. `--models +<ids>` extends the saved
+  selection or the curated defaults. Selected models still control registered
+  workers, and effort aliases remain callable while announced once per model.
+
+- Bound registered workers to the selected model-picker rows before starting
+  Claude, retaining effort aliases for selected models. Hidden models no longer
+  populate Claude's native worker catalog and rely solely on gateway text
+  filtering. Register Cursor display tools only when a Cursor harness is
+  available, avoiding those extra schemas in Claude/OpenAI/Zen-only launches.
+
 - Keep provider boundaries aligned with execution. Claude, OpenAI, and Zen
   workers record prompt identity while Cursor and Antigravity load full managed
   settings policy at harness prompts or when a harness worker is requested.

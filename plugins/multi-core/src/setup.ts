@@ -12,7 +12,7 @@ function detectedShell(env: NodeJS.ProcessEnv, platform: NodeJS.Platform) {
 }
 
 const USAGE =
-  'Usage: setup.ts [--shell bash|zsh|fish|powershell|cmd] [--claude /absolute/path] [--command name] [--models all|none|<id,id,...>]';
+  'Usage: setup.ts [--shell bash|zsh|fish|powershell|cmd] [--claude /absolute/path] [--command name] [--models all|none|<id,id,...>|+<id,id,...>]';
 
 function parseArguments(args: string[]) {
   let shell = detectedShell(process.env, process.platform);
@@ -45,6 +45,12 @@ function describeModels(models: string | undefined) {
   }
   if (models === '') {
     return '/model hides external rows; Claude models remain available.';
+  }
+  if (models === 'all') {
+    return '/model shows the full connected model catalog.';
+  }
+  if (models.startsWith('+')) {
+    return `/model shows the curated defaults plus: ${models.slice(1).split(',').join(', ')}.`;
   }
   return `/model shows only: ${models.split(',').join(', ')}.`;
 }

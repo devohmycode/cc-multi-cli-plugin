@@ -18,10 +18,16 @@ setup. Use the defaults unless the user chooses otherwise:
   works, such as `multiclaude`; pass it with `--command <name>`. Naming it `claude`
   shadows the plain command for every launch, including scripts, editors and agents
   that run `claude`; explain that before accepting it.
-- **Models shown in `/model`** (default: all connected providers' rows). Pass
+- **Models shown in `/model`** (default: curated rows for connected providers). Pass
   `--models <id,id,...>` with full IDs such as `multi/openai/gpt-6-astra` from the
-  provider docs, `--models none` to hide external rows, or `--models all` to restore
-  defaults. Claude's own models always stay listed.
+  provider docs, `--models none` to hide external rows, or `--models all` to show
+  the full connected catalog. Claude's own models always stay listed. Use
+  `--models +<id,id,...>` to add models to the saved selection; with no saved
+  selection, it extends the curated defaults. Existing explicit selections
+  remain until changed. If a requested worker is unavailable, find its model ID
+  in the provider docs or with `--cursor-models` / `--zen-models`, add it to the
+  displayed models, and relaunch the session. Do not inject model-selection
+  advice at every worker spawn.
 
 Run the fixed helper using this plugin's root, adding the chosen flags:
 

@@ -28,7 +28,12 @@ import { readCodexAuth } from '../../multi-openai/src/auth.ts';
 import { MODELS, OPENAI_WORKERS } from '../../multi-openai/src/models.ts';
 import type { Effort } from '../../multi-openai/src/responses.ts';
 import { readZenKey } from '../../multi-zen/src/auth.ts';
-import { ZEN_MODELS, ZEN_WORKERS, zenPickerOptions } from '../../multi-zen/src/models.ts';
+import {
+  ZEN_MODELS,
+  ZEN_WORKERS,
+  zenModelOptions,
+  zenPickerOptions,
+} from '../../multi-zen/src/models.ts';
 import { AgentCatalog } from './gateway/agent-catalog.ts';
 import {
   loadWorkerPermissions,
@@ -96,10 +101,8 @@ async function main() {
   const pluginRoot = await findPluginRoot(fileURLToPath(import.meta.url));
   await assertFunctionHooksSupported();
   const anthropic = await anthropicSignedIn();
-  const cursorPicker = cursorPickerOptions(
-    cursorModels,
-    cursorModels.length ? process.env.MULTI_CURSOR_EXTRA_MODELS : undefined,
-  );
+  const fullCatalog = process.env.MULTI_MODELS !== undefined;
+  const cursorPicker = selectedCursorOptions(cursorModels, fullCatalog);
   const authFile = path.join(
     process.env.CODEX_HOME || path.join(os.homedir(), '.codex'),
     'auth.json',
@@ -108,13 +111,27 @@ async function main() {
   const zenKey = providerEnabled('zen') ? await readZenKey() : undefined;
   const antigravityModels = await discoverAntigravity();
   const token = randomBytes(32).toString('hex');
-  const settings = pickerSettings(codexSignedIn, cursorPicker, Boolean(zenKey), antigravityModels);
+  const defaultModels = fullCatalog
+    ? pickerSettings(
+        codexSignedIn,
+        selectedCursorOptions(cursorModels, false),
+        Boolean(zenKey),
+        antigravityModels,
+      ).modelPicker.options.map((option) => option.model)
+    : [];
+  const settings = pickerSettings(
+    codexSignedIn,
+    cursorPicker,
+    Boolean(zenKey),
+    antigravityModels,
+    fullCatalog,
+  );
   await mergeSettings(args, settings);
   // The supervisor does not transfer --agents or our session-local gateway env,
   // and can outlive the child whose exit releases settingsDir and the gateway.
   // Keep ordinary background subagent tasks available within this owned session.
   settings.disableAgentView = true;
-  filterPicker(settings, process.env.MULTI_MODELS);
+  filterPicker(settings, process.env.MULTI_MODELS, defaultModels);
   const callerSettings = structuredClone(settings);
   const { cursor, antigravity } = nativeHarnesses(
     cursorModels,
@@ -122,7 +139,13 @@ async function main() {
     args,
     callerSettings,
   );
-  const agents = workerDefinitions(codexSignedIn, cursorPicker, Boolean(zenKey), antigravityModels);
+  const agents = workerDefinitions(
+    codexSignedIn,
+    cursorPicker,
+    Boolean(zenKey),
+    antigravityModels,
+    settings.modelPicker.options.map((option) => option.model),
+  );
   const modBridge = new ModBridge();
   const settingsDir = await mkdtemp(path.join(os.tmpdir(), 'multi-native-settings-'));
   const callerSettingsFile = path.join(settingsDir, 'caller-settings.json');
@@ -196,7 +219,7 @@ async function main() {
   configureApproval(settings, approvalProviders, selectedModel, Boolean(antigravity), anthropic);
   await writeFile(settingsFile, JSON.stringify(settings), { mode: 0o600 });
   const definitions = JSON.stringify(agents);
-  const childEnvironment = gatewayEnvironment(address.port, token, anthropic);
+  const childEnvironment = gatewayEnvironment(address.port, token, anthropic, Boolean(cursor));
   const claudePath = resolveExecutable('claude', {
     configuredPath: claudeExecutable,
     env: childEnvironment,
@@ -534,6 +557,7 @@ export function workerDefinitions(
   cursorPicker: CursorModelOption[],
   zen: boolean,
   antigravityModels: AntigravityModel[],
+  selectedModels?: readonly string[],
 ) {
   const agents: Record<string, AgentDefinition> = Object.fromEntries(
     Object.entries(codexSignedIn ? OPENAI_WORKERS : {}).map(([name, { model, effort }]) => [
@@ -574,7 +598,30 @@ export function workerDefinitions(
       ...(effort ? { effort } : {}),
     };
   }
-  return agents;
+  return selectWorkers(agents, antigravityModels, selectedModels);
+}
+
+function selectWorkers(
+  agents: Record<string, AgentDefinition>,
+  antigravityModels: readonly AntigravityModel[],
+  selectedModels: readonly string[] | undefined,
+) {
+  if (selectedModels === undefined) {
+    return agents;
+  }
+  const selected = new Set(selectedModels);
+  const nativeModels = new Set(antigravityModels.map((option) => option.model));
+  for (const option of antigravityModels) {
+    const base = option.model.replace(/-(low|medium|high)$/, '');
+    // Synthesized picker rows own their native effort variants. Independently
+    // advertised base and variant rows remain separate selections.
+    if (!nativeModels.has(base) && selected.has(base)) {
+      selected.add(option.model);
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(agents).filter(([, worker]) => selected.has(worker.model)),
+  );
 }
 
 interface LauncherInvocation {
@@ -663,13 +710,21 @@ async function initialSelection(args: string[], settings: LaunchSettings, anthro
   return { initialModel, selectedModel: initialModel ?? fallback };
 }
 
-function filterPicker(settings: LaunchSettings, selection: string | undefined) {
+function filterPicker(
+  settings: LaunchSettings,
+  selection: string | undefined,
+  defaultModels: readonly string[] = [],
+) {
   if (selection === undefined) {
     return;
   }
+  if (selection === 'all') {
+    return;
+  }
+  const additive = selection.startsWith('+');
   const models = [
     ...new Set(
-      selection
+      (additive ? `${defaultModels.join(',')},${selection.slice(1)}` : selection)
         .split(',')
         .map((model) => model.trim())
         .filter(Boolean),
@@ -679,7 +734,9 @@ function filterPicker(settings: LaunchSettings, selection: string | undefined) {
   settings.modelPicker.options = models.map((model) => {
     const option = available.get(model);
     if (!option) {
-      throw new Error(`MULTI_MODELS: model is not available in this launcher's picker: ${model}`);
+      throw new Error(
+        `MULTI_MODELS: model is not available from a connected provider in this launcher's picker: ${model}. Check the full ID with --cursor-models or --zen-models, then add it with /multi-core:setup --models <id>.`,
+      );
     }
     return option;
   });
@@ -831,6 +888,16 @@ function printCursorModels(cursorModels: CursorModelOption[], cursorSignedIn: bo
   );
 }
 
+function selectedCursorOptions(cursorModels: CursorModelOption[], fullCatalog: boolean) {
+  if (fullCatalog) {
+    return cursorModels;
+  }
+  return cursorPickerOptions(
+    cursorModels,
+    cursorModels.length ? process.env.MULTI_CURSOR_EXTRA_MODELS : undefined,
+  );
+}
+
 /** Client compatibility only, not provider equivalence. Both profiles default to 200K
  * in Claude 2.1.267; newer xhigh profiles imply native 1M and are deliberately not used.
  * Provider validation remains authoritative for every requested effort value. */
@@ -843,7 +910,12 @@ function pickerSettings(
   cursorPicker: CursorModelOption[],
   zen: boolean,
   antigravityModels: AntigravityModel[],
+  fullCatalog = false,
 ) {
+  let zenOptions = zenPickerOptions('');
+  if (zen) {
+    zenOptions = fullCatalog ? zenModelOptions() : zenPickerOptions(process.env.MULTI_ZEN_MODELS);
+  }
   const settings: LaunchSettings = {
     modelPicker: {
       options: [
@@ -868,14 +940,12 @@ function pickerSettings(
           behavesAs: pickerProfile(true),
           description: 'Native Antigravity CLI',
         })),
-        ...(zen ? zenPickerOptions(process.env.MULTI_ZEN_MODELS) : []).map(
-          ({ model, label, efforts }) => ({
-            model,
-            label: `Zen · ${label}`,
-            behavesAs: pickerProfile(Boolean(efforts?.length)),
-            description: `Zen API billing · Claude tools${efforts ? '' : ' · native reasoning; /effort not applicable'}`,
-          }),
-        ),
+        ...zenOptions.map(({ model, label, efforts }) => ({
+          model,
+          label: `Zen · ${label}`,
+          behavesAs: pickerProfile(Boolean(efforts?.length)),
+          description: `Zen API billing · Claude tools${efforts ? '' : ' · native reasoning; /effort not applicable'}`,
+        })),
       ],
     },
   };
@@ -905,7 +975,7 @@ function translateTrafficPolicy(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   };
 }
 
-function gatewayEnvironment(port: number, token: string, anthropic: boolean) {
+function gatewayEnvironment(port: number, token: string, anthropic: boolean, cursor: boolean) {
   const env = translateTrafficPolicy({ ...process.env });
   delete env.OPENCODE_API_KEY;
   return {
@@ -919,6 +989,7 @@ function gatewayEnvironment(port: number, token: string, anthropic: boolean) {
     // We forward Claude tool references; preserve an explicit user preference.
     ENABLE_TOOL_SEARCH: process.env.ENABLE_TOOL_SEARCH ?? 'auto',
     MULTI_GATEWAY_TOKEN: token,
+    MULTI_CURSOR_DISPLAY_TOOLS: cursor ? '1' : '0',
     CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1',
     MULTI_MOD_GATEWAY_URL: `http://127.0.0.1:${port}`,
     ...(!anthropic ? { ANTHROPIC_AUTH_TOKEN: token } : {}),

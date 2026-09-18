@@ -60,7 +60,7 @@ Install any subset; each provider pulls in the shared `multi-core` plugin. Open 
 
 Paste this into any coding agent:
 
-> Install cc-multi-cli-plugin by following https://github.com/greenpolo/cc-multi-cli-plugin/blob/main/docs/installation.md#for-agents. Ask which providers I want, what to name the launch command (default `claude-multi`), and which models to show in `/model` (default all). Hand browser logins and API-key entry to me, and never ask for credentials in chat.
+> Install cc-multi-cli-plugin by following https://github.com/greenpolo/cc-multi-cli-plugin/blob/main/docs/installation.md#for-agents. Ask which providers I want, what to name the launch command (default `claude-multi`), and which models to show in `/model` (curated provider defaults). Hand browser logins and API-key entry to me, and never ask for credentials in chat.
 
 </details>
 

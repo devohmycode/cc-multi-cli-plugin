@@ -40,7 +40,7 @@ export interface InstallationOptions {
   homedir?: string;
   shell?: string;
   command?: string;
-  /** Picker rows to show: `all` (launcher defaults), `none`, or comma-separated model IDs. */
+  /** Picker rows to show: `all`, `none`, IDs, or `+<ids>` to extend the saved selection. */
   models?: string;
 }
 
@@ -121,18 +121,25 @@ function validateCommand(command: string) {
   return command;
 }
 
-/** Normalize a `--models` value: `all` clears the selection and `none` hides external rows. */
-function normalizeModels(value: string | undefined): string | undefined {
-  if (value === undefined || value.trim().toLowerCase() === 'all') {
+/** Normalize a `--models` value: `all` requests the full connected catalog. */
+function normalizeModels(value: string | undefined, previous?: string): string | undefined {
+  if (value === undefined) {
     return undefined;
+  }
+  if (value.trim().toLowerCase() === 'all') {
+    return 'all';
   }
   if (value.trim().toLowerCase() === 'none') {
     return '';
   }
-  const models = value
+  const additive = value.trim().startsWith('+');
+  const models = (additive ? value.trim().slice(1) : value)
     .split(',')
     .map((model) => model.trim())
     .filter(Boolean);
+  if (additive && models.length === 0) {
+    throw new Error('Add at least one full model ID after --models +.');
+  }
   for (const model of models) {
     if (!/^multi\/[a-z]+\/[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(model)) {
       throw new Error(
@@ -140,7 +147,15 @@ function normalizeModels(value: string | undefined): string | undefined {
       );
     }
   }
-  return [...new Set(models)].join(',');
+  if (!additive) {
+    return [...new Set(models)].join(',');
+  }
+  if (previous === 'all') {
+    return 'all';
+  }
+  const base = previous?.startsWith('+') ? previous.slice(1) : previous;
+  const combined = [...new Set([...(base ? base.split(',') : []), ...models])].join(',');
+  return previous === undefined || previous.startsWith('+') ? `+${combined}` : combined;
 }
 
 /** Preserve the public executable path so Claude's own updater can replace its target. */
@@ -347,7 +362,8 @@ export async function setup(
   const bin = path.join(directory, 'bin');
   const block = blockFor(bin, normalizedShell, resolved.platform);
   const command = validateCommand(options.command ?? previous?.command ?? DEFAULT_COMMAND);
-  const models = 'models' in options ? normalizeModels(options.models) : previous?.models;
+  const models =
+    'models' in options ? normalizeModels(options.models, previous?.models) : previous?.models;
   const shims = await writeRuntime(
     directory,
     bin,

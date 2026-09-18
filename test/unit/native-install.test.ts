@@ -212,12 +212,17 @@ test('setup renames the launch command, persists picker models, and keeps them a
   await f.install();
   assert.equal(JSON.parse(await readFile(stateFile, 'utf8')).command, 'mc');
   assert.equal(JSON.parse((await f.invoke('mc', [])).stdout).models, 'multi/zen/kimi-k2.5');
-  // `none` hides external rows; `all` restores launcher defaults.
+  await f.install(['--models', '+multi/zen/glm-5.2']);
+  assert.equal(
+    JSON.parse((await f.invoke('mc', [])).stdout).models,
+    'multi/zen/kimi-k2.5,multi/zen/glm-5.2',
+  );
+  // `none` hides external rows; `all` requests the full connected catalog.
   await f.install(['--models', 'none']);
   assert.equal(JSON.parse((await f.invoke('mc', [])).stdout).models, '');
   await f.install(['--models', 'all']);
-  assert.equal(JSON.parse((await f.invoke('mc', [])).stdout).models, null);
-  assert.equal('models' in JSON.parse(await readFile(stateFile, 'utf8')), false);
+  assert.equal(JSON.parse((await f.invoke('mc', [])).stdout).models, 'all');
+  assert.equal(JSON.parse(await readFile(stateFile, 'utf8')).models, 'all');
   // Renaming removes the previous shim and uninstall removes the current one.
   await f.install(['--command', 'claude-multi']);
   await assert.rejects(access(shim('mc')), /ENOENT/);
