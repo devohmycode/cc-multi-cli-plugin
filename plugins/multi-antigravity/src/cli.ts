@@ -109,13 +109,21 @@ export class AntigravityCliError extends Error {
 }
 
 const defaultMaxOutputBytes = 8 * 1024 * 1024;
-const promptArgumentLimitBytes = 128 * 1024;
+// cmd.exe caps a command line at 8,191 characters when a .cmd shim cannot be
+// bypassed; the fixed flags, executable path, cwd and quoting need the rest.
+const windowsPromptArgumentLimitBytes = 6 * 1024;
+const posixPromptArgumentLimitBytes = 128 * 1024;
 const interruptGraceMs = 1500;
 const terminateGraceMs = 1500;
 const cancellationWaitMs = interruptGraceMs + terminateGraceMs + 1000;
 
+function promptArgumentLimitBytes(platform: NodeJS.Platform): number {
+  return platform === 'win32' ? windowsPromptArgumentLimitBytes : posixPromptArgumentLimitBytes;
+}
+
 export function runAntigravity(options: AntigravityRunOptions): Promise<AntigravityRunResult> {
-  const promptOnStdin = Buffer.byteLength(options.prompt) >= promptArgumentLimitBytes;
+  const platform = options.platform ?? process.platform;
+  const promptOnStdin = Buffer.byteLength(options.prompt) >= promptArgumentLimitBytes(platform);
   const args = promptOnStdin
     ? ['--input-format', 'stream-json', '--output-format', 'stream-json']
     : ['-p', options.prompt, '--output-format', 'stream-json'];
@@ -149,7 +157,6 @@ export function runAntigravity(options: AntigravityRunOptions): Promise<Antigrav
 
   return new Promise((resolve, reject) => {
     let child: ChildProcess;
-    const platform = options.platform ?? process.platform;
     const environment = antigravityEnvironment(options.env);
     try {
       const invocation = executableInvocation(

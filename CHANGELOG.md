@@ -6,6 +6,12 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Send Antigravity prompts of 6 KiB or more through stream-json stdin on
+  Windows instead of the `-p` argument. Windows caps a command line at 32,767
+  characters, and at 8,191 when a `.cmd` shim runs through `cmd.exe`, so prompts
+  between roughly 8 KiB and the previous 128 KiB threshold failed with `spawn
+  ENAMETOOLONG` before `agy` started. POSIX keeps the 128 KiB threshold.
+
 - Let explicit model selections reach the full connected Cursor and Zen catalogs,
   including models outside the curated picker defaults. `--models all` now saves
   an explicit full-catalog choice; existing installs without a saved selection

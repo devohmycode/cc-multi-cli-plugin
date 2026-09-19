@@ -232,6 +232,73 @@ test('delivers an oversized prompt through stream-json stdin', async (t) => {
   assert.equal(output.result.status, 'SUCCESS');
 });
 
+function fakeWindowsChild() {
+  const stdin = new PassThrough();
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const stdinChunks: string[] = [];
+  stdin.on('data', (chunk: Buffer) => stdinChunks.push(chunk.toString('utf8')));
+  const child = Object.assign(new EventEmitter(), { pid: 4242, stdin, stdout, stderr });
+  const spawnArgs: string[] = [];
+  const spawnStub = (
+    _command: string,
+    args?: readonly string[],
+  ): import('node:child_process').ChildProcess => {
+    spawnArgs.push(...(args ?? []));
+    setImmediate(() => {
+      stdout.write('{"event":"init","conversation_id":"conv-1","init":{}}\n');
+      stdout.write(
+        '{"event":"result","result":{"conversation_id":"conv-1","status":"SUCCESS","response":"done"}}\n',
+      );
+      stdout.end();
+      child.emit('close', 0, null);
+    });
+    return child as unknown as import('node:child_process').ChildProcess;
+  };
+  return { spawn: spawnStub, spawnArgs, stdin: () => stdinChunks.join('') };
+}
+
+test('a mid-sized prompt takes the stdin path on Windows but stays an argument on POSIX', async () => {
+  const prompt = `mid ${'x'.repeat(16 * 1024)}`;
+  const onWindows = fakeWindowsChild();
+  const windowsRun = await runAntigravity({
+    cwd: process.cwd(),
+    executable: process.execPath,
+    prompt,
+    platform: 'win32',
+    signal: AbortSignal.timeout(5000),
+    spawn: onWindows.spawn,
+  });
+  assert.equal(windowsRun.result.status, 'SUCCESS');
+  assert.equal(onWindows.spawnArgs.includes('-p'), false);
+  assert.deepEqual(onWindows.spawnArgs.slice(0, 2), ['--input-format', 'stream-json']);
+  assert.equal(onWindows.stdin().includes(prompt), true);
+
+  const onPosix = fakeWindowsChild();
+  const posixRun = await runAntigravity({
+    cwd: process.cwd(),
+    executable: process.execPath,
+    prompt,
+    platform: 'linux',
+    signal: AbortSignal.timeout(5000),
+    spawn: onPosix.spawn,
+  });
+  assert.equal(posixRun.result.status, 'SUCCESS');
+  assert.deepEqual(onPosix.spawnArgs.slice(0, 2), ['-p', prompt]);
+  assert.equal(onPosix.stdin(), '');
+
+  const short = fakeWindowsChild();
+  await runAntigravity({
+    cwd: process.cwd(),
+    executable: process.execPath,
+    prompt: 'hello',
+    platform: 'win32',
+    signal: AbortSignal.timeout(5000),
+    spawn: short.spawn,
+  });
+  assert.deepEqual(short.spawnArgs.slice(0, 2), ['-p', 'hello']);
+});
+
 test('escalates cancellation and reports missing terminal evidence as aborted', async (t) => {
   const cli = await fakeCli(t);
   const controller = new AbortController();
