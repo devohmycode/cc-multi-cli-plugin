@@ -232,24 +232,30 @@ async function managedCommandPolicy(
   options: Required<CursorSettingsOptions>,
   command: string,
   args: readonly string[],
+  retry?: () => Promise<string | undefined>,
 ): Promise<WorkerPermissions[]> {
-  let source: string;
+  let source: string | undefined;
   try {
     source = await options.runCommand(command, args);
   } catch (error) {
     if (managedPolicyCommandAbsent(command, error)) {
       return [];
     }
-    throw new Error(`Native Cursor cannot observe managed policy via ${command}: ${String(error)}`);
+    if (!retry || !failedWithExitCode(error, 1)) {
+      throw new Error(
+        `Native Cursor cannot observe managed policy via ${command}: ${String(error)}`,
+      );
+    }
+    source = await retry();
   }
-  if (!source.trim()) {
+  if (source === undefined || !source.trim()) {
     return [];
   }
   return [managedPolicy(parsePolicyValue(source), `${command} ${args.join(' ')}`)];
 }
 
 function managedPolicyCommandAbsent(command: string, error: unknown): boolean {
-  if (!(error instanceof Error) || !('code' in error) || error.code !== 1 || !('stderr' in error)) {
+  if (!failedWithExitCode(error, 1) || !('stderr' in error)) {
     return false;
   }
   const stderr = String(error.stderr);
@@ -259,20 +265,59 @@ function managedPolicyCommandAbsent(command: string, error: unknown): boolean {
   return command === 'reg' && /unable to find the specified registry key or value/i.test(stderr);
 }
 
+function failedWithExitCode(error: unknown, code: number): error is Error & { code: number } {
+  return error instanceof Error && 'code' in error && error.code === code;
+}
+
 async function managedRegistryPolicies(
   options: Required<CursorSettingsOptions>,
 ): Promise<WorkerPermissions[]> {
   const policies: WorkerPermissions[] = [];
   for (const root of ['HKLM', 'HKCU']) {
-    const source = await managedCommandPolicy(options, 'reg', [
-      'query',
-      `${root}\\SOFTWARE\\Policies\\ClaudeCode`,
-      '/v',
-      'Settings',
-    ]);
+    const key = `${root}\\SOFTWARE\\Policies\\ClaudeCode`;
+    const source = await managedCommandPolicy(
+      options,
+      'reg',
+      ['query', key, '/v', 'Settings'],
+      () => managedRegistryValue(options, root),
+    );
     policies.push(...source);
   }
   return policies;
+}
+
+// reg.exe exits 1 for an absent key, an absent value, and a denied read alike, and
+// localizes its stderr in the OEM code page, so an unrecognized failure cannot be
+// classified from text. PowerShell's error categories are locale-independent, so
+// only that fallback distinguishes absence from a real failure; English machines
+// never reach it.
+async function managedRegistryValue(
+  options: Required<CursorSettingsOptions>,
+  root: string,
+): Promise<string | undefined> {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `try { $key = Get-Item -LiteralPath '${root}:\\SOFTWARE\\Policies\\ClaudeCode' }`,
+    "catch { if ($_.CategoryInfo.Category -eq 'ObjectNotFound') { exit 3 }; throw }",
+    "$value = $key.GetValue('Settings', $null)",
+    'if ($null -eq $value) { exit 3 }',
+    '[Console]::Out.Write([string]$value)',
+  ].join('\n');
+  try {
+    return await options.runCommand('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      script,
+    ]);
+  } catch (error) {
+    if (failedWithExitCode(error, 3)) {
+      return undefined;
+    }
+    throw new Error(
+      `Native Cursor cannot observe managed policy via reg or PowerShell for ${root}: ${String(error)}`,
+    );
+  }
 }
 
 function parsePolicyValue(source: string): string {

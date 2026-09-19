@@ -86,4 +86,6 @@ registered with the interactive logon type.
 
 Managed Claude policy comes from `/etc/claude-code` on Linux and WSL,
 `/Library/Application Support/ClaudeCode` and macOS preferences on macOS, and
-`C:\Program Files\ClaudeCode` and the Windows policy keys on Windows.
+`C:\Program Files\ClaudeCode` and the Windows policy keys on Windows. Windows
+policy keys are read with `reg query`; when `reg.exe` reports a localized
+failure, Windows PowerShell classifies the key as absent or failed.

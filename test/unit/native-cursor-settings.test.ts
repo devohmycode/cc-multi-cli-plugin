@@ -174,6 +174,7 @@ for (const platform of ['darwin', 'win32'] as const) {
         ? 'The domain/default pair of (com.anthropic.claudecode, ...) does not exist'
         : 'ERROR: The system was unable to find the specified registry key or value.';
     const command = platform === 'darwin' ? 'defaults' : 'reg';
+    const commands: string[] = [];
     const absent = await checkSettings(
       '/workspace',
       ['--setting-sources='],
@@ -181,12 +182,14 @@ for (const platform of ['darwin', 'win32'] as const) {
       {
         platform,
         ...absentManagedFiles(),
-        runCommand: async () => {
+        runCommand: async (name) => {
+          commands.push(name);
           throw commandError(1, absentMessage);
         },
       },
     );
     assert.deepEqual(absent.disallowedTools, []);
+    assert.ok(commands.every((name) => name === command));
 
     await assert.rejects(
       checkSettings(
@@ -219,6 +222,86 @@ for (const platform of ['darwin', 'win32'] as const) {
     );
   });
 }
+
+const frenchRegistryAbsent =
+  "Erreur : le syst\uFFFDme n'a pas trouv\uFFFD la cl\uFFFD ou la valeur de Registre sp\uFFFDcifi\uFFFDe.";
+
+test('native Windows policy resolves localized reg failures through PowerShell', async () => {
+  const commands: string[][] = [];
+  const policy = await checkSettings(
+    'C:\\workspace',
+    ['--setting-sources='],
+    {},
+    {
+      platform: 'win32',
+      ...absentManagedFiles(),
+      runCommand: async (command, args) => {
+        commands.push([command, ...args]);
+        if (command === 'reg') {
+          throw commandError(1, frenchRegistryAbsent);
+        }
+        if (String(args.at(-1)).includes("'HKCU:\\SOFTWARE\\Policies\\ClaudeCode'")) {
+          return '{"permissions":{"deny":["Bash"]}}';
+        }
+        throw commandError(3, '');
+      },
+    },
+  );
+  assert.deepEqual(policy.disallowedTools, ['Bash']);
+  assert.deepEqual(
+    commands.map((command) => command.slice(0, 2).join(' ')),
+    ['reg query', 'powershell.exe -NoProfile', 'reg query', 'powershell.exe -NoProfile'],
+  );
+  const script = String(commands[1].at(-1));
+  assert.match(script, /Get-Item -LiteralPath 'HKLM:\\SOFTWARE\\Policies\\ClaudeCode'/);
+  assert.match(script, /ObjectNotFound.*exit 3/);
+  assert.doesNotMatch(script, /[^\x20-\x7e\n]/);
+  assert.match(script, /\ntry \{[^\n]*\}\ncatch \{/);
+});
+
+test('native Windows policy keeps failing when neither reg nor PowerShell can classify', async () => {
+  for (const failure of [
+    commandError(1, 'Access denied'),
+    commandError('ENOENT', 'no powershell'),
+  ]) {
+    const commands: string[] = [];
+    await assert.rejects(
+      checkSettings(
+        'C:\\workspace',
+        ['--setting-sources='],
+        {},
+        {
+          platform: 'win32',
+          ...absentManagedFiles(),
+          runCommand: async (command) => {
+            commands.push(command);
+            if (command === 'reg') {
+              throw commandError(1, frenchRegistryAbsent);
+            }
+            throw failure;
+          },
+        },
+      ),
+      /cannot observe managed policy via reg or PowerShell for HKLM/,
+    );
+    assert.deepEqual(commands, ['reg', 'powershell.exe']);
+  }
+  await assert.rejects(
+    checkSettings(
+      'C:\\workspace',
+      ['--setting-sources='],
+      {},
+      {
+        platform: 'win32',
+        ...absentManagedFiles(),
+        runCommand: async () => {
+          throw commandError(2, frenchRegistryAbsent);
+        },
+      },
+    ),
+    /cannot observe managed policy via reg:/,
+  );
+});
 
 test('native settings admission discovers macOS managed preferences', async () => {
   const commands: string[][] = [];

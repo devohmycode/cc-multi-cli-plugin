@@ -12,6 +12,14 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   between roughly 8 KiB and the previous 128 KiB threshold failed with `spawn
   ENAMETOOLONG` before `agy` started. POSIX keeps the 128 KiB threshold.
 
+- Start the gateway on non-English Windows. Managed policy discovery recognized
+  an absent `HKLM`/`HKCU` policy only from the English `reg.exe` message, so a
+  localized message (for example fr-FR) was treated as a failure and the
+  launcher exited before any model was reachable. An unrecognized `reg` failure
+  now asks PowerShell, whose error categories are locale-independent, to
+  distinguish an absent key or value from a real failure. English machines keep
+  the single `reg` query; genuine failures still stop the gateway (#25).
+
 - Let explicit model selections reach the full connected Cursor and Zen catalogs,
   including models outside the curated picker defaults. `--models all` now saves
   an explicit full-catalog choice; existing installs without a saved selection
