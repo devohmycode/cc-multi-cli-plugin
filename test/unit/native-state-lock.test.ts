@@ -5,10 +5,11 @@ import os, { hostname } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { lockStateFile } from '../../plugins/multi-core/src/gateway/state-lock.ts';
+import { removeTemporary } from '../temporary.ts';
 
 async function temporaryDirectory(t: test.TestContext, prefix: string): Promise<string> {
   const directory = await mkdtemp(path.join(os.tmpdir(), prefix));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTemporary(directory));
   return directory;
 }
 
@@ -172,7 +173,7 @@ test('recovers when a Windows delete-pending marker vanishes between open and st
 
 test('an empty marker left by the previous flock-based lock is taken over', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'state-lock-legacy-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTemporary(directory));
   const file = path.join(directory, 'state.lock');
   await writeFile(file, '');
   const release = await lockStateFile(file);

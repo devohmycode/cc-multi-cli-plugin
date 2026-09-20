@@ -2,11 +2,12 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { removeTemporary } from '../temporary.ts';
 import { isolatedEnvironment } from './environment.ts';
 
 /** The Claude Code stream-json events this reproducer drives and inspects. */
@@ -156,5 +157,5 @@ try {
     }
   } catch {}
   lines.close();
-  await rm(cwd, { recursive: true, force: true });
+  await removeTemporary(cwd);
 }

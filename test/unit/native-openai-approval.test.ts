@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
@@ -10,6 +10,7 @@ import {
   discoverOpenAIReviewer,
   inspectApprovalPath,
 } from '../../plugins/multi-openai/src/approval.ts';
+import { removeTemporary } from '../temporary.ts';
 
 const request = (model = 'claude-sonnet-5') => ({
   model,
@@ -61,7 +62,7 @@ test('reviewer promotes admitted hard blocks into mandatory instructions', async
 
 async function fixture(t: TestContext) {
   const cwd = await realpath(await mkdtemp(path.join(os.tmpdir(), 'approval-unit-')));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
+  t.after(() => removeTemporary(cwd));
   const authFile = path.join(cwd, 'auth.json');
   await writeFile(
     authFile,

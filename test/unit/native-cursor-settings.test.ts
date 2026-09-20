@@ -8,6 +8,7 @@ import {
   type CursorSettingsOptions,
   checkCursorSettings,
 } from '../../plugins/multi-core/src/gateway/cursor-settings.ts';
+import { removeTemporary } from '../temporary.ts';
 
 const absentManagedPolicy = async (): Promise<string> => '';
 
@@ -43,7 +44,7 @@ async function temporaryDirectory(): Promise<string> {
 
 test('native settings admission respects source selection and rechecks changed ancestor policies', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cursor-settings-'));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => removeTemporary(root));
   const config = path.join(root, 'user');
   const cwd = path.join(root, 'project', 'nested');
   await fs.mkdir(config);

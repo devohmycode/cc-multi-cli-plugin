@@ -19,6 +19,7 @@ import {
   prepareAntigravityRequest,
 } from '../../plugins/multi-antigravity/src/request.ts';
 import type { PermissionContext } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
+import { removeTemporary } from '../temporary.ts';
 
 const model = {
   id: 'gemini-test-low',
@@ -51,7 +52,7 @@ async function setup() {
 
 test('Antigravity exposes native usage in the Messages response', async (t) => {
   const stateDirectory = await mkdtemp(path.join(os.tmpdir(), 'agy-usage-'));
-  t.after(() => rm(stateDirectory, { recursive: true, force: true }));
+  t.after(() => removeTemporary(stateDirectory));
   const harness = new AntigravityHarness([model], {
     stateDirectory,
     checkPermissions: policy,

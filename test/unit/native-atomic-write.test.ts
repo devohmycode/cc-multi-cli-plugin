@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { atomicWriteFile } from '../../plugins/multi-core/src/gateway/atomic-write.ts';
+import { removeTemporary } from '../temporary.ts';
 
 test('atomicWriteFile replaces files on Unix and retries Windows sharing errors', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'atomic-write-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTemporary(directory));
   const file = path.join(directory, 'state.json');
   await writeFile(file, 'old');
   await atomicWriteFile(file, 'new', { platform: 'linux' });
@@ -16,7 +17,7 @@ test('atomicWriteFile replaces files on Unix and retries Windows sharing errors'
 
 test('retries a transient Windows rename sharing violation', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'atomic-write-win-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTemporary(directory));
   const file = path.join(directory, 'state.json');
   let failures = 1;
   await atomicWriteFile(file, 'new', {

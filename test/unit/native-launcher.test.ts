@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -13,6 +13,7 @@ import {
 } from '../../plugins/multi-core/src/launcher.ts';
 import { cursorModelOptions, cursorPickerOptions } from '../../plugins/multi-cursor/src/models.ts';
 import { ZEN_MODELS } from '../../plugins/multi-zen/src/models.ts';
+import { removeTemporary } from '../temporary.ts';
 
 async function writeClaudeFixture(bin: string, source: string): Promise<void> {
   if (process.platform === 'win32') {
@@ -43,7 +44,7 @@ test('launcher preserves native auth, disables unavailable auto mode, and merges
   skip: process.platform === 'win32',
 }, async (t) => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'launcher-test-'));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
+  t.after(() => removeTemporary(cwd));
   await mkdir(path.join(cwd, 'bin'));
   await writeClaudeFixture(
     path.join(cwd, 'bin'),
@@ -203,7 +204,7 @@ test('Zen credentials add picker models and named workers without leaking the ke
   skip: process.platform === 'win32',
 }, async (t) => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'launcher-zen-test-'));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
+  t.after(() => removeTemporary(cwd));
   const bin = path.join(cwd, 'bin');
   await mkdir(bin);
   await writeClaudeFixture(
@@ -350,7 +351,7 @@ test('Zen saved auth supplies the no-login fallback without exposing credentials
   skip: process.platform === 'win32',
 }, async (t) => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'launcher-zen-saved-test-'));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
+  t.after(() => removeTemporary(cwd));
   const bin = path.join(cwd, 'bin');
   const data = path.join(cwd, 'data', 'opencode');
   await mkdir(bin);
@@ -398,7 +399,7 @@ result(JSON.stringify({settings,models:args.filter(x=>x.startsWith('multi/')),ze
 
 test('Antigravity launcher groups picker families, keeps workers and enables function hooks', async (t) => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'launcher-agy-picker-'));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
+  t.after(() => removeTemporary(cwd));
   const bin = path.join(cwd, 'bin');
   await mkdir(bin);
   if (process.platform === 'win32') {

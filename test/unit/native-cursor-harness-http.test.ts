@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,6 +12,7 @@ import {
   CursorHarness,
 } from '../../plugins/multi-cursor/src/harness.ts';
 import { cursorModelOptions } from '../../plugins/multi-cursor/src/models.ts';
+import { removeTemporary } from '../temporary.ts';
 
 const options = cursorModelOptions([{ id: 'test-model', displayName: 'Test Model' }]);
 
@@ -99,7 +100,7 @@ test('Cursor harness serves isolated main and worker SSE progress without replay
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await harness.close();
-    await rm(directory, { recursive: true, force: true });
+    await removeTemporary(directory);
   });
   const address = server.address();
   assert(address && typeof address !== 'string');
@@ -213,7 +214,7 @@ test('native SSE cancellation stops the SDK run without reporting successful com
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await harness.close();
-    await rm(directory, { recursive: true, force: true });
+    await removeTemporary(directory);
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
