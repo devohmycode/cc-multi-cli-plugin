@@ -660,7 +660,7 @@ export function checkLauncherArgumentLimit(
     .join(', ');
   const shim = viaComSpec ? ' cmd.exe shim' : '';
   throw new Error(
-    `Native worker registration needs ${commandLine.length.toLocaleString()} characters for ${executable}, above the Windows${shim} limit of ${limit.toLocaleString()}. Largest providers: ${largest || 'none'}. Disable providers or extra models to reduce the launcher arguments.`,
+    `Native worker registration needs ${commandLine.length.toLocaleString('en-US')} characters for ${executable}, above the Windows${shim} limit of ${limit.toLocaleString('en-US')}. Largest providers: ${largest || 'none'}. Disable providers or extra models to reduce the launcher arguments.`,
   );
 }
 

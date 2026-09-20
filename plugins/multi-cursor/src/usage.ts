@@ -86,11 +86,11 @@ export function formatCursorUsage(records: readonly CursorUsageRecord[]): Cursor
   return {
     summary:
       `Active agents in this session; billed totals cover each agent's lifetime, not account quota. ` +
-      `Cursor billed usage: ${totals.total.toLocaleString()} tokens; ${cost}.`,
+      `Cursor billed usage: ${totals.total.toLocaleString('en-US')} tokens; ${cost}.`,
     details: records.map(
       (record, index) =>
-        `Agent ${index + 1}: ${record.usage.totalTokens.toLocaleString()} tokens ` +
-        `(${record.usage.inputTokens.toLocaleString()} in, ${record.usage.outputTokens.toLocaleString()} out); ` +
+        `Agent ${index + 1}: ${record.usage.totalTokens.toLocaleString('en-US')} tokens ` +
+        `(${record.usage.inputTokens.toLocaleString('en-US')} in, ${record.usage.outputTokens.toLocaleString('en-US')} out); ` +
         (validCost(record.cost)
           ? `$${(record.cost.chargedCents / 100).toFixed(2)} charged ` +
             `(raw $${(record.cost.rawCostCents / 100).toFixed(2)})`

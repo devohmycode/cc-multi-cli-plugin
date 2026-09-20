@@ -69,6 +69,22 @@ test('Cursor usage deduplicates agent lifetime records and marks partial costs',
   assert.equal(result.details.length, 2);
 });
 
+test('reported numbers group the same way on every machine locale', () => {
+  // Without an explicit locale these read "12 345" on a French host and "12,345"
+  // on an English one, so a contributor's machine decided whether the launcher
+  // limit test passed. The receipts view already pins en-US; the rest follows.
+  const large = {
+    inputTokens: 12000,
+    outputTokens: 345,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalTokens: 12345,
+  };
+  const result = formatCursorUsage([{ agentId: 'a', scope: 's', usage: large, runs: [] }]);
+  assert.match(result.summary, /12,345 tokens/);
+  assert.match(result.details[0], /12,345 tokens \(12,000 in, 345 out\)/);
+});
+
 test('Cursor usage reports unavailable when there are no agents', async () => {
   const result = await readCursorUsage('session', async () => []);
   assert.match(result.summary, /unavailable/);
