@@ -6,6 +6,40 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- **Grok Build as a native coding harness.** `multi-grok` runs the official `grok`
+  CLI inside Claude Code with the subscription account login, exposing the
+  advertised models in `/model` and one named worker per model. Claude's
+  permission mode travels in the run arguments: the native toolset is bounded
+  with `--tools` and execution is gated with deny rules whose syntax matches
+  Claude Code's own and which outrank every mode, including Bypass. No global
+  hook is installed and nothing is written to the user's Grok configuration.
+  The contract was captured from the binary rather than its documentation, which
+  disagrees with it on three points: the streaming format is plain NDJSON and not
+  ACP session updates, `--permission-mode plan` removes no tool, and
+  `--disallowed-tools` accepts an unknown name and runs the tool anyway. Every
+  announced toolset is therefore checked against the policy and an unenforced
+  removal fails the run. MCP tools join the toolset once their servers connect,
+  whatever the allowlist holds, so their execution is denied by rule and their
+  exposure is documented in [docs/grok.md](docs/grok.md). The gateway chooses the
+  native session identity before the run starts, records it as soon as the CLI
+  speaks, resumes with an interruption notice after a run without a terminal
+  event, and refuses an answer returned on another session. `XAI_API_KEY` is
+  removed from every run so billing stays on the account login. Deny genres are
+  coarser than native tool names — `Edit(*)` also refuses the `write` tool — so a
+  rule is only sent when none of the tools it reaches was granted. The allowlist
+  is not exact either, so every ungranted tool is removed by name as well, through
+  the one alias the CLI needs (`run_terminal_command` is removed as
+  `run_terminal_cmd`). A policy the CLI did not apply, or a CLI that cannot start,
+  is reported as a request error so the session does not retry a paid run. A
+  second prompt for a worker that is still answering waits its turn instead of
+  being refused, because the answer streams before the turn is released and a
+  refusal cost the user their message; Cursor and Antigravity keep refusing.
+  Claude's system reminders are no longer forwarded: measured on a live session
+  they were 99% of the flattened prompt and described Claude's own tools, MCP
+  servers and skills, which the provider cannot call. Recalled memories are kept.
+  Request identity follows the filtered prompt, so a retry carrying only a fresh
+  reminder is recognised as the same request instead of paying for a second run.
+
 - Send Antigravity prompts of 6 KiB or more through stream-json stdin on
   Windows instead of the `-p` argument. Windows caps a command line at 32,767
   characters, and at 8,191 when a `.cmd` shim runs through `cmd.exe`, so prompts

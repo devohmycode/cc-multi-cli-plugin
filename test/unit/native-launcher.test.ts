@@ -466,6 +466,9 @@ result(JSON.stringify({settings,agents}));
         CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
         CODEX_HOME: cwd,
         MULTI_ANTIGRAVITY: '1',
+        // The ambient PATH still holds this machine's real provider CLIs; name the
+        // provider under test so a locally installed one cannot add picker rows.
+        MULTI_ENABLED_PROVIDERS: 'antigravity',
       },
     },
   );
@@ -537,7 +540,7 @@ test('launcher registers only Cursor picker workers and keeps the representative
     label: `Antigravity · ${id}`,
     worker: `antigravity-${id}`,
   }));
-  const agents = workerDefinitions(true, picker, true, antigravity);
+  const agents = workerDefinitions(true, picker, true, antigravity, []);
   const definitions = JSON.stringify(agents);
   const definitionBytes = Buffer.byteLength(definitions);
   assert.equal(Object.keys(agents).filter((name) => name.startsWith('cursor-')).length, 3);
@@ -548,12 +551,12 @@ test('launcher registers only Cursor picker workers and keeps the representative
 
 test('worker registration follows selected models and retains their effort aliases', () => {
   const selected = ['multi/openai/gpt-5.6-luna', 'multi/zen/gpt-5.6-sol'];
-  const agents = workerDefinitions(true, [], true, [], selected);
+  const agents = workerDefinitions(true, [], true, [], [], selected);
   assert.deepEqual(new Set(Object.values(agents).map((worker) => worker.model)), new Set(selected));
   assert.equal(Object.keys(agents).length, 12);
   assert.equal(agents['openai-luna-high'].effort, 'high');
   assert.equal(agents['zen-gpt-5.6-sol-max'].effort, 'max');
-  assert.deepEqual(workerDefinitions(true, [], true, [], []), {});
+  assert.deepEqual(workerDefinitions(true, [], true, [], [], []), {});
 });
 
 test('selected synthesized Antigravity rows retain variants without selecting independent rows', () => {
@@ -563,10 +566,14 @@ test('selected synthesized Antigravity rows retain variants without selecting in
     worker: `antigravity-${id}`,
     label: id,
   }));
-  const agents = workerDefinitions(false, [], false, models, [
-    'multi/antigravity/gemini',
-    'multi/antigravity/claude',
-  ]);
+  const agents = workerDefinitions(
+    false,
+    [],
+    false,
+    models,
+    [],
+    ['multi/antigravity/gemini', 'multi/antigravity/claude'],
+  );
   assert.deepEqual(Object.keys(agents).sort(), [
     'antigravity-claude',
     'antigravity-gemini',
@@ -574,7 +581,7 @@ test('selected synthesized Antigravity rows retain variants without selecting in
     'antigravity-gemini-low',
   ]);
   assert.deepEqual(
-    Object.keys(workerDefinitions(false, [], false, models, ['multi/antigravity/claude-high'])),
+    Object.keys(workerDefinitions(false, [], false, models, [], ['multi/antigravity/claude-high'])),
     ['antigravity-claude-high'],
   );
 });

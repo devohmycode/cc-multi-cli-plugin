@@ -29,7 +29,7 @@ test('provider dashboard reads every enabled provider and preserves unavailable 
   assert.deepEqual(calls.sort(), ['cursor:owned', 'openai:owned', 'zen:owned']);
   assert.deepEqual(
     result.providers.map((row) => row.status),
-    ['ready', 'ready', 'ready', 'unavailable'],
+    ['ready', 'ready', 'ready', 'unavailable', 'disabled'],
   );
   assert.equal(result.providers[2].summary, 'zen quota');
   assert(result.providers[3].details.includes('No native quota connection'));
@@ -46,7 +46,7 @@ test('provider dashboard isolates errors and explicitly reports disabled and uns
   const result = await dashboard.read('s', empty());
   assert.deepEqual(
     result.providers.map((row) => row.status),
-    ['ready', 'error', 'unavailable', 'disabled'],
+    ['ready', 'error', 'unavailable', 'disabled', 'disabled'],
   );
   assert(!JSON.stringify(result).includes('secret'));
   assert(result.providers[2].details.some((line) => line.includes('billing console')));

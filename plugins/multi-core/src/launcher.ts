@@ -23,6 +23,13 @@ import type { CursorModelOption } from '../../multi-cursor/src/models.ts';
 import { cursorModelOptions, cursorPickerOptions } from '../../multi-cursor/src/models.ts';
 import { mergeCursorPermissions } from '../../multi-cursor/src/permissions.ts';
 import { CursorWorkspaces } from '../../multi-cursor/src/workspaces.ts';
+import { GrokHarness } from '../../multi-grok/src/harness.ts';
+import {
+  discoverGrokModels,
+  type GrokModel,
+  grokPickerOptions,
+} from '../../multi-grok/src/models.ts';
+import { grokPermissionPolicy } from '../../multi-grok/src/permissions.ts';
 import { createOpenAIApproval, discoverOpenAIReviewer } from '../../multi-openai/src/approval.ts';
 import { readCodexAuth } from '../../multi-openai/src/auth.ts';
 import { MODELS, OPENAI_WORKERS } from '../../multi-openai/src/models.ts';
@@ -110,6 +117,7 @@ async function main() {
   const { codexSignedIn, openaiReview } = await discoverOpenAI(authFile);
   const zenKey = providerEnabled('zen') ? await readZenKey() : undefined;
   const antigravityModels = await discoverAntigravity();
+  const grokModels = await discoverGrok();
   const token = randomBytes(32).toString('hex');
   const defaultModels = fullCatalog
     ? pickerSettings(
@@ -117,6 +125,7 @@ async function main() {
         selectedCursorOptions(cursorModels, false),
         Boolean(zenKey),
         antigravityModels,
+        grokModels,
       ).modelPicker.options.map((option) => option.model)
     : [];
   const settings = pickerSettings(
@@ -124,6 +133,7 @@ async function main() {
     cursorPicker,
     Boolean(zenKey),
     antigravityModels,
+    grokModels,
     fullCatalog,
   );
   await mergeSettings(args, settings);
@@ -133,9 +143,10 @@ async function main() {
   settings.disableAgentView = true;
   filterPicker(settings, process.env.MULTI_MODELS, defaultModels);
   const callerSettings = structuredClone(settings);
-  const { cursor, antigravity } = nativeHarnesses(
+  const { cursor, antigravity, grok } = nativeHarnesses(
     cursorModels,
     antigravityModels,
+    grokModels,
     args,
     callerSettings,
   );
@@ -144,6 +155,7 @@ async function main() {
     cursorPicker,
     Boolean(zenKey),
     antigravityModels,
+    grokModels,
     settings.modelPicker.options.map((option) => option.model),
   );
   const modBridge = new ModBridge();
@@ -158,16 +170,7 @@ async function main() {
         [...args, '--settings', callerSettingsFile],
         pluginInventory,
       ),
-    async (cwd) => {
-      if (!cursor && !antigravity) {
-        return {};
-      }
-      try {
-        return await checkCursorSettings(cwd, args, callerSettings);
-      } catch (error) {
-        return { nativePermissionError: String(error) };
-      }
-    },
+    nativeSettingsCheck({ cursor, antigravity, grok }, args, callerSettings),
   );
   await permissionModes.precompute(process.cwd());
   const { approvalBridge, approvalProviders } = await discoverApprovals(
@@ -191,6 +194,7 @@ async function main() {
     modBridge,
     cursor,
     antigravity,
+    grok,
     zen: zenKey ? { apiKey: zenKey } : undefined,
     permissionModes,
     approvalBridge,
@@ -216,7 +220,7 @@ async function main() {
   if (!initialModel && selectedModel) {
     args.push('--model', selectedModel);
   }
-  configureApproval(settings, approvalProviders, selectedModel, Boolean(antigravity), anthropic);
+  configureApproval(settings, approvalProviders, selectedModel, { antigravity, grok }, anthropic);
   await writeFile(settingsFile, JSON.stringify(settings), { mode: 0o600 });
   const definitions = JSON.stringify(agents);
   const childEnvironment = gatewayEnvironment(address.port, token, anthropic, Boolean(cursor));
@@ -241,8 +245,7 @@ async function main() {
     checkLauncherArgumentLimit(agents, childInvocation, claudePath, process.platform);
   } catch (error) {
     server.close();
-    await cursor?.close();
-    await antigravity?.close();
+    await closeHarnesses({ cursor, antigravity, grok });
     receipts.finishAll();
     await receipts.drain();
     await rm(settingsDir, { recursive: true, force: true });
@@ -258,8 +261,7 @@ async function main() {
   const shutdown = async () => {
     server.closeAllConnections();
     server.close();
-    await cursor?.close();
-    await antigravity?.close();
+    await closeHarnesses({ cursor, antigravity, grok });
     receipts.finishAll();
     await receipts.drain();
     await rm(settingsDir, { recursive: true, force: true });
@@ -337,9 +339,40 @@ function validateSessionLaunch(args: string[]) {
   }
 }
 
+interface Closable {
+  close(): Promise<void>;
+}
+
+/** Every native harness releases its locks and child processes before the gateway exits. */
+async function closeHarnesses(harnesses: Record<string, Closable | undefined>) {
+  for (const harness of Object.values(harnesses)) {
+    await harness?.close();
+  }
+}
+
+/** Native harness runs answer to the caller's settings; other providers do not. */
+function nativeSettingsCheck(
+  harnesses: { cursor?: unknown; antigravity?: unknown; grok?: unknown },
+  args: string[],
+  callerSettings: LaunchSettings,
+) {
+  const native = Boolean(harnesses.cursor || harnesses.antigravity || harnesses.grok);
+  return async (cwd: string) => {
+    if (!native) {
+      return {};
+    }
+    try {
+      return await checkCursorSettings(cwd, args, callerSettings);
+    } catch (error) {
+      return { nativePermissionError: String(error) };
+    }
+  };
+}
+
 function nativeHarnesses(
   cursorModels: CursorModelOption[],
   antigravityModels: AntigravityModel[],
+  grokModels: GrokModel[],
   args: string[],
   callerSettings: LaunchSettings,
 ) {
@@ -361,7 +394,15 @@ function nativeHarnesses(
         },
       })
     : undefined;
-  return { cursor, antigravity };
+  const grok = grokModels.length
+    ? new GrokHarness(grokModels, {
+        checkPermissions: async (cwd, context) => {
+          const restrictions = await checkCursorSettings(cwd, args, callerSettings);
+          return grokPermissionPolicy(mergeCursorPermissions(context, restrictions));
+        },
+      })
+    : undefined;
+  return { cursor, antigravity, grok };
 }
 
 async function discoverCursor(required: boolean) {
@@ -557,6 +598,7 @@ export function workerDefinitions(
   cursorPicker: CursorModelOption[],
   zen: boolean,
   antigravityModels: AntigravityModel[],
+  grokModels: GrokModel[],
   selectedModels?: readonly string[],
 ) {
   const agents: Record<string, AgentDefinition> = Object.fromEntries(
@@ -596,6 +638,14 @@ export function workerDefinitions(
       model: option.model,
       tools: ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write'],
       ...(effort ? { effort } : {}),
+    };
+  }
+  for (const option of grokModels) {
+    agents[option.worker] = {
+      description: `${option.label}. Native Grok Build CLI coding worker.`,
+      prompt: WORKER_PROMPT,
+      model: option.model,
+      tools: ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write'],
     };
   }
   return selectWorkers(agents, antigravityModels, selectedModels);
@@ -660,7 +710,7 @@ export function checkLauncherArgumentLimit(
     .join(', ');
   const shim = viaComSpec ? ' cmd.exe shim' : '';
   throw new Error(
-    `Native worker registration needs ${commandLine.length.toLocaleString()} characters for ${executable}, above the Windows${shim} limit of ${limit.toLocaleString()}. Largest providers: ${largest || 'none'}. Disable providers or extra models to reduce the launcher arguments.`,
+    `Native worker registration needs ${commandLine.length.toLocaleString('en-US')} characters for ${executable}, above the Windows${shim} limit of ${limit.toLocaleString('en-US')}. Largest providers: ${largest || 'none'}. Disable providers or extra models to reduce the launcher arguments.`,
   );
 }
 
@@ -771,16 +821,19 @@ function configureApproval(
   settings: LaunchSettings,
   providers: readonly ('openai' | 'cursor')[],
   selectedModel?: string,
-  antigravityAvailable = false,
+  harnesses: Record<string, unknown> = {},
   anthropic = false,
 ) {
   const provider = approvalProvider(selectedModel);
-  const nativeAntigravity = antigravityAvailable && selectedModel?.startsWith('multi/antigravity/');
+  // Antigravity and Grok run their own loop and bring no reviewer of their own.
+  const nativeHarness = Object.entries(harnesses).some(
+    ([name, harness]) => harness && selectedModel?.startsWith(`multi/${name}/`),
+  );
   // Auto mode is a Claude session capability. Keep it available when Claude is
   // authenticated, even if the initial model has no external reviewer; the
   // gateway still rejects unsupported external review requests, while a later
   // switch back to Claude can use its native reviewer.
-  if (!anthropic && !nativeAntigravity && (!provider || !providers.includes(provider))) {
+  if (!anthropic && !nativeHarness && (!provider || !providers.includes(provider))) {
     settings.permissions = { ...settings.permissions, disableAutoMode: 'disable' };
   }
   // Observe tool workspace information for reviewer attribution. This hook never
@@ -806,13 +859,17 @@ async function handleCommand(command?: string) {
     console.log(JSON.stringify(await discoverAntigravityModels(), null, 2));
     process.exit(0);
   }
+  if (command === '--grok-models') {
+    console.log(JSON.stringify(await discoverGrokModels(), null, 2));
+    process.exit(0);
+  }
   if (command === '--zen-models') {
     console.log(JSON.stringify(ZEN_MODELS, null, 2));
     process.exit(0);
   }
   if (command === '--help') {
     console.log(
-      'Usage: node plugins/multi-core/src/launcher.ts [--cursor-login | --cursor-models | --zen-models | --antigravity-models | --antigravity-setup] [-- <claude arguments>]\nLaunch Claude with external models and native coding workers.\n--cursor-login: official Cursor SDK browser sign-in\n--cursor-models: list account model choices and worker names\n--zen-models: list supported Zen models and capabilities\nMULTI_ANTIGRAVITY=1: enable native Antigravity models and workers\n--antigravity-setup: install the scoped native permission hook\n--antigravity-models: inspect the official Antigravity CLI catalog (native login required)\nOPENCODE_API_KEY: Zen key (or use OpenCode /connect)\nMULTI_ZEN_MODELS: comma-separated Zen model IDs to show, leaving other providers unchanged\nMULTI_MODELS: comma-separated full model IDs to show in /model (unset: defaults; empty: hide external rows)\nMULTI_CURSOR_EXTRA_MODELS: comma-separated Cursor model IDs to add to Auto, Grok 4.6, and Composer 2.5 in /model',
+      'Usage: node plugins/multi-core/src/launcher.ts [--cursor-login | --cursor-models | --zen-models | --antigravity-models | --antigravity-setup] [-- <claude arguments>]\nLaunch Claude with external models and native coding workers.\n--cursor-login: official Cursor SDK browser sign-in\n--cursor-models: list account model choices and worker names\n--zen-models: list supported Zen models and capabilities\nMULTI_ANTIGRAVITY=1: enable native Antigravity models and workers\n--antigravity-setup: install the scoped native permission hook\n--antigravity-models: inspect the official Antigravity CLI catalog (native login required)\n--grok-models: list the Grok Build catalog (native login required)\nMULTI_GROK_MODELS: comma-separated Grok model IDs to show, leaving other providers unchanged\nOPENCODE_API_KEY: Zen key (or use OpenCode /connect)\nMULTI_ZEN_MODELS: comma-separated Zen model IDs to show, leaving other providers unchanged\nMULTI_MODELS: comma-separated full model IDs to show in /model (unset: defaults; empty: hide external rows)\nMULTI_CURSOR_EXTRA_MODELS: comma-separated Cursor model IDs to add to Auto, Grok 4.6, and Composer 2.5 in /model',
     );
     process.exit(0);
   }
@@ -910,6 +967,7 @@ function pickerSettings(
   cursorPicker: CursorModelOption[],
   zen: boolean,
   antigravityModels: AntigravityModel[],
+  grokModels: GrokModel[],
   fullCatalog = false,
 ) {
   let zenOptions = zenPickerOptions('');
@@ -939,6 +997,12 @@ function pickerSettings(
           label,
           behavesAs: pickerProfile(true),
           description: 'Native Antigravity CLI',
+        })),
+        ...grokPickerOptions(grokModels, process.env.MULTI_GROK_MODELS).map(({ model, label }) => ({
+          model,
+          label: `Grok - ${label}`,
+          behavesAs: pickerProfile(true),
+          description: 'Grok subscription; native Grok Build CLI',
         })),
         ...zenOptions.map(({ model, label, efforts }) => ({
           model,
@@ -1027,6 +1091,27 @@ async function discoverAntigravity() {
     await installAntigravityHook();
   }
   return antigravityModels;
+}
+
+async function discoverGrok(): Promise<GrokModel[]> {
+  if (!providerEnabled('grok')) {
+    return [];
+  }
+  try {
+    resolveExecutable('grok');
+    return await discoverGrokModels();
+  } catch (error) {
+    if (!isMissingExecutable(error)) {
+      throw error;
+    }
+    // Silent when the plugin is merely present: only an enabled provider reports.
+    if (enabledProviders?.includes('grok')) {
+      console.error(
+        `Grok choices unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return [];
+  }
 }
 
 function isMissingExecutable(error: unknown): boolean {

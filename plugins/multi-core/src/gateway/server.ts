@@ -16,6 +16,8 @@ import { CursorProviderError } from '../../../multi-cursor/src/errors.ts';
 import type { CursorHarness } from '../../../multi-cursor/src/harness.ts';
 import { formatCursorQuota, readCursorQuota } from '../../../multi-cursor/src/quota.ts';
 import { readCursorAccountUsage } from '../../../multi-cursor/src/usage.ts';
+import { type GrokHarness, GrokProviderError } from '../../../multi-grok/src/harness.ts';
+import { formatGrokQuota, readGrokAuth } from '../../../multi-grok/src/usage.ts';
 import { CodexAuthError, codexRequest } from '../../../multi-openai/src/auth.ts';
 import { openaiInstructions } from '../../../multi-openai/src/instructions.ts';
 import { MODELS } from '../../../multi-openai/src/models.ts';
@@ -68,6 +70,7 @@ export interface GatewayEvent {
     | 'openai-request'
     | 'cursor'
     | 'antigravity'
+    | 'grok'
     | 'approval'
     | 'zen'
     | 'zen-request';
@@ -103,6 +106,7 @@ export interface GatewayOptions {
   cursor?: Pick<CursorHarness, 'validate' | 'handle'> &
     Partial<Pick<CursorHarness, 'billedUsageForSession'>>;
   antigravity?: Pick<AntigravityHarness, 'validate' | 'handle'>;
+  grok?: Pick<GrokHarness, 'validate' | 'handle'>;
   zen?: { apiKey: string };
   /** OpenAI review for GPT-originated actions, independent of Claude authentication. */
   approvalBridge?: Pick<NativeApprovalBridge, 'respond'>;
@@ -138,7 +142,8 @@ function providerOwnedReview(model: string): boolean {
   return (
     model.startsWith('multi/openai/') ||
     model.startsWith('multi/cursor/') ||
-    model.startsWith('multi/antigravity/')
+    model.startsWith('multi/antigravity/') ||
+    model.startsWith('multi/grok/')
   );
 }
 
@@ -178,6 +183,7 @@ export function createNativeGateway({
   timeoutMs,
   cursor,
   antigravity,
+  grok,
   zen,
   approvalBridge,
   approvalProviders: _approvalProviders = approvalBridge ? ['openai'] : [],
@@ -193,7 +199,7 @@ export function createNativeGateway({
   const dashboard =
     usageDashboard ??
     new ProviderUsageDashboard({
-      enabled: (enabledProviders ?? ['openai', 'cursor', 'zen', 'antigravity']).filter(
+      enabled: (enabledProviders ?? ['openai', 'cursor', 'zen', 'antigravity', 'grok']).filter(
         (provider) => {
           if (provider === 'cursor') {
             return Boolean(cursor);
@@ -203,6 +209,9 @@ export function createNativeGateway({
           }
           if (provider === 'antigravity') {
             return Boolean(antigravity);
+          }
+          if (provider === 'grok') {
+            return Boolean(grok);
           }
           return provider === 'openai';
         },
@@ -220,6 +229,7 @@ export function createNativeGateway({
       antigravity: antigravity
         ? async () => formatAntigravityQuota(await readAntigravityAccountStatus())
         : undefined,
+      grok: grok ? async () => formatGrokQuota(await readGrokAuth()) : undefined,
     });
   const onEvent = (event: GatewayEvent) => {
     receipts.observe(event);
@@ -346,8 +356,8 @@ export function createNativeGateway({
   const compactions = new ModCompactions(async (request) => {
     const model = request.context.model;
     const provider = model?.split('/')[1];
-    const harness = provider === 'cursor' ? cursor : undefined;
-    const native = provider === 'antigravity' ? antigravity : harness;
+    const harness = provider === 'cursor' ? cursor : grokOrAntigravity(provider);
+    const native = harness;
     if (!native || !model) {
       throw new Error('Precomputed summaries require a native harness model');
     }
@@ -376,14 +386,25 @@ export function createNativeGateway({
       .join('\n');
   });
 
-  async function handleHarness(exchange: ProviderRequest, provider: 'cursor' | 'antigravity') {
+  function grokOrAntigravity(provider: string | undefined) {
+    if (provider === 'antigravity') {
+      return antigravity;
+    }
+    return provider === 'grok' ? grok : undefined;
+  }
+
+  async function handleHarness(
+    exchange: ProviderRequest,
+    provider: 'cursor' | 'antigravity' | 'grok',
+  ) {
     const { res, body, url, signal, agentId, emit, identity } = exchange;
-    const bridge = { cursor, antigravity }[provider];
+    const bridge = { cursor, antigravity, grok }[provider];
     if (!bridge) {
       const unavailable = {
         cursor: 'Cursor SDK is not signed in. Run the launcher with --cursor-login first.',
         antigravity:
           'Antigravity is unavailable. Install and connect the multi-antigravity plugin.',
+        grok: 'Grok is unavailable. Install Grok Build, run grok login, and relaunch.',
       };
       throw new BadRequest(unavailable[provider]);
     }
@@ -419,9 +440,7 @@ export function createNativeGateway({
       exchange.permissionContext?.compaction,
     );
     rememberResult(exchange, result);
-    onEvent(
-      completionEvent(exchange, result, provider, provider === 'cursor' ? '@cursor/sdk' : 'agy'),
-    );
+    onEvent(completionEvent(exchange, result, provider, harnessEndpoint(provider)));
     sendResult(exchange, result);
     modBridge.complete(scope);
   }
@@ -735,7 +754,7 @@ export function createNativeGateway({
     let permissionContext: PermissionContext | undefined;
     if (
       permissionModes &&
-      ['cursor', 'antigravity'].includes(route) &&
+      ['cursor', 'antigravity', 'grok'].includes(route) &&
       url.pathname === '/v1/messages'
     ) {
       try {
@@ -759,7 +778,7 @@ export function createNativeGateway({
     if (!external) {
       return handleAnthropic(exchange);
     }
-    if (route === 'cursor' || route === 'antigravity') {
+    if (route === 'cursor' || route === 'antigravity' || route === 'grok') {
       return handleHarness(exchange, route);
     }
     if (external.startsWith('multi/zen/')) {
@@ -885,7 +904,11 @@ class RequestTooLarge extends Error {}
 
 function providerSignal(disconnected: AbortSignal, model: string | null, timeoutMs?: number) {
   // Native harness runs follow the client connection rather than an HTTP deadline.
-  if (model?.startsWith('multi/cursor/') || model?.startsWith('multi/antigravity/')) {
+  if (
+    model?.startsWith('multi/cursor/') ||
+    model?.startsWith('multi/antigravity/') ||
+    model?.startsWith('multi/grok/')
+  ) {
     return disconnected;
   }
   if (
@@ -925,18 +948,25 @@ async function readRequest(req: http.IncomingMessage, catalog?: AgentCatalog) {
 
 function providerRoute(
   model: string | null,
-): 'cursor' | 'antigravity' | 'openai' | 'anthropic' | 'zen' {
+): 'cursor' | 'antigravity' | 'grok' | 'openai' | 'anthropic' | 'zen' {
   if (model?.startsWith('multi/cursor/')) {
     return 'cursor';
   }
   if (model?.startsWith('multi/antigravity/')) {
     return 'antigravity';
   }
+  if (model?.startsWith('multi/grok/')) {
+    return 'grok';
+  }
   if (model?.startsWith('multi/zen/')) {
     return 'zen';
   }
   return model ? 'openai' : 'anthropic';
 }
+function harnessEndpoint(provider: 'cursor' | 'antigravity' | 'grok'): string {
+  return { cursor: '@cursor/sdk', antigravity: 'agy', grok: 'grok' }[provider];
+}
+
 function errorStatus(error: unknown): number {
   if (error instanceof CodexAuthError) {
     return 401;
@@ -947,7 +977,11 @@ function errorStatus(error: unknown): number {
   if (error instanceof UpstreamFailure) {
     return error.status;
   }
-  if (error instanceof CursorProviderError || error instanceof AntigravityProviderError) {
+  if (
+    error instanceof CursorProviderError ||
+    error instanceof AntigravityProviderError ||
+    error instanceof GrokProviderError
+  ) {
     return error.failure.status;
   }
   return 502;

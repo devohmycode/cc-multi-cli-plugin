@@ -10,6 +10,7 @@
 - Cursor: the official Cursor SDK login. No separate Cursor CLI is required.
 - OpenCode Zen: an OpenCode account or an `OPENCODE_API_KEY`.
 - Antigravity: the official `agy` CLI and its native login.
+- Grok: the official Grok Build CLI (`grok`) and its account login.
 
 ## Install
 
@@ -21,6 +22,7 @@ In Claude Code, add the marketplace and install the providers you want:
 /plugin install multi-cursor@cc-multi-cli-plugin
 /plugin install multi-zen@cc-multi-cli-plugin
 /plugin install multi-antigravity@cc-multi-cli-plugin
+/plugin install multi-grok@cc-multi-cli-plugin
 /reload-plugins
 /multi-core:setup
 ```
@@ -75,6 +77,7 @@ model only once.
 | Cursor | `/multi-cursor:login` | Official Cursor SDK browser login |
 | OpenCode Zen | `/multi-zen:connect` | OpenCode auth or an API key |
 | Antigravity | `/multi-antigravity:connect` | The official `agy` login and scoped hook |
+| Grok | `/multi-grok:login` | The official Grok Build account login |
 
 Run Zen key entry in a separate terminal. After connecting any provider, relaunch
 Claude so its models and workers are discovered. `multi status` reports installed

@@ -13,6 +13,7 @@ their own data handling and privacy policies.
 | Zen | `https://opencode.ai/zen/v1/` | Selected conversation, instructions, tools, and attachments. |
 | Cursor | Official Cursor SDK | Selected conversation, workspace context, tools, and tool results through the SDK's native run. |
 | Antigravity | Official `agy` CLI | Selected conversation, workspace context, tools, and tool results through the CLI's native run. |
+| Grok | Official Grok Build CLI | Selected conversation, workspace context, tools, and tool results through the CLI's native run. |
 
 Native tools can read workspace files, run commands, and contact services allowed
 by the effective provider and Claude permissions. The plugin sends requests only
@@ -28,6 +29,7 @@ billing follow the provider's policies.
 | Zen authentication | `$OPENCODE_AUTH_FILE`, or `~/.local/share/opencode/auth.json` on Unix and `%LOCALAPPDATA%/opencode/auth.json` on Windows. |
 | Antigravity hook and settings | `~/.gemini/config/hooks.json` and `~/.gemini/antigravity-cli/settings.json` on Unix; `%LOCALAPPDATA%/gemini/config/hooks.json` and `%LOCALAPPDATA%/gemini/antigravity-cli/settings.json` on Windows. |
 | Antigravity run state | The `multi-harness` directory beside Antigravity's settings file. It contains session and response records for continuation and recovery. |
+| Grok run state | The `multi-harness` directory under `~/.grok`. It contains session and response records for continuation and recovery. Grok's own sessions stay in `~/.grok/sessions`. |
 | Multi installation state | `~/.local/share/multi-cli/`, including `state.json`, wrappers, and runtime files. |
 | Temporary launcher settings | A `multi-native-settings-*` directory under the platform temporary directory. It is removed on normal shutdown. |
 | Optional trace output | The destination configured by `MULTI_NATIVE_TRACE`; it contains routing, model, status, and tool names without prompt bodies or credentials. |
@@ -39,9 +41,9 @@ and execution state in provider-controlled locations.
 ## What is never done
 
 - Multi never creates a Claude token pool or forwards Claude credentials to another provider.
-- Multi never extracts Antigravity credentials or stores provider credentials in its own installation directory.
+- Multi never extracts Antigravity or Grok credentials or stores provider credentials in its own installation directory. Multi removes `XAI_API_KEY` from a Grok run so billing stays on the account login.
 - Multi never sends telemetry to the plugin author.
-- Multi never runs a separate reviewer for Zen or Antigravity.
+- Multi never runs a separate reviewer for Zen, Antigravity, or Grok.
 
 ## Removing data
 

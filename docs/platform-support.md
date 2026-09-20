@@ -11,6 +11,7 @@ provider checks need a real login on the host and are run by hand.
 | Cursor SDK | Live-verified | As Linux | CI offline | Live-verified |
 | OpenCode Zen | Live-verified | As Linux | CI offline | CI offline |
 | Antigravity | Live-verified | As Linux | CI offline | Live-verified |
+| Grok | CI offline | As Linux | CI offline | Live-verified |
 
 "Live-verified" means the live checks for that provider have passed on that
 platform. "CI offline" means the unit suite passes there and live checks are
@@ -44,6 +45,7 @@ Run from a fresh checkout after `npm ci`.
 | `npm run test:live:approval-worker` | OpenAI worker permissions | Codex login and Claude launcher |
 | `npm run test:live:permissions` | Modes, denials, effects, and attribution | Provider login, Python 3, Node 24 |
 | `npm run test:live:antigravity` | `agy` tools, continuation, and saved resume | `agy` login, `--antigravity-setup`, advertised model |
+| `npm run test:live:grok` | Grok tools, denial, continuation, and saved resume | Grok Build login and an advertised model |
 | `npm run test:live:install` | Plugin install, startup, wrappers, and uninstall | Claude executable |
 
 On Windows, PTY checks require ConPTY and skip with an explicit message. The
@@ -77,6 +79,7 @@ registered with the interactive logon type.
    npm run test:live:permissions
    node plugins/multi-core/src/launcher.ts --antigravity-setup
    npm run test:live:antigravity
+   npm run test:live:grok
    ```
 
 ### Windows native
