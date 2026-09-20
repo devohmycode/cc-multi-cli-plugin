@@ -31,7 +31,12 @@ const marketplace = 'cc-multi-cli-plugin';
 
 async function fixture(t: test.TestContext) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'multi-install-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  // This fixture writes .cmd shims and executes them several times. Windows can
+  // still hold a handle on one when the test ends, and fs.rm only retries EBUSY
+  // when maxRetries is set, so without it the teardown fails a passing test.
+  t.after(() =>
+    rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+  );
   const platform = process.platform;
   const windows = platform === 'win32';
   const home = path.join(directory, "home with spaces and 'quotes'");

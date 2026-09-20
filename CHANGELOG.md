@@ -6,6 +6,12 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Retry the temporary-directory teardown of the installation fixture on Windows.
+  It writes `.cmd` shims and executes them several times, and Windows can still
+  hold a handle when the test ends, so `fs.rm` failed the run with `EBUSY` after
+  the test itself had passed. `fs.rm` retries that error only when `maxRetries`
+  is set, as the live Cursor harness check already does.
+
 - Send Antigravity prompts of 6 KiB or more through stream-json stdin on
   Windows instead of the `-p` argument. Windows caps a command line at 32,767
   characters, and at 8,191 when a `.cmd` shim runs through `cmd.exe`, so prompts
