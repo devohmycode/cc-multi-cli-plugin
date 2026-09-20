@@ -6,6 +6,14 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Start native Cursor workers on macOS 27. Managed policy discovery recognized
+  an absent `com.anthropic.claudecode` preferences domain only from the
+  `does not exist` message of earlier macOS releases. macOS 27 words it
+  `Error: Domain 'com.anthropic.claudecode' not found.`, so a Mac without
+  managed policy was treated as a failure: every native worker was refused with
+  `cannot observe managed policy via defaults`. Both wordings now mean absent;
+  any other `defaults` failure still stops the worker (#30).
+
 - Report counts the same way on every machine locale. `toLocaleString()` without
   an argument follows the host, so the launcher's argument-limit message read
   "32 041" on a French Windows and "32,041" on an English one: the pinned

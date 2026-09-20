@@ -260,7 +260,8 @@ function managedPolicyCommandAbsent(command: string, error: unknown): boolean {
   }
   const stderr = String(error.stderr);
   if (command === 'defaults') {
-    return /does not exist/i.test(stderr);
+    // macOS 27 reports a missing domain as "Domain '...' not found".
+    return /does not exist|Domain .+ not found/i.test(stderr);
   }
   return command === 'reg' && /unable to find the specified registry key or value/i.test(stderr);
 }

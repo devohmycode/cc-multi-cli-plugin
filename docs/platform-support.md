@@ -88,4 +88,7 @@ Managed Claude policy comes from `/etc/claude-code` on Linux and WSL,
 `/Library/Application Support/ClaudeCode` and macOS preferences on macOS, and
 `C:\Program Files\ClaudeCode` and the Windows policy keys on Windows. Windows
 policy keys are read with `reg query`; when `reg.exe` reports a localized
-failure, Windows PowerShell classifies the key as absent or failed.
+failure, Windows PowerShell classifies the key as absent or failed. macOS
+preferences are read with `defaults read`; a missing domain is recognized from
+both wordings `defaults` uses for it, `does not exist` and the macOS 27
+`Domain '...' not found`.
