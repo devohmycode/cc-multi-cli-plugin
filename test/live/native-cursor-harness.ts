@@ -129,9 +129,16 @@ try {
         'PASS: actual SDK getRun recovery after an interrupted gateway commit, without inference.',
       );
     }
+    // A replay serves the saved response without inference, marked so the receipt ledger
+    // never bills the same turn twice.
     assert.deepEqual(
       await harness.handle(request, 'live/main', AbortSignal.timeout(5000), undefined, mode),
-      first,
+      {
+        ...first,
+        multi_usage: first.multi_usage
+          ? { ...first.multi_usage, replayed: true }
+          : { source: 'unavailable', replayed: true },
+      },
     );
     recovering = false;
     const followup = 'Without using tools, repeat the full line you just produced. One line only.';
