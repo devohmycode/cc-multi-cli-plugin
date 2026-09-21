@@ -21,7 +21,10 @@ import { antigravityPermissionPolicy } from '../../multi-antigravity/src/permiss
 import { CursorHarness } from '../../multi-cursor/src/harness.ts';
 import type { CursorModelOption } from '../../multi-cursor/src/models.ts';
 import { cursorModelOptions, cursorPickerOptions } from '../../multi-cursor/src/models.ts';
-import { mergeCursorPermissions } from '../../multi-cursor/src/permissions.ts';
+import {
+  cursorPermissionPolicy,
+  mergeCursorPermissions,
+} from '../../multi-cursor/src/permissions.ts';
 import { CursorWorkspaces } from '../../multi-cursor/src/workspaces.ts';
 import { createOpenAIApproval, discoverOpenAIReviewer } from '../../multi-openai/src/approval.ts';
 import { readCodexAuth } from '../../multi-openai/src/auth.ts';
@@ -40,7 +43,7 @@ import {
   type PluginPermissionInventory,
   pluginPermissions,
 } from './gateway/agent-definitions.ts';
-import { checkCursorSettings } from './gateway/cursor-settings.ts';
+import { type CursorSettingsOptions, checkCursorSettings } from './gateway/cursor-settings.ts';
 import { executableInvocation, resolveExecutable } from './gateway/executable.ts';
 import { ModBridge } from './gateway/mod-bridge.ts';
 import { PermissionModes } from './gateway/mode-hook.ts';
@@ -163,7 +166,12 @@ async function main() {
         return {};
       }
       try {
-        return await checkCursorSettings(cwd, args, callerSettings);
+        return await checkCursorSettings(
+          cwd,
+          args,
+          callerSettings,
+          sharedAdmission(antigravity !== undefined),
+        );
       } catch (error) {
         return { nativePermissionError: String(error) };
       }
@@ -356,7 +364,9 @@ function nativeHarnesses(
     ? new AntigravityHarness(antigravityModels, {
         checkPermissions: async (cwd, context) => {
           await checkAntigravityHooks();
-          const restrictions = await checkCursorSettings(cwd, args, callerSettings);
+          const restrictions = await checkCursorSettings(cwd, args, callerSettings, {
+            validate: antigravityPermissionPolicy,
+          });
           return antigravityPermissionPolicy(mergeCursorPermissions(context, restrictions));
         },
       })
@@ -550,6 +560,16 @@ async function discoverOpenAI(authFile: string) {
     }
   }
   return { codexSignedIn, openaiReview };
+}
+
+/** One admission result is shared by every native provider, so it has to be judged by the
+ * validator that rejects the least: a rule Antigravity supports natively must not be refused
+ * here because Cursor cannot express it. Cursor re-validates with its own policy on its own
+ * dispatch, where the rejection belongs and where it can name the file. */
+export function sharedAdmission(antigravity: boolean): CursorSettingsOptions {
+  return antigravity
+    ? { validate: antigravityPermissionPolicy, cursorToolRules: false }
+    : { validate: cursorPermissionPolicy, cursorToolRules: true };
 }
 
 export function workerDefinitions(

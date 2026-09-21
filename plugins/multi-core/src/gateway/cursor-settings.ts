@@ -17,7 +17,19 @@ export interface CursorSettingsOptions {
   readFile?: typeof fs.readFile;
   readDir?: typeof fs.readdir;
   runCommand?: (command: string, args: readonly string[]) => Promise<string>;
+  /** Validator for the merged rules; defaults to Cursor's. Another harness passes its own.
+   * It must be synchronous: admission throws, and a returned promise would be ignored. */
+  validate?: (context: PermissionContext) => void;
+  /** Whether each settings file is also judged against Cursor's tool vocabulary as it is
+   * read, which buys the per-file attribution in the error message. Defaults to Cursor's
+   * own dispatch, meaning any caller that brings its own `validate` owns validation and
+   * opts back in explicitly. Stated as an option rather than inferred from which function
+   * `validate` is, so a wrapper or a test double cannot change the mode by accident. */
+  cursorToolRules?: boolean;
 }
+
+/** Every discovery option resolved to a value; not part of the public surface. */
+type SettingsDiscovery = Required<CursorSettingsOptions>;
 
 const defaultRunCommand = (command: string, args: readonly string[]): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -41,16 +53,23 @@ export async function checkCursorSettings(
   const { sources, restrictions } = settingSources(args);
   await pluginPermissions(cwd, [...args, '--settings', JSON.stringify(inlineSettings)]);
   let context = mergeCursorPermissions({ permissionMode: 'auto' }, restrictions);
-  const settingsOptions = {
+  const { validate = cursorPermissionPolicy, cursorToolRules = options.validate === undefined } =
+    options;
+  const settingsOptions: SettingsDiscovery = {
     platform: options.platform ?? process.platform,
     env: options.env ?? process.env,
     osRelease: options.osRelease ?? os.release(),
     readFile: options.readFile ?? fs.readFile,
     readDir: options.readDir ?? fs.readdir,
     runCommand: options.runCommand ?? defaultRunCommand,
+    validate,
+    cursorToolRules,
   };
   context = mergePolicies(context, await managedSettings(settingsOptions));
-  context = mergeCursorPermissions(context, assertCursorClaudeSettings(inlineSettings));
+  context = mergeCursorPermissions(
+    context,
+    assertCursorClaudeSettings(inlineSettings, { cursorToolRules }),
+  );
   if (sources.has('user')) {
     context = mergeCursorPermissions(
       context,
@@ -60,6 +79,7 @@ export async function checkCursorSettings(
           'settings.json',
         ),
         settingsOptions.readFile,
+        cursorToolRules,
       ),
     );
   }
@@ -67,7 +87,11 @@ export async function checkCursorSettings(
     if (sources.has('project')) {
       context = mergeCursorPermissions(
         context,
-        await checkFile(path.join(directory, '.claude', 'settings.json'), settingsOptions.readFile),
+        await checkFile(
+          path.join(directory, '.claude', 'settings.json'),
+          settingsOptions.readFile,
+          cursorToolRules,
+        ),
       );
     }
     if (sources.has('local')) {
@@ -76,6 +100,7 @@ export async function checkCursorSettings(
         await checkFile(
           path.join(directory, '.claude', 'settings.local.json'),
           settingsOptions.readFile,
+          cursorToolRules,
         ),
       );
     }
@@ -83,7 +108,7 @@ export async function checkCursorSettings(
       break;
     }
   }
-  cursorPermissionPolicy(context);
+  validate(context);
   return { tools: context.tools, disallowedTools: context.disallowedTools };
 }
 
@@ -141,6 +166,7 @@ function selectedSources(sources: string): Set<string> {
 async function checkFile(
   file: string,
   readFile: typeof fs.readFile = fs.readFile,
+  cursorToolRules = true,
 ): Promise<WorkerPermissions> {
   let text: string;
   try {
@@ -152,15 +178,13 @@ async function checkFile(
     throw error;
   }
   try {
-    return assertCursorClaudeSettings(JSON.parse(text));
+    return assertCursorClaudeSettings(JSON.parse(text), { cursorToolRules });
   } catch (error) {
     throw new Error(`Native Cursor settings admission failed for ${file}: ${String(error)}`);
   }
 }
 
-async function managedSettings(
-  options: Required<CursorSettingsOptions>,
-): Promise<WorkerPermissions[]> {
+async function managedSettings(options: SettingsDiscovery): Promise<WorkerPermissions[]> {
   // Claude Code documents these file locations: macOS uses
   // /Library/Application Support/ClaudeCode, Linux and WSL use /etc/claude-code,
   // and Windows uses C:\Program Files\ClaudeCode (ProgramData is legacy and ignored).
@@ -194,7 +218,7 @@ async function managedSettings(
       }
       throw error;
     }
-    policies.push(managedPolicy(source, file));
+    policies.push(managedPolicy(source, file, options.cursorToolRules));
   }
   if (effectivePlatform === 'darwin') {
     policies.push(
@@ -207,7 +231,7 @@ async function managedSettings(
 }
 
 async function managedPolicyFiles(
-  options: Required<CursorSettingsOptions>,
+  options: SettingsDiscovery,
   platformPath: typeof path.posix,
   directory: string,
 ): Promise<string[]> {
@@ -229,7 +253,7 @@ async function managedPolicyFiles(
 }
 
 async function managedCommandPolicy(
-  options: Required<CursorSettingsOptions>,
+  options: SettingsDiscovery,
   command: string,
   args: readonly string[],
   retry?: () => Promise<string | undefined>,
@@ -251,7 +275,13 @@ async function managedCommandPolicy(
   if (source === undefined || !source.trim()) {
     return [];
   }
-  return [managedPolicy(parsePolicyValue(source), `${command} ${args.join(' ')}`)];
+  return [
+    managedPolicy(
+      parsePolicyValue(source),
+      `${command} ${args.join(' ')}`,
+      options.cursorToolRules,
+    ),
+  ];
 }
 
 function managedPolicyCommandAbsent(command: string, error: unknown): boolean {
@@ -270,9 +300,7 @@ function failedWithExitCode(error: unknown, code: number): error is Error & { co
   return error instanceof Error && 'code' in error && error.code === code;
 }
 
-async function managedRegistryPolicies(
-  options: Required<CursorSettingsOptions>,
-): Promise<WorkerPermissions[]> {
+async function managedRegistryPolicies(options: SettingsDiscovery): Promise<WorkerPermissions[]> {
   const policies: WorkerPermissions[] = [];
   for (const root of ['HKLM', 'HKCU']) {
     const key = `${root}\\SOFTWARE\\Policies\\ClaudeCode`;
@@ -293,7 +321,7 @@ async function managedRegistryPolicies(
 // only that fallback distinguishes absence from a real failure; English machines
 // never reach it.
 async function managedRegistryValue(
-  options: Required<CursorSettingsOptions>,
+  options: SettingsDiscovery,
   root: string,
 ): Promise<string | undefined> {
   const script = [
@@ -337,7 +365,7 @@ function parsePolicyValue(source: string): string {
   }
 }
 
-function managedPolicy(source: string, file: string): WorkerPermissions {
+function managedPolicy(source: string, file: string, cursorToolRules = true): WorkerPermissions {
   const settings = JSON.parse(source.trim() || '{}');
   if (
     !settings ||
@@ -355,7 +383,7 @@ function managedPolicy(source: string, file: string): WorkerPermissions {
   ) {
     throw new Error(`Native Cursor cannot enforce managed permission controls in ${file}`);
   }
-  return assertCursorClaudeSettings(settings);
+  return assertCursorClaudeSettings(settings, { cursorToolRules });
 }
 
 function missing(error: unknown): boolean {

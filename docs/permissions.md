@@ -48,4 +48,4 @@ Native dispatch re-reads the selected settings and managed policy sources. Manag
 | macOS | `/Library/Application Support/ClaudeCode/managed-settings.json`, JSON files in `managed-settings.d`, and `defaults read com.anthropic.claudecode` |
 | Windows | `C:\Program Files\ClaudeCode\managed-settings.json`, JSON files in `managed-settings.d`, and `HKLM` plus `HKCU` under `SOFTWARE\Policies\ClaudeCode`, value `Settings` |
 
-Managed policies accept supported permissions, hooks, and sandbox settings. Unsupported controls, argument or path rules, ask rules, sandbox policy, and ignored policy files fail admission when the native provider cannot enforce them.
+Managed policies accept supported permissions, hooks, and sandbox settings. Unsupported controls, argument or path rules, ask rules, sandbox policy, and ignored policy files fail admission when the native provider cannot enforce them. The provider that will run the request supplies that judgement, so a Claude tool rule one harness maps natively is enforced rather than refused because another harness could not map it.

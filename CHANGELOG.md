@@ -6,6 +6,19 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Admit Claude settings with the validator of the harness that will run them. Settings
+  discovery validated the merged rules with the Cursor translator on every launch, so a
+  launch without Cursor was refused for rules Cursor cannot map but the running harness
+  can: `permissions.deny: ["WebSearch", "WebFetch"]` stopped every Antigravity dispatch
+  with `Native Cursor cannot enforce Claude tool rule WebSearch`, although Antigravity
+  maps both to `search_web` and `read_url_content`. `checkCursorSettings()` now takes a
+  `validate` callback, and a `cursorToolRules` option that defers the per-file Cursor tool
+  check to it, including on the managed-policy path. One admission result is shared by every
+  native provider, so a launch with both harnesses is judged by the one that rejects the
+  least and Cursor re-validates on its own dispatch, where the rejection belongs and where
+  it can name the file. Structural admission, `permissions.ask`, hooks and sandbox checks
+  still run per file, and Cursor keeps its own validator (#33).
+
 - Start native Cursor workers on macOS 27. Managed policy discovery recognized
   an absent `com.anthropic.claudecode` preferences domain only from the
   `does not exist` message of earlier macOS releases. macOS 27 words it

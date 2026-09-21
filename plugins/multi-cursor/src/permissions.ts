@@ -108,7 +108,10 @@ async function rejectIgnoredPolicy(file: string): Promise<void> {
 }
 
 /** Claude cannot enforce these restrictions over tools executed by Cursor. */
-export function assertCursorClaudeSettings(settings: unknown): WorkerPermissions {
+export function assertCursorClaudeSettings(
+  settings: unknown,
+  { cursorToolRules = true }: { cursorToolRules?: boolean } = {},
+): WorkerPermissions {
   const value = settingsRecord(settings);
   if (value.disableAllHooks === true) {
     throw new Error('Native Cursor requires Claude mode hooks; disableAllHooks is unsupported.');
@@ -122,7 +125,11 @@ export function assertCursorClaudeSettings(settings: unknown): WorkerPermissions
   ) {
     throw new Error('Native Cursor cannot enforce Claude permissions.deny');
   }
-  claudeToolRules(denied);
+  // Another harness validates the merged rules itself once every source is read, so a
+  // per-file Cursor check would reject rules that harness does enforce.
+  if (cursorToolRules) {
+    claudeToolRules(denied);
+  }
   // Claude's PreToolUse/PermissionRequest hooks never run for native Cursor tools.
   // They are not translatable policy, so they neither block admission nor apply.
   const sandbox = settingsRecord(value.sandbox ?? {});
