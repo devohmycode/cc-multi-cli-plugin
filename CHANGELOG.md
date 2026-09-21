@@ -6,6 +6,19 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Size Antigravity sessions to the provider's real context window. Picker rows and
+  named workers took their window from the conservative `behavesAs` profile, so every
+  Antigravity model reported 200K and long sessions compacted early. Gemini rows now
+  carry a `[1m]` tag on the model ID, which Claude reads before it consults `behavesAs`
+  and matches on the untagged spelling, so the window widens without adopting a profile
+  that advertises effort levels `agy` does not have. The tag never reaches `agy`:
+  `selectAntigravityModel()` strips it, and worker selection compares untagged spellings.
+  Only families with a verified window are tagged, because `agy models` reports no
+  capacity metadata: Gemini 3.x accepts 1,048,576 tokens, while GPT-OSS 120B accepts
+  131,072 and the Claude models served here carry no 1M entitlement.
+  `MULTI_DISABLE_1M_CONTEXT=1` opts out. A saved or explicit plain model ID is moved onto
+  the tagged row, so `--model` and a restored selection get the same window as the picker.
+
 - Report counts the same way on every machine locale. `toLocaleString()` without
   an argument follows the host, so the launcher's argument-limit message read
   "32 041" on a French Windows and "32,041" on an English one: the pinned

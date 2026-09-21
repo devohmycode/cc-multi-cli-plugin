@@ -102,14 +102,21 @@ function defaultVariant(models: readonly AntigravityModel[], base: string) {
   throw new Error('Antigravity base route has no advertised native variant.');
 }
 
+/** Claude's 1M-context picker tag; it is display metadata and never a native model ID. */
+export function nativeSpelling(model: string | undefined): string | undefined {
+  return model?.replace(/\[1m\]$/i, '');
+}
+
 /** Resolve advertised variants; let agy validate effort for models without suffixes. */
 export function selectAntigravityModel(
   models: readonly AntigravityModel[],
   model: string | undefined,
   effort?: unknown,
 ): AntigravityModel {
-  const native = models.find((option) => option.model === model);
-  const row = native ?? antigravityPickerOptions(models).find((option) => option.model === model);
+  const requested = nativeSpelling(model);
+  const native = models.find((option) => option.model === requested);
+  const row =
+    native ?? antigravityPickerOptions(models).find((option) => option.model === requested);
   if (!row) {
     throw new Error('Unknown Antigravity model; run agy models for native selections.');
   }

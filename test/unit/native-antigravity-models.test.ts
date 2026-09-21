@@ -23,6 +23,18 @@ test('Antigravity catalog resolves only advertised effort variants', () => {
   assert.throws(() => parseAntigravityModels('not a catalog'), /no recognized/);
 });
 
+test('Antigravity selection ignores the 1M-context picker tag', () => {
+  const models = parseAntigravityModels(
+    'gemini-3.8-flash-low\tGemini Low\ngemini-3.8-flash-high\tGemini High\nclaude-sonnet-4-6\tSonnet\n',
+  );
+  assert.equal(selectAntigravityModel(models, `${models[2].model}[1m]`).id, 'claude-sonnet-4-6');
+  assert.equal(
+    selectAntigravityModel(models, 'multi/antigravity/gemini-3.8-flash[1m]', 'high').id,
+    'gemini-3.8-flash-high',
+  );
+  assert.throws(() => selectAntigravityModel(models, 'multi/antigravity/unknown[1m]'), /Unknown/);
+});
+
 test('Antigravity picker groups exact suffix families and resolves only advertised defaults', () => {
   const models = parseAntigravityModels(
     [

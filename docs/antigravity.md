@@ -37,6 +37,22 @@ The default variant order is medium, high, then low. `/effort` accepts only an
 advertised low, medium, or high variant. Unknown models and unavailable effort
 variants fail explicitly.
 
+### Context window
+
+Gemini rows and their workers carry a `[1m]` tag on the model ID, so Claude sizes
+the session to the million input tokens Gemini 3.x accepts. The tag is Claude-side
+display metadata: `agy` never sees it, both spellings select the same native model,
+and `/effort` still offers only the advertised low, medium, and high variants.
+
+Other advertised models keep Claude's 200K default, because their window is smaller
+or unestablished: GPT-OSS 120B accepts 131,072 tokens, and the Claude models served
+here carry no 1M entitlement. `agy models` reports no capacity metadata, so the
+eligible families are listed in `launcher.ts` rather than discovered. Set
+`MULTI_DISABLE_1M_CONTEXT=1` to leave every row untagged.
+
+Claude's window governs when the session compacts. It is separate from the native
+`agy` conversation, which keeps its own state and its own limits.
+
 ## Execution and permissions
 
 Claude's permission mode and tool rules take precedence. `agy` runs with native

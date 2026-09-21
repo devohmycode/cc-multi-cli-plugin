@@ -471,9 +471,11 @@ result(JSON.stringify({settings,agents}));
   );
   const { settings, agents } = JSON.parse(stdout);
   const rows: { model: string; behavesAs: string }[] = settings.modelPicker.options;
+  // Only a family with a verified ~1M native window carries the context tag. The native
+  // ID stays the untagged spelling, and the effort profile is unchanged either way.
   assert.deepEqual(
     rows.map(({ model }) => model),
-    ['multi/antigravity/gemini', 'multi/antigravity/sonnet-thinking', custom.model],
+    ['multi/antigravity/gemini[1m]', 'multi/antigravity/sonnet-thinking', custom.model],
   );
   assert.equal(rows[0].behavesAs, 'claude-sonnet-4-6');
   assert.deepEqual(rows[2], custom);
@@ -482,9 +484,10 @@ result(JSON.stringify({settings,agents}));
     assert.equal(agents[`antigravity-gemini-${effort}`].effort, effort);
     assert.equal(
       agents[`antigravity-gemini-${effort}`].model,
-      `multi/antigravity/gemini-${effort}`,
+      `multi/antigravity/gemini-${effort}[1m]`,
     );
   }
+  assert.doesNotMatch(agents['antigravity-sonnet-thinking'].model, /\[1m\]/);
   assert.equal(agents['antigravity-gemini'].model, rows[0].model);
   const catalog = new AgentCatalog(
     agents,
@@ -576,6 +579,14 @@ test('selected synthesized Antigravity rows retain variants without selecting in
   assert.deepEqual(
     Object.keys(workerDefinitions(false, [], false, models, ['multi/antigravity/claude-high'])),
     ['antigravity-claude-high'],
+  );
+  // Picker rows carry the context tag while native IDs never do; selection compares
+  // the untagged spelling, so a tagged row keeps its own effort workers.
+  assert.deepEqual(
+    Object.keys(
+      workerDefinitions(false, [], false, models, ['multi/antigravity/gemini[1m]']),
+    ).sort(),
+    ['antigravity-gemini', 'antigravity-gemini-high', 'antigravity-gemini-low'],
   );
 });
 
