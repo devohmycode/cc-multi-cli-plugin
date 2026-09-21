@@ -16,8 +16,12 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   Only families with a verified window are tagged, because `agy models` reports no
   capacity metadata: Gemini 3.x accepts 1,048,576 tokens, while GPT-OSS 120B accepts
   131,072 and the Claude models served here carry no 1M entitlement.
-  `MULTI_DISABLE_1M_CONTEXT=1` opts out. A saved or explicit plain model ID is moved onto
-  the tagged row, so `--model` and a restored selection get the same window as the picker.
+  `MULTI_DISABLE_1M_CONTEXT=1` opts out, and the opt-out is reversible: a selection saved
+  in either spelling resolves to whichever row the picker currently offers, so turning the
+  tag off cannot leave `MULTI_MODELS` naming a model the launcher refuses to start. A saved
+  or explicit plain model ID is moved onto the tagged row, so `--model` and a restored
+  selection get the same window as the picker; the rewrite lands on the last `--model` the
+  caller spelled, which is the one Claude resolves.
 
 - Report counts the same way on every machine locale. `toLocaleString()` without
   an argument follows the host, so the launcher's argument-limit message read

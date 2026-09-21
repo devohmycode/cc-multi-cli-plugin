@@ -729,7 +729,8 @@ function explicitModel(args: readonly string[]): string | undefined {
   return model;
 }
 
-/** Move a plain provider ID onto the picker row that carries the context tag. */
+/** Move a selection onto whichever spelling the picker offers: tagged, or plain once the
+ * context tag is switched off. A selection that survives the opt-out keeps its own row. */
 function retagSelection(
   model: string | undefined,
   options: readonly ModelOption[],
@@ -737,22 +738,38 @@ function retagSelection(
   if (model === undefined || options.some((option) => option.model === model)) {
     return model;
   }
-  return options.find((option) => option.model === `${model}[1m]`)?.model ?? model;
+  const native = nativeSpelling(model) ?? model;
+  const rows = new Set(options.map((option) => option.model));
+  const tagged = `${native}[1m]`;
+  if (rows.has(tagged)) {
+    return tagged;
+  }
+  return rows.has(native) ? native : model;
 }
 
-/** Replace the caller's own `--model`, so a retagged selection cannot be passed twice. */
+/** Replace the caller's own `--model`, so a retagged selection cannot be passed twice.
+ * This walks the arguments exactly as `explicitModel` does, so both agree on which
+ * occurrence is authoritative; rewriting an earlier one would leave the child on the
+ * spelling the retag was meant to replace. */
 function applyModelArgument(args: string[], model: string) {
+  let index = -1;
+  let inline = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--model') {
-      args[i + 1] = model;
-      return;
-    }
-    if (args[i].startsWith('--model=')) {
-      args[i] = `--model=${model}`;
-      return;
+      index = i;
+      inline = false;
+    } else if (args[i].startsWith('--model=')) {
+      index = i;
+      inline = true;
     }
   }
-  args.push('--model', model);
+  if (index === -1) {
+    args.push('--model', model);
+  } else if (inline) {
+    args[index] = `--model=${model}`;
+  } else {
+    args[index + 1] = model;
+  }
 }
 
 function filterPicker(
@@ -778,8 +795,10 @@ function filterPicker(
   const available = new Map(settings.modelPicker.options.map((option) => [option.model, option]));
   const chosen = new Set<ModelOption>();
   for (const model of models) {
-    // A tagged row stays selectable by its plain provider ID; both spellings mean one row.
-    const option = available.get(model) ?? available.get(`${model}[1m]`);
+    // A tagged row stays selectable by its plain provider ID and the reverse: a selection
+    // saved while the tag was on must still resolve once MULTI_DISABLE_1M_CONTEXT turns it off.
+    const native = nativeSpelling(model) ?? model;
+    const option = available.get(model) ?? available.get(`${native}[1m]`) ?? available.get(native);
     if (!option) {
       throw new Error(
         `MULTI_MODELS: model is not available from a connected provider in this launcher's picker: ${model}. Check the full ID with --cursor-models or --zen-models, then add it with /multi-core:setup --models <id>.`,
