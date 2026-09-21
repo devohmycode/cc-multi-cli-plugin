@@ -10,6 +10,7 @@ import {
   checkCursorSettings,
 } from '../../plugins/multi-core/src/gateway/cursor-settings.ts';
 import type { PermissionContext } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
+import { sharedAdmission } from '../../plugins/multi-core/src/launcher.ts';
 
 const absentManagedPolicy = async (): Promise<string> => '';
 
@@ -95,6 +96,18 @@ test('settings admission validates with the requested harness policy', async (t)
   assert.deepEqual(admitted.disallowedTools, ['WebSearch', 'WebFetch']);
   assert.deepEqual(validated.at(-1)?.disallowedTools, ['WebSearch', 'WebFetch']);
 
+  // The per-file Cursor check is an option of its own, not an inference from which function
+  // `validate` happens to be: a wrapper around Antigravity's policy must not silently change it.
+  const wrapped = (context: PermissionContext) => antigravityPermissionPolicy(context);
+  await assert.rejects(
+    checkSettings(root, [], {}, { validate: wrapped, cursorToolRules: true }),
+    /Native Cursor settings admission failed/,
+  );
+  assert.deepEqual((await checkSettings(root, [], {}, { validate: wrapped })).disallowedTools, [
+    'WebSearch',
+    'WebFetch',
+  ]);
+
   // Structural admission still applies per file whichever harness validates the result.
   await fs.writeFile(
     path.join(config, 'settings.json'),
@@ -103,6 +116,27 @@ test('settings admission validates with the requested harness policy', async (t)
   await assert.rejects(
     checkSettings(root, [], {}, { validate: antigravityPermissionPolicy }),
     /permissions.ask/,
+  );
+});
+
+test('the shared admission result is judged by the least restrictive native harness', async (t) => {
+  const root = await temporaryDirectory();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const config = path.join(root, 'user');
+  await fs.mkdir(config);
+  t.mock.property(process, 'env', { ...process.env, CLAUDE_CONFIG_DIR: config });
+  await fs.writeFile(
+    path.join(config, 'settings.json'),
+    JSON.stringify({ permissions: { deny: ['WebFetch'] } }),
+  );
+  // One error is recorded for every native provider, so a launch that also has Cursor must
+  // not refuse a rule Antigravity maps natively; Cursor rejects it on its own dispatch.
+  assert.deepEqual((await checkSettings(root, [], {}, sharedAdmission(true))).disallowedTools, [
+    'WebFetch',
+  ]);
+  await assert.rejects(
+    checkSettings(root, [], {}, sharedAdmission(false)),
+    /WebFetch; unsupported policy/,
   );
 });
 

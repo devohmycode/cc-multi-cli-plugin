@@ -20,10 +20,16 @@ export interface CursorSettingsOptions {
   /** Validator for the merged rules; defaults to Cursor's. Another harness passes its own.
    * It must be synchronous: admission throws, and a returned promise would be ignored. */
   validate?: (context: PermissionContext) => void;
+  /** Whether each settings file is also judged against Cursor's tool vocabulary as it is
+   * read, which buys the per-file attribution in the error message. Defaults to Cursor's
+   * own dispatch, meaning any caller that brings its own `validate` owns validation and
+   * opts back in explicitly. Stated as an option rather than inferred from which function
+   * `validate` is, so a wrapper or a test double cannot change the mode by accident. */
+  cursorToolRules?: boolean;
 }
 
-/** Discovery options plus the resolved validator mode; not part of the public surface. */
-type SettingsDiscovery = Required<CursorSettingsOptions> & { cursorToolRules: boolean };
+/** Every discovery option resolved to a value; not part of the public surface. */
+type SettingsDiscovery = Required<CursorSettingsOptions>;
 
 const defaultRunCommand = (command: string, args: readonly string[]): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -47,10 +53,8 @@ export async function checkCursorSettings(
   const { sources, restrictions } = settingSources(args);
   await pluginPermissions(cwd, [...args, '--settings', JSON.stringify(inlineSettings)]);
   let context = mergeCursorPermissions({ permissionMode: 'auto' }, restrictions);
-  const { validate = cursorPermissionPolicy } = options;
-  // Only Cursor's own validator can judge Cursor tool rules per file. Any other harness
-  // validates the merged result itself, so the per-file check is deferred to it.
-  const cursorToolRules = validate === cursorPermissionPolicy;
+  const { validate = cursorPermissionPolicy, cursorToolRules = options.validate === undefined } =
+    options;
   const settingsOptions: SettingsDiscovery = {
     platform: options.platform ?? process.platform,
     env: options.env ?? process.env,

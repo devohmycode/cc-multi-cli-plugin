@@ -12,9 +12,12 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   can: `permissions.deny: ["WebSearch", "WebFetch"]` stopped every Antigravity dispatch
   with `Native Cursor cannot enforce Claude tool rule WebSearch`, although Antigravity
   maps both to `search_web` and `read_url_content`. `checkCursorSettings()` now takes a
-  `validate` callback, and the per-file Cursor tool check is deferred to it, including on
-  the managed-policy path. Structural admission, `permissions.ask`, hooks and sandbox
-  checks still run per file, and Cursor keeps its own validator (#33).
+  `validate` callback, and a `cursorToolRules` option that defers the per-file Cursor tool
+  check to it, including on the managed-policy path. One admission result is shared by every
+  native provider, so a launch with both harnesses is judged by the one that rejects the
+  least and Cursor re-validates on its own dispatch, where the rejection belongs and where
+  it can name the file. Structural admission, `permissions.ask`, hooks and sandbox checks
+  still run per file, and Cursor keeps its own validator (#33).
 
 - Report counts the same way on every machine locale. `toLocaleString()` without
   an argument follows the host, so the launcher's argument-limit message read
