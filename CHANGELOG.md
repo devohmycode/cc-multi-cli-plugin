@@ -6,6 +6,14 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Start native Cursor workers on macOS 27. Managed policy discovery recognized
+  an absent `com.anthropic.claudecode` preferences domain only from the
+  `does not exist` message of earlier macOS releases. macOS 27 words it
+  `Error: Domain 'com.anthropic.claudecode' not found.`, so a Mac without
+  managed policy was treated as a failure: every native worker was refused with
+  `cannot observe managed policy via defaults`. Both wordings now mean absent;
+  any other `defaults` failure still stops the worker (#30).
+
 - Retry temporary-directory teardowns on Windows through a shared test helper.
   Windows can still hold a handle on a file shortly after the process that wrote
   or executed it exits, and `fs.rm` retries `EBUSY` only when `maxRetries` is

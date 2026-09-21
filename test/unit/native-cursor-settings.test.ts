@@ -224,6 +224,38 @@ for (const platform of ['darwin', 'win32'] as const) {
   });
 }
 
+test('native macOS policy treats the macOS 27 missing-domain message as absent', async () => {
+  const policy = await checkSettings(
+    '/workspace',
+    ['--setting-sources='],
+    {},
+    {
+      platform: 'darwin',
+      ...absentManagedFiles(),
+      runCommand: async () => {
+        throw commandError(1, "Error: Domain 'com.anthropic.claudecode' not found.");
+      },
+    },
+  );
+  assert.deepEqual(policy.disallowedTools, []);
+
+  await assert.rejects(
+    checkSettings(
+      '/workspace',
+      ['--setting-sources='],
+      {},
+      {
+        platform: 'darwin',
+        ...absentManagedFiles(),
+        runCommand: async () => {
+          throw commandError(1, 'Error: Could not read preferences.');
+        },
+      },
+    ),
+    /cannot observe managed policy via defaults/,
+  );
+});
+
 const frenchRegistryAbsent =
   "Erreur : le syst\uFFFDme n'a pas trouv\uFFFD la cl\uFFFD ou la valeur de Registre sp\uFFFDcifi\uFFFDe.";
 
