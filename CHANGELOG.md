@@ -16,8 +16,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   check to it, including on the managed-policy path. One admission result is shared by every
   native provider, so a launch with both harnesses is judged by the one that rejects the
   least and Cursor re-validates on its own dispatch, where the rejection belongs and where
-  it can name the file. Structural admission, `permissions.ask`, hooks and sandbox checks
-  still run per file, and Cursor keeps its own validator (#33).
+  it can name the file. That choice is only safe while Antigravity's admitted tool vocabulary
+  contains Cursor's, which two separate tables maintain by hand, so a test now asserts it.
+  Structural admission, `permissions.ask`, hooks and sandbox checks still run per file, and
+  Cursor keeps its own validator (#33).
 
 - Report counts the same way on every machine locale. `toLocaleString()` without
   an argument follows the host, so the launcher's argument-limit message read
