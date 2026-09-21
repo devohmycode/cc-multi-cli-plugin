@@ -231,6 +231,17 @@ test('setup renames the launch command, persists picker models, and keeps them a
   await assert.rejects(f.install(['--command', 'multi']), /reserved/);
   await assert.rejects(f.install(['--command', 'bad name']), /Invalid launch command/);
   await assert.rejects(f.install(['--models', 'gpt-6-astra']), /Invalid picker model/);
+  // A picker row can display a context tag, so that is the spelling a user copies out of
+  // /model. It names a row and must persist as the untagged ID, which stays valid whether
+  // or not the tag is on, and must not persist twice alongside its own plain spelling.
+  await f.install([
+    '--models',
+    'multi/antigravity/gemini-3.8-flash[1m],multi/antigravity/gemini-3.8-flash',
+  ]);
+  assert.equal(
+    JSON.parse(await readFile(stateFile, 'utf8')).models,
+    'multi/antigravity/gemini-3.8-flash',
+  );
   await f.invoke('multi', ['uninstall']);
   if (f.windows) {
     await waitForMissing(shim('claude-multi'));

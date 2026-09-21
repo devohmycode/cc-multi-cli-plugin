@@ -23,7 +23,7 @@ import type {
 import { runAntigravity } from './cli.ts';
 import { antigravitySettingsFile } from './hooks.ts';
 import type { AntigravityModel } from './models.ts';
-import { selectAntigravityModel } from './models.ts';
+import { nativeSpelling, selectAntigravityModel } from './models.ts';
 import { type AntigravityPolicy, antigravityCompactionDenyList } from './permissions.ts';
 import {
   antigravityHistoryHash,
@@ -157,6 +157,10 @@ export class AntigravityHarness {
       identity,
       {
         ...body,
+        // Both spellings of a model name the same native request. Keying on the tagged one
+        // would let the plain spelling miss a completed exchange and dispatch it a second
+        // time, which is exactly what happens across a MULTI_DISABLE_1M_CONTEXT change.
+        model: nativeSpelling(body.model),
         stream: undefined,
         messages: antigravityHistoryHash(body.messages),
         system: undefined,

@@ -76,6 +76,31 @@ test('worker admission rejects inconsistent identity and native dispatch awaits 
   assert.throws(() => modes.startPreparedModWorker('s', 'other', 'cursor', '/workspace'), /unique/);
 });
 
+test('a worker spawned by its plain model ID matches its tagged catalog definition', async () => {
+  const modes = new PermissionModes(async () => ({
+    gemini: { model: 'multi/antigravity/gemini[1m]', tools: ['Read'] },
+  }));
+  await modes.precompute('/workspace');
+  modes.recordModSession('s', {
+    permissionMode: 'plan',
+    cwd: '/workspace',
+    model: 'multi/antigravity/gemini[1m]',
+  });
+  const spawn = {
+    subagentType: 'gemini',
+    cwd: '/workspace',
+    permissionMode: 'plan',
+    parentModel: 'multi/antigravity/gemini',
+  };
+  // The tag is Claude-side presentation, so a caller that spells the model without it is
+  // naming the same native model, not a different one.
+  await modes.prepareModWorker('s', { ...spawn, model: 'multi/antigravity/gemini' });
+  await assert.rejects(
+    modes.prepareModWorker('s', { ...spawn, model: 'multi/antigravity/other' }),
+    /inconsistent with its catalog definition/,
+  );
+});
+
 test('host-only snapshots cannot authorize harness workers until policy admission', async () => {
   const modes = new PermissionModes(
     async () => ({

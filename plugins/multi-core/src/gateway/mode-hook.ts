@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { nativeSpelling } from '../../../multi-antigravity/src/models.ts';
 import { mergeCursorPermissions } from '../../../multi-cursor/src/permissions.ts';
 import type { WorkerPermissions } from './agent-definitions.ts';
 import { ModPolicies } from './mod-policy.ts';
@@ -119,7 +120,7 @@ export class PermissionModes {
       throw new Error('Native harness settings policy has not been admitted');
     }
     const context = this.resolve(session, agent);
-    if (model && context.model && context.model !== model) {
+    if (model && context.model && !sameModel(context.model, model)) {
       throw new Error('Harness model is inconsistent with its admitted permission context');
     }
     return context;
@@ -357,6 +358,14 @@ export class PermissionModes {
   }
 }
 
+/** Claude's context tag is presentation metadata, so two spellings name one model. */
+function sameModel(left: unknown, right: unknown): boolean {
+  if (typeof left !== 'string' || typeof right !== 'string') {
+    return left === right;
+  }
+  return nativeSpelling(left) === nativeSpelling(right);
+}
+
 function validateWorkerDefinition(definition: WorkerPermissions, input: Record<string, unknown>) {
   if (definition.nativePermissionError) {
     throw new Error(definition.nativePermissionError);
@@ -365,7 +374,7 @@ function validateWorkerDefinition(definition: WorkerPermissions, input: Record<s
     definition.model &&
     definition.model !== 'inherit' &&
     input.model !== undefined &&
-    input.model !== definition.model
+    !sameModel(input.model, definition.model)
   ) {
     throw new Error('Worker model is inconsistent with its catalog definition');
   }
@@ -381,7 +390,7 @@ function validateWorkerRequest(
   }
   if (
     parent.model &&
-    input.parentModel !== parent.model &&
+    !sameModel(input.parentModel, parent.model) &&
     (executionForModel(parent.model) === 'harness' ||
       executionForModel(input.parentModel) === 'harness')
   ) {
