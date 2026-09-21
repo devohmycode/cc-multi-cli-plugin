@@ -50,6 +50,14 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   ignores every reminder, so a retry carrying only a refreshed block is recognised
   as the same request instead of paying for a second run.
 
+- Report counts the same way on every machine locale. `toLocaleString()` without
+  an argument follows the host, so the launcher's argument-limit message read
+  "32 041" on a French Windows and "32,041" on an English one: the pinned
+  expectation in `native-launcher.test.ts` failed for contributors whose machine
+  is not in English, and `/multi-usage` grouped Cursor token totals differently
+  per host. Both now pass `en-US`, the convention receipts already used, and a
+  test covers the grouping so it cannot drift back.
+
 - Send Antigravity prompts of 6 KiB or more through stream-json stdin on
   Windows instead of the `-p` argument. Windows caps a command line at 32,767
   characters, and at 8,191 when a `.cmd` shim runs through `cmd.exe`, so prompts
