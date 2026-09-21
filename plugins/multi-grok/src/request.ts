@@ -24,8 +24,8 @@ export function grokHistoryHash(messages: MessagesRequest['messages']): string {
           }
           const { cache_control: _cache, ...rest } = block as ContentBlock;
           if (rest.type === 'text' && typeof rest.text === 'string') {
-            // Identity follows the prompt actually sent: a retry that only carries a
-            // fresh reminder is the same request, and must not run a second time.
+            // Identity follows the prompt actually sent, not the reminders wrapped
+            // around it; see withoutClaudeReminders.
             return { ...rest, text: withoutClaudeReminders(rest.text) };
           }
           return rest.type === 'tool_result' ? { ...rest, content: normalize(rest.content) } : rest;
@@ -35,29 +35,50 @@ export function grokHistoryHash(messages: MessagesRequest['messages']): string {
 }
 
 /**
- * Claude's system reminders are instructions addressed to Claude: catalogues of
- * its deferred tools, MCP servers, skills and subagents, none of which this
- * provider can call. Measured on a live session, they were 99% of a flattened
- * prompt — 95,011 characters out of 95,852 for a one-word message — and they
- * describe capabilities the provider does not have, which is misleading as well
- * as expensive. They are dropped.
+ * Claude's system reminders carry two different kinds of block, and only one of
+ * them is noise here. The catalogues — its deferred tools, MCP servers, skills and
+ * subagent types — describe capabilities this provider cannot call. Measured on a
+ * live session they were 72,704 characters of a 95,852-character prompt whose real
+ * message was 841, and they are dropped.
  *
- * Recalled memories are the exception: unlike the repository's own AGENTS.md,
- * which the CLI reads for itself, their content exists nowhere the provider can
- * reach. `native-grok-request.test.ts` pins both halves against the block
- * openings a live session produced, so a change upstream fails a test instead of
- * silently dropping or forwarding the wrong thing.
+ * Everything else is an instruction addressed to whoever answers the turn: the
+ * project's CLAUDE.md and the user's own, Auto Mode notices, hook output and
+ * recalled memories. The CLI reads the repository's AGENTS.md for itself and
+ * reaches none of the rest, so those blocks are forwarded. The filter names the
+ * catalogues and keeps what it does not recognise: a renamed catalogue costs
+ * tokens, while a renamed instruction block would cost the worker the rules it is
+ * meant to follow. `native-grok-request.test.ts` pins both halves against the
+ * block openings a live session produced, so a change upstream fails a test
+ * instead of silently dropping or forwarding the wrong thing.
  */
 const SYSTEM_REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/g;
-const RECALLED_MEMORIES = /Below are some potentially helpful\/relevant pieces of information/i;
+const CATALOGUES: readonly RegExp[] = [
+  /The following deferred tools are now available/i,
+  /The following skills are available for use with the Skill tool/i,
+  /Available agent types for the Agent tool/i,
+  /#+ MCP Server Instructions/,
+];
 
+/** The forwarded prompt: catalogues out, instructions in. */
+function withoutClaudeCatalogues(text: string): string {
+  return text.replace(SYSTEM_REMINDER, (block) =>
+    CATALOGUES.some((catalogue) => catalogue.test(block)) ? '' : block,
+  );
+}
+
+/**
+ * Identity follows the prompt actually typed, so every reminder is stripped from
+ * it: a retry that only carries a fresh reminder — a new catalogue, a recalculated
+ * memory recall, an updated environment block — is the same request, and must not
+ * run a second time.
+ */
 function withoutClaudeReminders(text: string): string {
-  return text.replace(SYSTEM_REMINDER, (block) => (RECALLED_MEMORIES.test(block) ? block : ''));
+  return text.replace(SYSTEM_REMINDER, '');
 }
 
 function blockText(block: ContentBlock, allowReasoning: boolean, role: string): string {
   if (block.type === 'text' && typeof block.text === 'string') {
-    return withoutClaudeReminders(block.text);
+    return withoutClaudeCatalogues(block.text);
   }
   if (block.type === 'tool_use') {
     return toolUseText(block, role);
@@ -113,7 +134,7 @@ function messageText(message: RequestMessage): string {
     throw new Error(`Grok CLI does not support ${message.role} messages`);
   }
   const content = contentText(message.content, message.role === 'assistant', message.role);
-  // A turn that carried nothing but reminders has no content left to forward.
+  // A turn that carried nothing but catalogues has no content left to forward.
   return content.trim() ? `${message.role}: ${content}` : '';
 }
 

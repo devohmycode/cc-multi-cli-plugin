@@ -231,6 +231,19 @@ test('sends explicit flags and refuses to both create and resume a session', asy
   );
 });
 
+test('a CLI that cannot start reports the operating system reason', async (t) => {
+  const cli = await fakeCli(t);
+  // The classification upstream turns on this code: a missing binary is permanent,
+  // a machine momentarily out of processes is not.
+  await assert.rejects(
+    replay(cli, 'text-only.jsonl', {
+      executable: path.join(cli.cwd, 'absent', 'grok'),
+    }),
+    (error: unknown) =>
+      isCliError(error) && error.code === 'spawn' && error.systemCode === 'ENOENT',
+  );
+});
+
 test('resumes an existing session without claiming a new identity', async (t) => {
   const cli = await fakeCli(t);
   const argsFile = path.join(cli.cwd, 'args.txt');

@@ -81,17 +81,24 @@ them out of sight, remove the servers from your Grok configuration with
 ## What the provider is sent
 
 The conversation is flattened into one native prompt behind a fixed preamble.
-Claude's own `system` is never forwarded, and neither are its system reminders:
-they are instructions addressed to Claude, mostly catalogues of its deferred
-tools, MCP servers, skills and subagents that this provider cannot call. On a
-measured session they were 99% of the prompt — 95,011 characters out of 95,852
-for a one-word message — and they described capabilities the provider does not
-have. Recalled memories are the one exception, because their content exists
-nowhere the CLI can reach; the repository's own `AGENTS.md` is dropped with the
-rest, since the CLI reads it directly.
+Claude's own `system` is never forwarded, and four of its system reminders are
+dropped: the deferred tool catalogue, the MCP server catalogue, the skill
+catalogue, and the subagent catalogue. They name capabilities this provider
+cannot call, and on a measured session they were 72,704 characters of a 95,852
+character prompt whose real message was 841.
 
-A turn left empty by that filtering adds nothing, and a request with no content
-at all fails explicitly.
+Every other reminder is forwarded, because it is an instruction addressed to
+whoever answers the turn and the CLI reaches it no other way: the project's
+`CLAUDE.md` and your own, the environment and repository context block, Auto Mode
+notices, hook output, and recalled memories. The repository's `AGENTS.md` is not
+sent, since the CLI reads it directly. A block Multi does not recognise is
+forwarded rather than dropped — a renamed catalogue only costs tokens, a renamed
+instruction block would cost the worker its rules.
+
+Request identity ignores every reminder, forwarded or not, so a retry that only
+carries a refreshed block is the same request and never pays for the turn twice.
+A turn left empty by the filtering adds nothing, and a request with no content at
+all fails explicitly.
 
 ## Continuation, caching and failures
 
@@ -102,16 +109,24 @@ instead of starting a fresh one. Follow-ups send only the newest turn after the
 last assistant response, and outer history changes produce a notice and continue
 on the native record. Native state is never rewound.
 
-One turn runs at a time per worker and workspace, and a second prompt waits its
-turn rather than being refused: the answer streams to you before the turn is
-released, so a prompt typed straight after reading it would otherwise be lost.
-Cursor and Antigravity still refuse a concurrent prompt; only Grok queues.
+One turn runs at a time per worker and workspace, and a prompt sent while a run
+is in flight is refused with an explicit error rather than queued behind it. Such
+a prompt was written before the running turn answered, so its history stops at the
+previous assistant message and resuming with it would send the running turn to the
+CLI a second time. Multi never reruns a paid turn on a guess; send the prompt
+again once the answer lands. Cursor and Antigravity refuse the same way.
 
 A completed identical request replays its saved output. A run that ends without
 a terminal event is never assumed complete: the next request resumes with an
 interruption notice. An answer returned on a different native session is refused
 rather than merged. Cost and token counts come from the run's own terminal event;
 `grok usage <session>` reports the session total the CLI itself recorded.
+
+A failure that repeats on every attempt — a policy the CLI would not apply, a
+missing binary, a denied path — is reported as a request error so the session
+stops instead of paying for the same run again. A start the operating system
+refused because the machine was momentarily out of processes, handles or memory
+stays retryable: nothing ran, so nothing was billed.
 
 ## Paths per OS
 

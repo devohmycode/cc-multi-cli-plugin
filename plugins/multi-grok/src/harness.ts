@@ -67,7 +67,6 @@ export class GrokHarness {
   private readonly exchanges = new Map<string, Exchange>();
   private readonly creating = new Set<string>();
   private readonly loading = new Set<string>();
-  private readonly queues = new Map<string, Promise<void>>();
   private closed = false;
 
   constructor(
@@ -173,7 +172,7 @@ export class GrokHarness {
       observers: 0,
       settled: false,
       result: Promise.resolve().then(() =>
-        this.cachedExecute(body, context, selection, cwd, identity, key, exchange, forward),
+        this.serve(body, context, selection, cwd, identity, key, exchange, forward),
       ),
     };
     const settle = () => {
@@ -184,67 +183,6 @@ export class GrokHarness {
     };
     void exchange.result.then(settle, settle);
     return exchange;
-  }
-
-  /**
-   * One turn at a time per agent, in arrival order. A second prompt waits instead
-   * of being refused: the answer streams to the user before the turn is released,
-   * so typing straight after reading it used to cost them the message. Grok only —
-   * Cursor and Antigravity still refuse, and widening this is the repository
-   * owner's call.
-   */
-  private async waitForTurn(identity: string, signal: AbortSignal): Promise<() => void> {
-    const previous = this.queues.get(identity) ?? Promise.resolve();
-    const turn = Promise.withResolvers<void>();
-    const queued = previous.then(
-      () => turn.promise,
-      () => turn.promise,
-    );
-    this.queues.set(identity, queued);
-    const release = () => {
-      turn.resolve();
-      if (this.queues.get(identity) === queued) {
-        this.queues.delete(identity);
-      }
-    };
-    const controller = new AbortController();
-    const waiting = new Promise<never>((_, reject) => {
-      const cancel = () => reject(signal.reason);
-      if (signal.aborted) {
-        cancel();
-        return;
-      }
-      signal.addEventListener('abort', cancel, { once: true, signal: controller.signal });
-    });
-    void waiting.catch(() => {});
-    try {
-      // A failure ahead in the queue never fails the request behind it.
-      await Promise.race([previous.catch(() => {}), waiting]);
-    } catch (error) {
-      release();
-      throw error;
-    } finally {
-      controller.abort();
-    }
-    return release;
-  }
-
-  private async cachedExecute(
-    body: MessagesRequest,
-    context: PermissionContext,
-    selection: ReturnType<typeof selectGrokModel>,
-    cwd: string,
-    identity: string,
-    key: string,
-    exchange: Exchange,
-    emit: Emit,
-  ) {
-    const release = await this.waitForTurn(identity, exchange.controller.signal);
-    try {
-      return await this.serve(body, context, selection, cwd, identity, key, exchange, emit);
-    } finally {
-      release();
-    }
   }
 
   private async serve(
@@ -428,6 +366,13 @@ export class GrokHarness {
     return finished;
   }
 
+  /**
+   * One turn at a time per agent, and a prompt that arrives during a run is refused
+   * rather than queued behind it. Such a prompt was composed before the run in
+   * flight answered, so its history stops at the previous assistant turn and
+   * resuming with it would forward the running user turn a second time: a blind
+   * rerun of a paid turn. Cursor and Antigravity refuse the same way.
+   */
   private async session(body: MessagesRequest, identity: string) {
     const current = this.sessions.get(identity);
     if (current?.busy || this.creating.has(identity)) {
@@ -903,6 +848,20 @@ const missingPermissions: CheckGrokPermissions = async () => {
   throw new Error('Grok native permission policy is not configured');
 };
 
+/**
+ * A machine momentarily out of processes, file handles or memory starts the CLI on
+ * the next attempt; a missing binary or a denied path never does. Only the second
+ * kind is answered as a request error.
+ */
+const TRANSIENT_SPAWN = new Set(['EAGAIN', 'EMFILE', 'ENFILE', 'ENOMEM', 'ETXTBSY']);
+
+function permanentFailure(error: GrokCliError): boolean {
+  if (error.code === 'policy') {
+    return true;
+  }
+  return error.code === 'spawn' && !TRANSIENT_SPAWN.has(error.systemCode ?? '');
+}
+
 export class GrokProviderError extends Error {
   readonly failure: { status: number; message: string };
   constructor(error: unknown) {
@@ -910,8 +869,7 @@ export class GrokProviderError extends Error {
     // way on every attempt. Reporting them as 502 had Claude retry a paid run ten
     // times over one prompt, so they are answered as a request error instead.
     const deterministic =
-      error instanceof GrokBusyError ||
-      (error instanceof GrokCliError && (error.code === 'policy' || error.code === 'spawn'));
+      error instanceof GrokBusyError || (error instanceof GrokCliError && permanentFailure(error));
     const detail = error && typeof error === 'object' && 'message' in error ? error.message : error;
     const reported = String(detail ?? 'unknown Grok failure');
     const advice = grokFailureAdvice(reported);

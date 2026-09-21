@@ -108,8 +108,10 @@ test('refuses request shapes the native CLI cannot honor', () => {
 /**
  * The reminder blocks a live Claude Code session actually sent to this provider on
  * 2026-09-20, with their measured sizes. They were 95,011 of a 95,852-character
- * prompt whose real message was 841 characters. If Claude Code renames one, the
- * matching case here fails rather than the change passing unnoticed.
+ * prompt whose real message was 841 characters. The catalogues among them, 72,704
+ * characters, are dropped; the rest are instructions the CLI reaches no other way
+ * and are forwarded. If Claude Code renames one, the matching case here fails
+ * rather than the change passing unnoticed.
  */
 const CAPTURED_REMINDERS: readonly { size: number; kept: boolean; opening: string }[] = [
   {
@@ -123,7 +125,7 @@ const CAPTURED_REMINDERS: readonly { size: number; kept: boolean; opening: strin
     kept: false,
     opening: 'The following skills are available for use with the Skill tool:',
   },
-  { size: 8421, kept: false, opening: 'Codebase and user instructions are shown below.' },
+  { size: 8421, kept: true, opening: 'Codebase and user instructions are shown below.' },
   {
     size: 6031,
     kept: true,
@@ -132,19 +134,23 @@ const CAPTURED_REMINDERS: readonly { size: number; kept: boolean; opening: strin
   { size: 3841, kept: false, opening: 'Available agent types for the Agent tool:' },
   {
     size: 2211,
-    kept: false,
+    kept: true,
     opening: "As you answer the user's questions, you can use the following context:",
   },
-  { size: 2016, kept: false, opening: 'SessionStart:startup hook success: === REMEMBER ===' },
-  { size: 1316, kept: false, opening: '## Auto Mode Active' },
-  { size: 859, kept: false, opening: '# Environment' },
+  { size: 2016, kept: true, opening: 'SessionStart:startup hook success: === REMEMBER ===' },
+  { size: 1316, kept: true, opening: '## Auto Mode Active' },
+  { size: 859, kept: true, opening: '# Environment' },
 ];
 
 function reminder(opening: string, size: number): string {
-  return `<system-reminder>${'\n'}${opening}${'\n'}${'x'.repeat(Math.max(0, size - opening.length))}${'\n'}</system-reminder>`;
+  const width = Math.max(0, size - opening.length);
+  // Words, not one long run of a single character: the estimator tokenizes this
+  // fixture, and a degenerate run costs seconds of test time for no realism.
+  const filler = 'line of reminder body '.repeat(Math.ceil(width / 22)).slice(0, width);
+  return `<system-reminder>${'\n'}${opening}${'\n'}${filler}${'\n'}</system-reminder>`;
 }
 
-test('Claude reminders are dropped, recalled memories are kept', () => {
+test('Claude catalogues are dropped and instruction reminders are forwarded', () => {
   const content = [
     ...CAPTURED_REMINDERS.map(({ opening, size }) => reminder(opening, size)),
     'ship the fix',
@@ -160,10 +166,27 @@ test('Claude reminders are dropped, recalled memories are kept', () => {
   // Catalogues of Claude's own tools describe capabilities this provider lacks.
   assert.equal(prepared.prompt.includes('ToolSearch'), false);
   assert.equal(prepared.prompt.includes('Skill tool'), false);
+  // They remain the bulk of what a live session sent.
+  const dropped = CAPTURED_REMINDERS.filter(({ kept }) => !kept);
+  assert.equal(
+    dropped.reduce((total, { size }) => total + size, 0),
+    72704,
+  );
 });
 
-test('a turn that carried only reminders adds nothing, and an empty one fails', () => {
-  const noise = reminder('# Environment', 400);
+test('an unrecognised reminder is forwarded rather than dropped', () => {
+  // A renamed catalogue only costs tokens, while a renamed instruction block would
+  // cost the worker the rules it is meant to follow, so the filter fails that way.
+  const text = `${reminder('Some block Claude Code has not shipped yet', 200)}${'\n'}ship it`;
+  const prepared = prepareGrokRequest(
+    request({ messages: [{ role: 'user', content: [{ type: 'text', text }] }] }),
+  );
+
+  assert.match(prepared.prompt, /Some block Claude Code has not shipped yet/);
+});
+
+test('a turn that carried only catalogues adds nothing, and an empty one fails', () => {
+  const noise = reminder('# MCP Server Instructions', 400);
   const prepared = prepareGrokRequest(
     request({
       messages: [
@@ -184,21 +207,27 @@ test('a turn that carried only reminders adds nothing, and an empty one fails', 
 });
 
 test('request identity follows the prompt, not the reminders around it', () => {
-  const withReminder = (text: string) => [
+  const withReminder = (opening: string, text: string) => [
     {
       role: 'user',
-      content: [{ type: 'text', text: `${reminder('# Environment', 300)}${'\n'}${text}` }],
+      content: [{ type: 'text', text: `${reminder(opening, 300)}${'\n'}${text}` }],
     },
   ];
+  const question = grokHistoryHash([
+    { role: 'user', content: [{ type: 'text', text: `${'\n'}same question` }] },
+  ]);
   // A retry carrying only a fresh reminder is the same request; a different key
-  // would queue it as competing work and pay for the same turn twice.
+  // would make it a competing run and pay for the same turn twice. A forwarded
+  // instruction block follows the same rule: it reaches the CLI, never identity.
+  const instructions = 'Codebase and user instructions are shown below.';
   assert.equal(
-    grokHistoryHash(withReminder('same question')),
-    grokHistoryHash([{ role: 'user', content: [{ type: 'text', text: `${'\n'}same question` }] }]),
+    grokHistoryHash(withReminder('# MCP Server Instructions', 'same question')),
+    question,
   );
+  assert.equal(grokHistoryHash(withReminder(instructions, 'same question')), question);
   assert.notEqual(
-    grokHistoryHash(withReminder('same question')),
-    grokHistoryHash(withReminder('other question')),
+    grokHistoryHash(withReminder(instructions, 'same question')),
+    grokHistoryHash(withReminder(instructions, 'other question')),
   );
 });
 

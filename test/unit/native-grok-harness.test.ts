@@ -366,43 +366,45 @@ test('a policy the CLI did not apply fails the request instead of retrying', asy
   });
 });
 
-test('a second prompt waits for the run in flight instead of being refused', async (t) => {
-  const { stateDirectory, calls } = await setup(t);
-  const release = Promise.withResolvers<void>();
+test('a CLI the machine could not start stays retryable, a missing one does not', async (t) => {
+  const { stateDirectory } = await setup(t);
+  const failures = [
+    new GrokCliError('grok failed to start: spawn EAGAIN', 'spawn', { systemCode: 'EAGAIN' }),
+    new GrokCliError('grok failed to start: spawn grok ENOENT', 'spawn', { systemCode: 'ENOENT' }),
+  ];
   const harness = new GrokHarness([model], {
     stateDirectory,
     checkPermissions: policy,
-    run: async (options) => {
-      calls.push(options);
-      options.onEvent?.({ event: 'text', text: 'working' });
-      if (calls.length === 1) {
-        await release.promise;
-      }
-      return echoSession(options);
+    run: async () => {
+      throw failures.shift() ?? new Error('no failure left');
     },
   });
-  t.after(async () => {
-    release.resolve();
-    await harness.close();
+  t.after(() => harness.close());
+
+  // Nothing ran, so nothing was paid for: a machine out of processes is worth
+  // another attempt, unlike a binary that is not there.
+  await assert.rejects(ask(harness, 'out of processes'), (error: unknown) => {
+    assert.equal((error as GrokProviderError).failure.status, 502);
+    return true;
   });
-
-  // The answer streams before the turn is released, so a prompt typed straight
-  // after reading it lands here; refusing it used to cost the user the message.
-  const first = ask(harness, 'long running');
-  await until(() => calls.length === 1);
-  const second = ask(harness, 'typed while busy');
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.equal(calls.length, 1, 'the queued turn must not start early');
-
-  release.resolve();
-  await first;
-  await second;
-  assert.equal(calls.length, 2);
-  // The queued turn saw the session the first one opened, so it resumes it.
-  assert.equal(calls[1].resume, calls[0].session);
+  await assert.rejects(ask(harness, 'no binary'), (error: unknown) => {
+    assert.equal((error as GrokProviderError).failure.status, 400);
+    assert.match((error as GrokProviderError).message, /make grok available on PATH/);
+    return true;
+  });
 });
 
-test('a queued prompt that is cancelled never blocks the one behind it', async (t) => {
+test('failure advice reads a status, not a number that resembles one', () => {
+  const advised = (message: string) => new GrokProviderError(new Error(message)).message;
+
+  assert.match(advised('Request failed with status code 401'), /grok login/);
+  assert.match(advised('401 Unauthorized'), /grok login/);
+  assert.match(advised('HTTP 429 Too Many Requests'), /rate limited/);
+  // Sending someone to re-login over a line count is worse than saying nothing.
+  assert.equal(advised('Rewrote 401 lines of grok-429.log'), 'Rewrote 401 lines of grok-429.log');
+});
+
+test('a prompt sent during a run is refused instead of resuming stale history', async (t) => {
   const { stateDirectory, calls } = await setup(t);
   const release = Promise.withResolvers<void>();
   const harness = new GrokHarness([model], {
@@ -424,22 +426,41 @@ test('a queued prompt that is cancelled never blocks the one behind it', async (
 
   const first = ask(harness, 'long running');
   await until(() => calls.length === 1);
-  const abandoned = new AbortController();
-  const queued = harness.handle(
-    { model: model.model, messages: [{ role: 'user', content: 'abandoned' }] },
-    'worker',
-    abandoned.signal,
-    undefined,
-    context,
+
+  // This prompt was written before the answer existed, so its history stops at the
+  // running turn; resuming with it would send that turn to the CLI a second time.
+  await assert.rejects(
+    harness.handle(
+      {
+        model: model.model,
+        messages: [
+          { role: 'user', content: 'long running' },
+          { role: 'user', content: 'typed while busy' },
+        ],
+      },
+      'worker',
+      new AbortController().signal,
+      undefined,
+      context,
+    ),
+    (error: unknown) => {
+      assert.equal(error instanceof GrokProviderError, true);
+      assert.match((error as GrokProviderError).message, /already running/);
+      // Deterministic while the run lasts: a retryable status turned one conflict
+      // into ten attempts in a live session.
+      assert.equal((error as GrokProviderError).failure.status, 400);
+      return true;
+    },
   );
-  const waiting = assert.rejects(queued);
-  abandoned.abort();
-  await waiting;
+  assert.equal(calls.length, 1, 'the refused prompt must not start a native run');
 
   release.resolve();
   await first;
-  await ask(harness, 'after the abandoned one');
+
+  // The run in flight is untouched, and the next prompt resumes the session it opened.
+  await ask(harness, 'after the refusal');
   assert.equal(calls.length, 2);
+  assert.equal(calls[1].resume, calls[0].session);
 });
 
 test('a closed harness refuses new work', async (t) => {

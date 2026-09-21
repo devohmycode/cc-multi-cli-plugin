@@ -29,16 +29,26 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   rule is only sent when none of the tools it reaches was granted. The allowlist
   is not exact either, so every ungranted tool is removed by name as well, through
   the one alias the CLI needs (`run_terminal_command` is removed as
-  `run_terminal_cmd`). A policy the CLI did not apply, or a CLI that cannot start,
-  is reported as a request error so the session does not retry a paid run. A
-  second prompt for a worker that is still answering waits its turn instead of
-  being refused, because the answer streams before the turn is released and a
-  refusal cost the user their message; Cursor and Antigravity keep refusing.
-  Claude's system reminders are no longer forwarded: measured on a live session
-  they were 99% of the flattened prompt and described Claude's own tools, MCP
-  servers and skills, which the provider cannot call. Recalled memories are kept.
-  Request identity follows the filtered prompt, so a retry carrying only a fresh
-  reminder is recognised as the same request instead of paying for a second run.
+  `run_terminal_cmd`). A policy the CLI did not apply, or a CLI that cannot start
+  because its binary is missing or its path is denied, is reported as a request
+  error so the session does not retry a paid run; a start the operating system
+  refused for want of processes, handles or memory stays retryable, since nothing
+  ran and nothing was billed. Failure advice reads `401` and `429` as statuses only
+  where the message presents them as such, so a line count or a file name no longer
+  sends the user to re-login. A
+  prompt sent while a worker is still answering is refused rather than queued
+  behind it: that prompt was written before the running turn answered, so its
+  history stops at the previous assistant message and resuming with it would send
+  the running turn to the CLI a second time. Cursor and Antigravity refuse the
+  same way. Claude's tool, MCP, skill and subagent catalogues are no longer
+  forwarded: measured on a live session they were 72,704 characters of a 95,852
+  character prompt, and they name capabilities the provider cannot call. Every
+  other system reminder is forwarded, because the CLI reaches it no other way —
+  the project's `CLAUDE.md` and the user's own, the environment and repository
+  context, Auto Mode notices, hook output, and recalled memories — and a block
+  Multi does not recognise is forwarded rather than dropped. Request identity
+  ignores every reminder, so a retry carrying only a refreshed block is recognised
+  as the same request instead of paying for a second run.
 
 - Send Antigravity prompts of 6 KiB or more through stream-json stdin on
   Windows instead of the `-p` argument. Windows caps a command line at 32,767

@@ -101,11 +101,22 @@ export class GrokCliError extends Error {
   readonly exitCode: number | null;
   readonly signal: NodeJS.Signals | null;
   readonly stderr: string;
+  /**
+   * The operating system's own reason a process could not be created, when it gave
+   * one: `ENOENT` for a missing binary, `EAGAIN` for a machine momentarily out of
+   * processes. Only that code tells a permanent failure from a transient one.
+   */
+  readonly systemCode: string | undefined;
 
   constructor(
     message: string,
     code: GrokCliError['code'],
-    details: { exitCode?: number | null; signal?: NodeJS.Signals | null; stderr?: string } = {},
+    details: {
+      exitCode?: number | null;
+      signal?: NodeJS.Signals | null;
+      stderr?: string;
+      systemCode?: string;
+    } = {},
   ) {
     super(message);
     this.name = 'GrokCliError';
@@ -113,7 +124,16 @@ export class GrokCliError extends Error {
     this.exitCode = details.exitCode ?? null;
     this.signal = details.signal ?? null;
     this.stderr = details.stderr ?? '';
+    this.systemCode = details.systemCode;
   }
+}
+
+/** Node reports the OS failure as `code` on the error it throws or emits. */
+function spawnSystemCode(error: unknown): string | undefined {
+  if (error && typeof error === 'object' && 'code' in error && typeof error.code === 'string') {
+    return error.code;
+  }
+  return undefined;
 }
 
 const defaultMaxOutputBytes = 8 * 1024 * 1024;
@@ -241,7 +261,11 @@ function spawnGrok(
     try {
       child = startGrok(options, platform, environment, promptFile);
     } catch (error) {
-      reject(new GrokCliError(`Failed to start grok: ${String(error)}`, 'spawn'));
+      reject(
+        new GrokCliError(`Failed to start grok: ${String(error)}`, 'spawn', {
+          systemCode: spawnSystemCode(error),
+        }),
+      );
       return;
     }
 
@@ -356,7 +380,11 @@ function spawnGrok(
     child.stdout?.on('data', consumeStdout);
     child.stderr?.on('data', consumeStderr);
     child.once('error', (error) => {
-      fail(new GrokCliError(`grok failed to start: ${error.message}`, 'spawn'));
+      fail(
+        new GrokCliError(`grok failed to start: ${error.message}`, 'spawn', {
+          systemCode: spawnSystemCode(error),
+        }),
+      );
     });
     child.once('close', finish);
     options.signal.addEventListener('abort', onAbort, { once: true });
