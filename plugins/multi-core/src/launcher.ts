@@ -21,7 +21,10 @@ import { antigravityPermissionPolicy } from '../../multi-antigravity/src/permiss
 import { CursorHarness } from '../../multi-cursor/src/harness.ts';
 import type { CursorModelOption } from '../../multi-cursor/src/models.ts';
 import { cursorModelOptions, cursorPickerOptions } from '../../multi-cursor/src/models.ts';
-import { mergeCursorPermissions } from '../../multi-cursor/src/permissions.ts';
+import {
+  cursorPermissionPolicy,
+  mergeCursorPermissions,
+} from '../../multi-cursor/src/permissions.ts';
 import { CursorWorkspaces } from '../../multi-cursor/src/workspaces.ts';
 import { createOpenAIApproval, discoverOpenAIReviewer } from '../../multi-openai/src/approval.ts';
 import { readCodexAuth } from '../../multi-openai/src/auth.ts';
@@ -163,7 +166,9 @@ async function main() {
         return {};
       }
       try {
-        return await checkCursorSettings(cwd, args, callerSettings);
+        return await checkCursorSettings(cwd, args, callerSettings, {
+          validate: cursor ? cursorPermissionPolicy : antigravityPermissionPolicy,
+        });
       } catch (error) {
         return { nativePermissionError: String(error) };
       }
@@ -356,7 +361,9 @@ function nativeHarnesses(
     ? new AntigravityHarness(antigravityModels, {
         checkPermissions: async (cwd, context) => {
           await checkAntigravityHooks();
-          const restrictions = await checkCursorSettings(cwd, args, callerSettings);
+          const restrictions = await checkCursorSettings(cwd, args, callerSettings, {
+            validate: antigravityPermissionPolicy,
+          });
           return antigravityPermissionPolicy(mergeCursorPermissions(context, restrictions));
         },
       })

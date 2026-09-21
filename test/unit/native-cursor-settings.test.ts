@@ -4,10 +4,12 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test, { mock } from 'node:test';
+import { antigravityPermissionPolicy } from '../../plugins/multi-antigravity/src/permissions.ts';
 import {
   type CursorSettingsOptions,
   checkCursorSettings,
 } from '../../plugins/multi-core/src/gateway/cursor-settings.ts';
+import type { PermissionContext } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
 
 const absentManagedPolicy = async (): Promise<string> => '';
 
@@ -68,6 +70,57 @@ test('native settings admission respects source selection and rechecks changed a
   await fs.writeFile(path.join(project, 'settings.json'), '{invalid');
   await assert.rejects(checkSettings(cwd, ['--setting-sources=project'], {}), /admission failed/);
   await checkSettings(cwd, ['--setting-sources='], {});
+});
+
+test('settings admission validates with the requested harness policy', async (t) => {
+  const root = await temporaryDirectory();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const config = path.join(root, 'user');
+  await fs.mkdir(config);
+  t.mock.property(process, 'env', { ...process.env, CLAUDE_CONFIG_DIR: config });
+  // Claude tools Cursor cannot enforce but Antigravity maps to native tools.
+  await fs.writeFile(
+    path.join(config, 'settings.json'),
+    JSON.stringify({ permissions: { deny: ['WebSearch', 'WebFetch'] } }),
+  );
+  await assert.rejects(checkSettings(root, [], {}), /WebSearch; unsupported policy/);
+
+  const validated: PermissionContext[] = [];
+  const admitted = await checkSettings(
+    root,
+    [],
+    {},
+    { validate: (context) => void validated.push(context) },
+  );
+  assert.deepEqual(admitted.disallowedTools, ['WebSearch', 'WebFetch']);
+  assert.deepEqual(validated.at(-1)?.disallowedTools, ['WebSearch', 'WebFetch']);
+
+  // Structural admission still applies per file whichever harness validates the result.
+  await fs.writeFile(
+    path.join(config, 'settings.json'),
+    JSON.stringify({ permissions: { deny: ['WebSearch'], ask: ['Bash'] } }),
+  );
+  await assert.rejects(
+    checkSettings(root, [], {}, { validate: antigravityPermissionPolicy }),
+    /permissions.ask/,
+  );
+});
+
+test('managed policy follows the requested harness policy', async (t) => {
+  const root = await temporaryDirectory();
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const runCommand = async () => '{"permissions":{"deny":["WebSearch"]}}';
+  await assert.rejects(
+    checkSettings(root, ['--setting-sources='], {}, { platform: 'darwin', runCommand }),
+    /WebSearch; unsupported policy/,
+  );
+  const admitted = await checkSettings(
+    root,
+    ['--setting-sources='],
+    {},
+    { platform: 'darwin', runCommand, validate: antigravityPermissionPolicy },
+  );
+  assert.deepEqual(admitted.disallowedTools, ['WebSearch']);
 });
 
 test('native settings admission refuses CLI restrictions and caller hooks but accepts grants', async () => {

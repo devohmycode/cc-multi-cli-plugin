@@ -6,6 +6,16 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Admit Claude settings with the validator of the harness that will run them. Settings
+  discovery validated the merged rules with the Cursor translator on every launch, so a
+  launch without Cursor was refused for rules Cursor cannot map but the running harness
+  can: `permissions.deny: ["WebSearch", "WebFetch"]` stopped every Antigravity dispatch
+  with `Native Cursor cannot enforce Claude tool rule WebSearch`, although Antigravity
+  maps both to `search_web` and `read_url_content`. `checkCursorSettings()` now takes a
+  `validate` callback, and the per-file Cursor tool check is deferred to it, including on
+  the managed-policy path. Structural admission, `permissions.ask`, hooks and sandbox
+  checks still run per file, and Cursor keeps its own validator (#33).
+
 - Report counts the same way on every machine locale. `toLocaleString()` without
   an argument follows the host, so the launcher's argument-limit message read
   "32 041" on a French Windows and "32,041" on an English one: the pinned
