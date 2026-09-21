@@ -16,6 +16,7 @@ import {
   type AntigravityModel,
   antigravityPickerOptions,
   discoverAntigravityModels,
+  nativeSpelling,
 } from '../../multi-antigravity/src/models.ts';
 import { antigravityPermissionPolicy } from '../../multi-antigravity/src/permissions.ts';
 import { CursorHarness } from '../../multi-cursor/src/harness.ts';
@@ -220,9 +221,9 @@ async function main() {
     throw new Error('Gateway did not bind a local port.');
   }
   const settingsFile = path.join(settingsDir, 'settings.json');
-  const { initialModel, selectedModel } = await initialSelection(args, settings, anthropic);
-  if (!initialModel && selectedModel) {
-    args.push('--model', selectedModel);
+  const { selectedModel, modelArgument } = await initialSelection(args, settings, anthropic);
+  if (modelArgument) {
+    applyModelArgument(args, modelArgument);
   }
   configureApproval(settings, approvalProviders, selectedModel, Boolean(antigravity), anthropic);
   await writeFile(settingsFile, JSON.stringify(settings), { mode: 0o600 });
@@ -613,7 +614,8 @@ export function workerDefinitions(
     agents[option.worker] = {
       description: `${option.label}. Native Antigravity CLI coding worker.`,
       prompt: WORKER_PROMPT,
-      model: option.model,
+      // Tagged like the picker row so a delegated worker reads the same window.
+      model: oneMillionContext(option.model, option.id),
       tools: ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write'],
       ...(effort ? { effort } : {}),
     };
@@ -629,7 +631,9 @@ function selectWorkers(
   if (selectedModels === undefined) {
     return agents;
   }
-  const selected = new Set(selectedModels);
+  // Selections arrive in the picker's spelling, which may carry the context tag; native
+  // model IDs never do. Compare both in the untagged spelling.
+  const selected = new Set(selectedModels.map((model) => nativeSpelling(model) ?? model));
   const nativeModels = new Set(antigravityModels.map((option) => option.model));
   for (const option of antigravityModels) {
     const base = option.model.replace(/-(low|medium|high)$/, '');
@@ -640,7 +644,9 @@ function selectWorkers(
     }
   }
   return Object.fromEntries(
-    Object.entries(agents).filter(([, worker]) => selected.has(worker.model)),
+    Object.entries(agents).filter(([, worker]) =>
+      selected.has(nativeSpelling(worker.model) ?? worker.model),
+    ),
   );
 }
 
@@ -710,24 +716,80 @@ async function mergeSettings(args: string[], settings: LaunchSettings) {
 
 async function initialSelection(args: string[], settings: LaunchSettings, anthropic: boolean) {
   const savedModel = await savedSelection(args);
-  let initialModel =
+  const requested =
+    explicitModel(args) ??
     process.env.ANTHROPIC_MODEL ??
     (typeof settings.model === 'string' ? settings.model : savedModel);
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--model') {
-      initialModel = args[++i];
-    } else if (args[i].startsWith('--model=')) {
-      initialModel = args[i].slice(8);
-    }
-  }
   // With no Claude login, start on an available external model instead of Sonnet.
   const options = settings.modelPicker.options;
+  const initialModel = retagSelection(requested, options);
   const defaultModel =
     process.env.MULTI_MODELS === undefined
       ? options.find((option) => option.model === 'multi/openai/gpt-5.6-luna')
       : undefined;
   const fallback = anthropic ? undefined : (defaultModel ?? options[0])?.model;
-  return { initialModel, selectedModel: initialModel ?? fallback };
+  const selectedModel = initialModel ?? fallback;
+  // Claude is told the model when it would otherwise choose one itself, and when retagging
+  // changed the spelling: the selection Claude restores on its own carries no context tag.
+  const retagged = initialModel !== requested;
+  const passToClaude = selectedModel !== undefined && (initialModel === undefined || retagged);
+  return { selectedModel, modelArgument: passToClaude ? selectedModel : undefined };
+}
+
+/** The last `--model` the caller spelled, in either form. */
+function explicitModel(args: readonly string[]): string | undefined {
+  let model: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--model') {
+      model = args[i + 1];
+    } else if (args[i].startsWith('--model=')) {
+      model = args[i].slice(8);
+    }
+  }
+  return model;
+}
+
+/** Move a selection onto whichever spelling the picker offers: tagged, or plain once the
+ * context tag is switched off. A selection that survives the opt-out keeps its own row. */
+function retagSelection(
+  model: string | undefined,
+  options: readonly ModelOption[],
+): string | undefined {
+  if (model === undefined || options.some((option) => option.model === model)) {
+    return model;
+  }
+  const native = nativeSpelling(model) ?? model;
+  const rows = new Set(options.map((option) => option.model));
+  const tagged = `${native}[1m]`;
+  if (rows.has(tagged)) {
+    return tagged;
+  }
+  return rows.has(native) ? native : model;
+}
+
+/** Replace the caller's own `--model`, so a retagged selection cannot be passed twice.
+ * This walks the arguments exactly as `explicitModel` does, so both agree on which
+ * occurrence is authoritative; rewriting an earlier one would leave the child on the
+ * spelling the retag was meant to replace. */
+function applyModelArgument(args: string[], model: string) {
+  let index = -1;
+  let inline = false;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--model') {
+      index = i;
+      inline = false;
+    } else if (args[i].startsWith('--model=')) {
+      index = i;
+      inline = true;
+    }
+  }
+  if (index === -1) {
+    args.push('--model', model);
+  } else if (inline) {
+    args[index] = `--model=${model}`;
+  } else {
+    args[index + 1] = model;
+  }
 }
 
 function filterPicker(
@@ -751,15 +813,20 @@ function filterPicker(
     ),
   ];
   const available = new Map(settings.modelPicker.options.map((option) => [option.model, option]));
-  settings.modelPicker.options = models.map((model) => {
-    const option = available.get(model);
+  const chosen = new Set<ModelOption>();
+  for (const model of models) {
+    // A tagged row stays selectable by its plain provider ID and the reverse: a selection
+    // saved while the tag was on must still resolve once MULTI_DISABLE_1M_CONTEXT turns it off.
+    const native = nativeSpelling(model) ?? model;
+    const option = available.get(model) ?? available.get(`${native}[1m]`) ?? available.get(native);
     if (!option) {
       throw new Error(
         `MULTI_MODELS: model is not available from a connected provider in this launcher's picker: ${model}. Check the full ID with --cursor-models or --zen-models, then add it with /multi-core:setup --models <id>.`,
       );
     }
-    return option;
-  });
+    chosen.add(option);
+  }
+  settings.modelPicker.options = [...chosen];
 }
 
 function approvalProvider(model: string | undefined): 'openai' | 'cursor' | undefined {
@@ -925,6 +992,35 @@ function pickerProfile(adjustableEffort: boolean): string {
   return adjustableEffort ? 'claude-sonnet-4-6' : 'claude-haiku-4-5';
 }
 
+/**
+ * Antigravity families whose native input window is about a million tokens. Gemini 3.x
+ * Flash and Pro take 1,048,576. Every other advertised model keeps the conservative
+ * default, because its window is smaller or unestablished: GPT-OSS 120B takes 131,072,
+ * and the Claude models served here carry no 1M entitlement. The native catalog reports
+ * no capacity metadata, so this list is the only place that claim is made.
+ */
+const ANTIGRAVITY_1M_FAMILIES = /^gemini(?:-|$)/;
+
+/**
+ * Claude reads a row's context window from a `[1m]` tag on the model ID before it consults
+ * the `behavesAs` profile, and it matches `behavesAs` on the untagged spelling. Tagging a
+ * row therefore states the provider's real window without adopting a Claude profile that
+ * also advertises effort levels the provider does not have. The harness strips the tag
+ * before it resolves the native model. `MULTI_DISABLE_1M_CONTEXT` opts out.
+ */
+function oneMillionContext(model: string, id: string): string {
+  const family = id.replace(/-(low|medium|high)$/, '');
+  if (optedOut(process.env.MULTI_DISABLE_1M_CONTEXT) || !ANTIGRAVITY_1M_FAMILIES.test(family)) {
+    return model;
+  }
+  return `${model}[1m]`;
+}
+
+/** An opt-out set to an explicit negative reads as off, not as "the variable is present". */
+function optedOut(value: string | undefined): boolean {
+  return value !== undefined && !['', '0', 'false', 'no', 'off'].includes(value.toLowerCase());
+}
+
 function pickerSettings(
   codexSignedIn: boolean,
   cursorPicker: CursorModelOption[],
@@ -954,8 +1050,8 @@ function pickerSettings(
               false,
           ),
         })),
-        ...antigravityPickerOptions(antigravityModels).map(({ model, label }) => ({
-          model,
+        ...antigravityPickerOptions(antigravityModels).map(({ model, label, id }) => ({
+          model: oneMillionContext(model, id),
           label,
           behavesAs: pickerProfile(true),
           description: 'Native Antigravity CLI',

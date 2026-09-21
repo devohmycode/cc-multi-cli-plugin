@@ -6,6 +6,23 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Size Antigravity sessions to the provider's real context window. Picker rows and
+  named workers took their window from the conservative `behavesAs` profile, so every
+  Antigravity model reported 200K and long sessions compacted early. Gemini rows now
+  carry a `[1m]` tag on the model ID, which Claude reads before it consults `behavesAs`
+  and matches on the untagged spelling, so the window widens without adopting a profile
+  that advertises effort levels `agy` does not have. The tag never reaches `agy`:
+  `selectAntigravityModel()` strips it, and worker selection compares untagged spellings.
+  Only families with a verified window are tagged, because `agy models` reports no
+  capacity metadata: Gemini 3.x accepts 1,048,576 tokens, while GPT-OSS 120B accepts
+  131,072 and the Claude models served here carry no 1M entitlement.
+  `MULTI_DISABLE_1M_CONTEXT=1` opts out, and the opt-out is reversible: a selection saved
+  in either spelling resolves to whichever row the picker currently offers, so turning the
+  tag off cannot leave `MULTI_MODELS` naming a model the launcher refuses to start. A saved
+  or explicit plain model ID is moved onto the tagged row, so `--model` and a restored
+  selection get the same window as the picker; the rewrite lands on the last `--model` the
+  caller spelled, which is the one Claude resolves.
+
 - Admit Claude settings with the validator of the harness that will run them. Settings
   discovery validated the merged rules with the Cursor translator on every launch, so a
   launch without Cursor was refused for rules Cursor cannot map but the running harness

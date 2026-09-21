@@ -438,7 +438,7 @@ if(args.includes('plugin')){console.log('[]');process.exit(0)}
 const settings=JSON.parse(fs.readFileSync(args[args.indexOf('--settings')+1],'utf8'));
 const agents=JSON.parse(args[args.indexOf('--agents')+1]);
 if(process.env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS !== '1') throw new Error('function hooks missing');
-result(JSON.stringify({settings,agents}));
+result(JSON.stringify({settings,agents,args,models:args.filter(x=>x.startsWith('multi/'))}));
 `,
   );
   const launcher = fileURLToPath(
@@ -472,9 +472,11 @@ result(JSON.stringify({settings,agents}));
   );
   const { settings, agents } = JSON.parse(stdout);
   const rows: { model: string; behavesAs: string }[] = settings.modelPicker.options;
+  // Only a family with a verified ~1M native window carries the context tag. The native
+  // ID stays the untagged spelling, and the effort profile is unchanged either way.
   assert.deepEqual(
     rows.map(({ model }) => model),
-    ['multi/antigravity/gemini', 'multi/antigravity/sonnet-thinking', custom.model],
+    ['multi/antigravity/gemini[1m]', 'multi/antigravity/sonnet-thinking', custom.model],
   );
   assert.equal(rows[0].behavesAs, 'claude-sonnet-4-6');
   assert.deepEqual(rows[2], custom);
@@ -483,9 +485,10 @@ result(JSON.stringify({settings,agents}));
     assert.equal(agents[`antigravity-gemini-${effort}`].effort, effort);
     assert.equal(
       agents[`antigravity-gemini-${effort}`].model,
-      `multi/antigravity/gemini-${effort}`,
+      `multi/antigravity/gemini-${effort}[1m]`,
     );
   }
+  assert.doesNotMatch(agents['antigravity-sonnet-thinking'].model, /\[1m\]/);
   assert.equal(agents['antigravity-gemini'].model, rows[0].model);
   const catalog = new AgentCatalog(
     agents,
@@ -510,6 +513,40 @@ result(JSON.stringify({settings,agents}));
   assert.match(compacted, /- antigravity-gemini:/);
   assert.match(compacted, /- antigravity-sonnet-thinking:/);
   assert.doesNotMatch(compacted, /antigravity-gemini-(low|medium|high):/);
+
+  // The opt-out has to stay reversible. A selection saved while rows were tagged is the
+  // spelling the user copied out of the picker, so it must still name a row once the tag
+  // is switched off - and the launcher must hand Claude the spelling that row now carries.
+  const optedOut = await promisify(execFile)(
+    process.execPath,
+    [launcher, '--model', 'sonnet', '--model', 'multi/antigravity/gemini[1m]'],
+    {
+      cwd,
+      timeout: 20000,
+      env: {
+        PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+        HOME: cwd,
+        ...windowsHome(cwd),
+        CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
+        CODEX_HOME: cwd,
+        MULTI_ANTIGRAVITY: '1',
+        MULTI_DISABLE_1M_CONTEXT: '1',
+        MULTI_MODELS: 'multi/antigravity/gemini[1m]',
+      },
+    },
+  );
+  const untagged = JSON.parse(optedOut.stdout);
+  assert.deepEqual(
+    untagged.settings.modelPicker.options.map((option: { model: string }) => option.model),
+    ['multi/antigravity/gemini'],
+  );
+  // The caller's last --model is the one Claude resolves, so that is the one rewritten.
+  // Rewriting the first would leave the tagged spelling as the argument Claude actually reads.
+  const flags: string[] = untagged.args;
+  const last = flags.lastIndexOf('--model');
+  assert.equal(flags[last + 1], 'multi/antigravity/gemini');
+  assert.equal(flags.filter((flag: string) => flag === '--model').length, 2);
+  assert.deepEqual(untagged.models, ['multi/antigravity/gemini']);
 });
 
 test('launcher registers only Cursor picker workers and keeps the representative catalog under 30 KB', () => {
@@ -577,6 +614,14 @@ test('selected synthesized Antigravity rows retain variants without selecting in
   assert.deepEqual(
     Object.keys(workerDefinitions(false, [], false, models, ['multi/antigravity/claude-high'])),
     ['antigravity-claude-high'],
+  );
+  // Picker rows carry the context tag while native IDs never do; selection compares
+  // the untagged spelling, so a tagged row keeps its own effort workers.
+  assert.deepEqual(
+    Object.keys(
+      workerDefinitions(false, [], false, models, ['multi/antigravity/gemini[1m]']),
+    ).sort(),
+    ['antigravity-gemini', 'antigravity-gemini-high', 'antigravity-gemini-low'],
   );
 });
 
