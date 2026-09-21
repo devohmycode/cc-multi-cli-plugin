@@ -27,7 +27,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   name one native model, they are compared in the untagged spelling wherever a model ID is
   an identity: the Antigravity request digest, so a spelling change cannot miss a completed
   exchange and dispatch it twice, and the worker and harness consistency checks, so a
-  spawn that names a model without the tag is not refused.
+  spawn that names a model without the tag is not refused. `/multi-core:setup --models`
+  accepts the tagged spelling the picker displays and persists the untagged one, which
+  stays valid whichever way the tag is set later.
 
 - Report counts the same way on every machine locale. `toLocaleString()` without
   an argument follows the host, so the launcher's argument-limit message read

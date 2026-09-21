@@ -140,7 +140,14 @@ function normalizeModels(value: string | undefined, previous?: string): string |
   if (additive && models.length === 0) {
     throw new Error('Add at least one full model ID after --models +.');
   }
-  for (const model of models) {
+  // A picker row may display a context tag, so that is the spelling a user copies out of
+  // /model and pastes here. Accept it and store the untagged ID, which is the stable one:
+  // it still names the row whether or not the tag is switched on later. The strip is
+  // spelled out rather than imported because this file is installed on its own, with no
+  // sibling plugin sources beside it; `nativeSpelling()` in multi-antigravity is the
+  // canonical definition.
+  const persisted = models.map((model) => model.replace(/\[1m\]$/i, ''));
+  for (const model of persisted) {
     if (!/^multi\/[a-z]+\/[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(model)) {
       throw new Error(
         `Invalid picker model ID: ${JSON.stringify(model)}. Use full IDs such as multi/openai/gpt-6-astra, or all/none.`,
@@ -148,13 +155,13 @@ function normalizeModels(value: string | undefined, previous?: string): string |
     }
   }
   if (!additive) {
-    return [...new Set(models)].join(',');
+    return [...new Set(persisted)].join(',');
   }
   if (previous === 'all') {
     return 'all';
   }
   const base = previous?.startsWith('+') ? previous.slice(1) : previous;
-  const combined = [...new Set([...(base ? base.split(',') : []), ...models])].join(',');
+  const combined = [...new Set([...(base ? base.split(',') : []), ...persisted])].join(',');
   return previous === undefined || previous.startsWith('+') ? `+${combined}` : combined;
 }
 
