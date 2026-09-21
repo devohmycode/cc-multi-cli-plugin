@@ -7,6 +7,7 @@ const providers = [
   { name: 'Antigravity', icon: 'antigravity' },
   { name: 'OpenCode Zen', icon: 'opencode' },
   { name: 'OpenAI Codex', icon: 'openai' },
+  { name: 'Grok Build', icon: 'grok' },
 ];
 
 // Small, editable vector marks; no raster images or remote logo dependencies.
@@ -15,6 +16,8 @@ const icons = {
     '<path d="M-43 34C-26 22-25-39 0-40 25-39 26 22 43 34 48 42 30 37 25 30 15 13 10-2 0-2S-15 13-25 30C-30 37-48 42-43 34Z" fill="currentColor"/>',
   opencode:
     '<path fill="currentColor" fill-rule="evenodd" d="M-29-38H29V38H-29ZM-17-26V26H17V-26Z"/><path fill="currentColor" d="M-10-10H10V24H-10Z"/>',
+  // Grok mark: official icon from grok.com; source link and terms in docs/assets/README.md.
+  grok: '<g transform="scale(.22) translate(-256 -256)" fill="currentColor"><path d="M210.484 312.759L343.465 210.383C349.984 205.364 359.302 207.322 362.408 215.117C378.758 256.231 371.454 305.64 338.925 339.563C306.397 373.487 261.137 380.927 219.768 363.983L174.577 385.803C239.394 432.008 318.104 420.581 367.289 369.251C406.303 328.564 418.386 273.104 407.088 223.091L407.19 223.198C390.807 149.726 411.218 120.359 453.03 60.3072C454.02 58.8833 455.01 57.4595 456 56L400.978 113.382V113.204L210.45 312.794"/><path d="M183.042 337.641C136.519 291.294 144.54 219.567 184.236 178.203C213.59 147.59 261.683 135.096 303.666 153.464L348.755 131.75C340.632 125.627 330.221 119.042 318.275 114.414C264.277 91.2407 199.63 102.774 155.735 148.516C113.513 192.549 100.236 260.254 123.036 318.027C140.069 361.206 112.148 391.748 84.0229 422.575C74.0561 433.503 64.0553 444.431 56 456L183.007 337.677"/></g>',
   cursor:
     '<path d="M0-40 35-20V20L0 40-35 20V-20Z" fill="none" stroke="currentColor" stroke-width="4"/><path d="M-35-20H35L17 16 0 40V0Z" fill="currentColor"/>',
   // OpenAI mark: Simple Icons 11.0.0, CC0; source links in docs/assets/README.md.
@@ -29,30 +32,38 @@ for (const provider of providers) {
   assert(provider.name.length <= 18, 'Keep labels short enough for the provider layout');
 }
 
-const rows = Math.ceil(providers.length / 2);
-const height = Math.max(548, rows * 166 + 50);
+// Providers ring the hub at equal angles, so any count stays symmetric about it.
+const radius = 250;
+const step = (Math.PI * 2) / providers.length;
+// Odd counts start at the top. Even counts turn half a step, keeping the mirror
+// symmetry while sparing the spoke that would otherwise point at the wordmark.
+const start = -Math.PI / 2 + (providers.length % 2 === 0 ? step / 2 : 0);
+const offsets = providers.map((_, index) => ({
+  dx: Math.cos(start + index * step) * radius,
+  dy: Math.sin(start + index * step) * radius,
+}));
+// Reserve room for the tallest mark above and for a label below.
+const reachUp = Math.max(...offsets.map((offset) => -offset.dy)) + 56;
+const reachDown = Math.max(...offsets.map((offset) => offset.dy)) + 104;
+const height = Math.max(548, Math.ceil(Math.max(reachUp, reachDown)) * 2);
 const centerX = 910;
 const centerY = height / 2;
-const nodes = providers
-  .map((provider, index) => {
-    const x = index % 2 === 0 ? 728 : 1096;
-    const row = providers.length === 2 ? index : Math.floor(index / 2);
-    const y =
-      providers.length === 1 ? centerY - 20 : 108 + row * ((height - 224) / Math.max(1, rows - 1));
+const nodes = offsets
+  .map((offset, index) => {
+    const provider = providers[index];
+    const x = centerX + offset.dx;
+    const y = centerY + offset.dy;
     // Keep endpoint dots clear of wide marks and their labels (especially Antigravity).
-    const dx = x - centerX;
-    const dy = y - centerY;
-    const distance = Math.hypot(dx, dy);
-    const startX = centerX + (dx / distance) * 85;
-    const startY = centerY + (dy / distance) * 85;
-    const endX = x - (dx / distance) * 100;
-    const endY = y - (dy / distance) * 100;
+    const startX = centerX + (offset.dx / radius) * 85;
+    const startY = centerY + (offset.dy / radius) * 85;
+    const endX = x - (offset.dx / radius) * 100;
+    const endY = y - (offset.dy / radius) * 100;
     return `
   <g class="provider" aria-label="${xml(provider.name)}">
     <path d="M${startX.toFixed(1)} ${startY.toFixed(1)} ${endX.toFixed(1)} ${endY.toFixed(1)}" fill="none" stroke="currentColor" stroke-width="4"/>
     <circle cx="${endX.toFixed(1)}" cy="${endY.toFixed(1)}" r="7" fill="currentColor"/>
-    <g transform="translate(${x} ${y})">${icons[provider.icon]}</g>
-    <text x="${x}" y="${y + 72}" text-anchor="middle" font-size="22">${xml(provider.name)}</text>
+    <g transform="translate(${x.toFixed(1)} ${y.toFixed(1)})">${icons[provider.icon]}</g>
+    <text x="${x.toFixed(1)}" y="${(y + 72).toFixed(1)}" text-anchor="middle" font-size="22">${xml(provider.name)}</text>
   </g>`;
   })
   .join('');

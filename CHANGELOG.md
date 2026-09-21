@@ -6,6 +6,13 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- **Grok on the README banner.** The generated banner lists Grok Build alongside
+  the other native harnesses, using the official Grok mark as vector paths from
+  grok.com, recolored with `currentColor` like the neighbouring marks and credited
+  in [docs/assets/README.md](docs/assets/README.md). Providers now ring the mascot
+  at equal angles instead of stacking in two columns, so an odd provider count
+  stays symmetric about the hub. No raster image and no request at render time.
+
 - **Grok Build as a native coding harness.** `multi-grok` runs the official `grok`
   CLI inside Claude Code with the subscription account login, exposing the
   advertised models in `/model` and one named worker per model. Claude's

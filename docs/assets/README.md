@@ -11,14 +11,21 @@ To add a provider:
 3. Run `npm run banner:generate` and review `docs/assets/banner.svg` in a browser.
 
 The design follows the original README banner: monospace title, solid black
-background, a central pixel mascot and provider icons connected by spokes. Provider
-rows and canvas height expand automatically. Palette, wording and layout live in
-the same script. Keep changes there; direct SVG edits are overwritten.
+background, a central pixel mascot and provider icons connected by spokes. The
+providers ring the mascot at equal angles, so the arrangement stays symmetric about
+it whatever the count, and the canvas height follows automatically. Palette, wording
+and layout live in the same script. Keep changes there; direct SVG edits are
+overwritten.
 `npm run banner:check` (also part of CI's `npm run check`) verifies exact output.
 The README supplies alt text; the SVG also contains a title and description.
 
 The OpenAI mark comes from [Simple Icons 11.0.0](https://github.com/simple-icons/simple-icons/blob/11.0.0/icons/openai.svg),
 under [CC0](https://github.com/simple-icons/simple-icons/blob/11.0.0/LICENSE.md).
+The Grok mark is the official icon served at <https://grok.com/images/favicon.svg>,
+retrieved on September 21, 2026: the two glyph paths only, scaled into the icon box
+and recolored with `currentColor`. It is a trademark of xAI, reproduced to identify
+the provider; xAI publishes no open license for it and this is not a claim of
+affiliation or endorsement. Remove it on request from the owner.
 Other marks are editable vector interpretations for this banner, not official brand assets.
 
 The accent is Anthropic orange `#d97757`, with `#faf9f5` light text from [Anthropic’s brand guidelines](https://github.com/anthropics/skills/blob/main/skills/brand-guidelines/SKILL.md).
