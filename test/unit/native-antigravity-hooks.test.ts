@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -9,6 +9,7 @@ import {
   antigravitySettingsFile,
   installAntigravityHook,
 } from '../../plugins/multi-antigravity/src/hooks.ts';
+import { removeTemporary } from '../temporary.ts';
 
 interface InstalledPreToolUseHook {
   PreToolUse: Array<{
@@ -21,7 +22,7 @@ async function fixture(t: test.TestContext, value: Record<string, unknown>) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'antigravity-hooks-'));
   const file = path.join(directory, 'hooks.json');
   await writeFile(file, `${JSON.stringify(value)}\n`);
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTemporary(directory));
   return { file, value };
 }
 
@@ -100,7 +101,7 @@ test('Antigravity replaces an existing Windows destination', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'antigravity-win-hooks-'));
   const file = path.join(directory, 'hooks.json');
   await writeFile(file, JSON.stringify({ old: true }));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTemporary(directory));
   await installAntigravityHook(file, { platform: 'win32' });
   const installed = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
   assert.equal(installed.old, true);

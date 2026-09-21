@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
@@ -35,6 +35,7 @@ import {
   readSse,
   toResponses,
 } from '../../plugins/multi-openai/src/responses.ts';
+import { removeTemporary } from '../temporary.ts';
 
 /** A test double for one OpenAI Responses SSE event; sent as JSON, never typed upstream. */
 interface SseEvent {
@@ -447,7 +448,7 @@ async function gateway(
   t.after(async () => {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    await rm(cwd, { recursive: true, force: true });
+    await removeTemporary(cwd);
   });
   const address = server.address();
   assert(address !== null && typeof address === 'object', 'Gateway port');
@@ -821,7 +822,7 @@ test('a dropped downstream connection aborts external inference', async (t) => {
 
 test('an auth.json without usable ChatGPT credentials fails before any upstream call', async (t) => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'native-auth-test-'));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
+  t.after(() => removeTemporary(cwd));
   const authFile = path.join(cwd, 'auth.json');
   for (const tokens of [
     { access_token: '', account_id: 'account-test' },

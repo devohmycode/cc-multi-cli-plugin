@@ -2,12 +2,13 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cursorModelOptions } from '../../plugins/multi-cursor/src/models.ts';
 import { OPENAI_WORKERS } from '../../plugins/multi-openai/src/models.ts';
+import { removeTemporary } from '../temporary.ts';
 import { isolatedEnvironment } from './environment.ts';
 
 /** The Claude Code stream-json events this reproducer inspects. */
@@ -174,5 +175,5 @@ try {
     `PASS: real ${parent} parent + ${worker} (${model}${effort ? `, ${effort}` : ''}) + native Read/Edit + completion.`,
   );
 } finally {
-  await rm(cwd, { recursive: true, force: true });
+  await removeTemporary(cwd);
 }

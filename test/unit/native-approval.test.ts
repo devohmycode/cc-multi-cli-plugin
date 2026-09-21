@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
@@ -13,6 +13,7 @@ import {
   parseApprovalRequest,
 } from '../../plugins/multi-core/src/gateway/approval.ts';
 import { createNativeGateway } from '../../plugins/multi-core/src/gateway/server.ts';
+import { removeTemporary } from '../temporary.ts';
 
 const request = (stage = 1, session = 'session-one', command = 'node harmless-test.js') => ({
   model: 'claude-sonnet-5',
@@ -323,9 +324,9 @@ test('classifier cwd comparison accepts Windows drive and UNC paths on Linux', (
 });
 
 test('headerless classifier uses pending worker context and rejects ambiguous actions', async (t) => {
-  const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+  const { mkdtemp, writeFile } = await import('node:fs/promises');
   const dir = await mkdtemp(path.join(os.tmpdir(), 'approval-scope-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  t.after(() => removeTemporary(dir));
   await writeFile(
     `${dir}/auth.json`,
     JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'fake', account_id: 'fake' } }),
@@ -503,7 +504,7 @@ function providerToolResponse(url: string, id: string, command: string, stream: 
 
 async function mixedReviewGateway(t: TestContext, reviewer = true, blockAnthropic = false) {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'mixed-review-'));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
+  t.after(() => removeTemporary(cwd));
   const authFile = path.join(cwd, 'auth.json');
   await writeFile(
     authFile,

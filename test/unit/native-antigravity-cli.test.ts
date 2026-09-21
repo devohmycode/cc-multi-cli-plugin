@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -13,6 +13,7 @@ import {
   type AntigravityStreamEvent,
   runAntigravity,
 } from '../../plugins/multi-antigravity/src/cli.ts';
+import { removeTemporary } from '../temporary.ts';
 
 const script = `#!/bin/bash
 if [[ -n "$AGY_ARGS_FILE" ]]; then printf '%s\n' "$@" > "$AGY_ARGS_FILE"; fi
@@ -86,7 +87,7 @@ async function fakeCli(t: test.TestContext) {
     await writeFile(executable, script, 'utf8');
     await chmod(executable, 0o700);
   }
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTemporary(directory));
   return { cwd: directory, executable };
 }
 
@@ -112,14 +113,14 @@ test('Windows fixture emits the same NDJSON stream as the POSIX fixture', async 
   assert.doesNotThrow(() => new vm.Script(emittedSource));
   assert.match(emittedSource, /join\('\\n'\)/);
   assert.doesNotMatch(emittedSource, /(?<!\r)\n/);
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTemporary(directory));
   const [posix, windows] = await Promise.all([
     execFileAsync(posixFixture, ['-p', 'hello']),
     execFileAsync(process.execPath, [windowsFixture, '-p', 'hello']),
   ]);
   assert.equal(windows.stdout, posix.stdout);
   assert.equal(windows.stderr, posix.stderr);
-  await rm(directory, { recursive: true, force: true });
+  await removeTemporary(directory);
 });
 
 test('runs agy with explicit flags and parses typed NDJSON events', async (t) => {

@@ -12,6 +12,7 @@ import {
 } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
 import { CursorHarness } from '../../plugins/multi-cursor/src/harness.ts';
 import { cursorModelOptions } from '../../plugins/multi-cursor/src/models.ts';
+import { removeTemporary } from '../temporary.ts';
 
 const plan = process.argv.includes('--plan');
 const compact = process.argv.includes('--compact');
@@ -174,7 +175,7 @@ try {
 } finally {
   await harness.close();
   // The SDK child can still hold the directory open on Windows for a moment.
-  await rm(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  await removeTemporary(cwd);
 }
 
 async function emulateInterruptedCommit(directory: string, runId: string) {

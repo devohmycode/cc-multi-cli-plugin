@@ -14,6 +14,7 @@ import {
   providerSelection,
   settingsArguments,
 } from '../../plugins/multi-core/src/install/plugins.ts';
+import { removeTemporary } from '../temporary.ts';
 
 const execute = promisify(execFile);
 
@@ -31,7 +32,7 @@ const marketplace = 'cc-multi-cli-plugin';
 
 async function fixture(t: test.TestContext) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'multi-install-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTemporary(directory));
   const platform = process.platform;
   const windows = platform === 'win32';
   const home = path.join(directory, "home with spaces and 'quotes'");
@@ -268,7 +269,7 @@ test('edited shell blocks and project-only executable cores fail explicitly', as
 
 test('Windows installation writes quoted PowerShell and cmd shims and uninstalls exactly', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'multi-win-install-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTemporary(directory));
   const home = path.join(directory, "home with spaces and 'quotes'");
   await mkdir(home, { recursive: true });
   const profile = path.join(home, 'profile.ps1');
@@ -312,12 +313,12 @@ test('Windows installation writes quoted PowerShell and cmd shims and uninstalls
     windowsHide: true,
     windowsVerbatimArguments: true,
   });
-  await rm(directory, { recursive: true, force: true });
+  await removeTemporary(directory);
 });
 
 test('Windows executable discovery uses PATHEXT and does not require mode bits', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'multi-win-resolution-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTemporary(directory));
   const home = path.join(directory, 'home');
   const bin = path.join(home, 'npm global bin');
   await mkdir(bin, { recursive: true });

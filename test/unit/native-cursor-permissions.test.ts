@@ -10,10 +10,11 @@ import {
   cursorPermissionPolicy,
   mergeCursorPermissions,
 } from '../../plugins/multi-cursor/src/permissions.ts';
+import { removeTemporary } from '../temporary.ts';
 
 test('native Cursor permissions retain SDK review and sandbox defaults without ambient tools', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cursor-permissions-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => removeTemporary(root));
   t.mock.method(os, 'homedir', () => root);
   const options = await cursorNativePermissions(root);
   assert.deepEqual(options.tools, ['shell', 'read', 'edit', 'grep', 'glob', 'ls']);
@@ -34,7 +35,7 @@ test('native Cursor permissions retain SDK review and sandbox defaults without a
 
 test('native Cursor Plan removes shell and edit regardless of requested tools', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cursor-plan-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => removeTemporary(root));
   t.mock.method(os, 'homedir', () => root);
   const context = { permissionMode: 'plan' as const };
   const policy = cursorPermissionPolicy(context);
@@ -79,7 +80,7 @@ test('native Cursor policy identity follows effective mode and tools', () => {
 
 test('native Cursor refuses explicit ancestor and user policies its isolated settings would ignore', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cursor-policy-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => removeTemporary(root));
   const workspace = path.join(root, 'workspace', 'nested');
   const home = path.join(root, 'home');
   t.mock.method(os, 'homedir', () => home);
@@ -145,7 +146,7 @@ test('native Cursor translates explicit auto and plan modes without weakening ot
 
 test('native bypass disables review without widening explicit capabilities', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cursor-bypass-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => removeTemporary(root));
   t.mock.method(os, 'homedir', () => root);
   const context = { permissionMode: 'bypassPermissions' as const, tools: ['Read'] };
   const policy = cursorPermissionPolicy(context);

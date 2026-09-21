@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -13,6 +13,7 @@ import {
 } from '../../plugins/multi-cursor/src/errors.ts';
 import { CursorHarness } from '../../plugins/multi-cursor/src/harness.ts';
 import { cursorModelOptions } from '../../plugins/multi-cursor/src/models.ts';
+import { removeTemporary } from '../temporary.ts';
 
 test('Cursor SDK classes preserve the provider error contract', () => {
   const authentication = cursorFailure(new AuthenticationError('Bearer secret-token'));
@@ -87,7 +88,7 @@ test('gateway preserves Cursor status and SSE failure terminal event', async (t)
     stream: false,
   };
   const directory = await mkdtemp(path.join(os.tmpdir(), 'cursor-errors-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTemporary(directory));
   const makeHarness = (code: string) => {
     const harness = new CursorHarness(
       cursorModelOptions([{ id: 'test-model', displayName: 'Test' }]),

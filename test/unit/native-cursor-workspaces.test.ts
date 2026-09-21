@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import type { MessagesResponse } from '../../plugins/multi-core/src/gateway/messages.ts';
 import { CursorHarness } from '../../plugins/multi-cursor/src/harness.ts';
 import { CursorWorkspaces } from '../../plugins/multi-cursor/src/workspaces.ts';
+import { removeTemporary } from '../temporary.ts';
 
 test('worktree workers route to their canonical workspace and close all SDK harnesses', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cursor-workspaces-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => removeTemporary(root));
   const worktree = path.join(root, 'worktree');
   await mkdir(worktree);
   await symlink(worktree, path.join(root, 'alias'));

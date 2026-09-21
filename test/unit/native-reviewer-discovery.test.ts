@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { removeTemporary } from '../temporary.ts';
 
 async function writeClaudeFixture(bin: string, source: string): Promise<void> {
   if (process.platform === 'win32') {
@@ -22,7 +23,7 @@ async function writeClaudeFixture(bin: string, source: string): Promise<void> {
 
 test('launcher discovers GPT review with Claude subscription, API credentials, or no Claude login', async (t) => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'reviewer-discovery-'));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
+  t.after(() => removeTemporary(cwd));
   const bin = path.join(cwd, 'bin');
   await mkdir(bin);
   await writeFile(

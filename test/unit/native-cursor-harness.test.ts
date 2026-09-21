@@ -18,6 +18,7 @@ import {
   CursorHarness,
 } from '../../plugins/multi-cursor/src/harness.ts';
 import { cursorModelOptions } from '../../plugins/multi-cursor/src/models.ts';
+import { removeTemporary } from '../temporary.ts';
 
 const models = cursorModelOptions([
   { id: 'test-model', displayName: 'Test Model' },
@@ -214,7 +215,7 @@ async function fixture(t: test.TestContext) {
   };
   t.after(async () => {
     await Promise.all(harnesses.map((harness) => harness.close()));
-    await rm(directory, { recursive: true, force: true });
+    await removeTemporary(directory);
   });
   return {
     make,

@@ -6,6 +6,14 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- Retry temporary-directory teardowns on Windows through a shared test helper.
+  Windows can still hold a handle on a file shortly after the process that wrote
+  or executed it exits, and `fs.rm` retries `EBUSY` only when `maxRetries` is
+  set, so a passing run could fail on cleanup. `test/temporary.ts` now owns the
+  removal and the 46 teardowns across 24 files use it, including the live Cursor
+  harness that already retried on its own; removals performed deliberately in
+  the middle of a test are unchanged.
+
 - Report counts the same way on every machine locale. `toLocaleString()` without
   an argument follows the host, so the launcher's argument-limit message read
   "32 041" on a French Windows and "32,041" on an English one: the pinned

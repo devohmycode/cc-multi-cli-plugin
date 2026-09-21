@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,6 +12,7 @@ import type {
 import { ModBridge } from '../../plugins/multi-core/src/gateway/mod-bridge.ts';
 import { CursorHarness } from '../../plugins/multi-cursor/src/harness.ts';
 import { cursorModelOptions } from '../../plugins/multi-cursor/src/models.ts';
+import { removeTemporary } from '../temporary.ts';
 
 const models = cursorModelOptions([{ id: 'row-test', displayName: 'Rows' }]);
 const names = ['read', 'search', 'edit', 'shell', 'other', 'note'].map(
@@ -89,7 +90,7 @@ async function harnessFixture(
   });
   t.after(async () => {
     await harness.close();
-    await rm(stateDirectory, { recursive: true, force: true });
+    await removeTemporary(stateDirectory);
   });
   return {
     harness,

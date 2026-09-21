@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -16,6 +16,7 @@ import {
   zenModelOptions,
   zenPickerOptions,
 } from '../../plugins/multi-zen/src/models.ts';
+import { removeTemporary } from '../temporary.ts';
 
 function hostAuthOptions(dataHome: string) {
   const env: NodeJS.ProcessEnv = { OPENCODE_API_KEY: undefined };
@@ -109,7 +110,7 @@ test('Zen key validation rejects whitespace, controls, and non-ASCII without ech
 
 test('an explicit Zen env key prevents reading saved auth', async (t) => {
   const dataHome = await mkdtemp(path.join(os.tmpdir(), 'zen-auth-test-'));
-  t.after(() => rm(dataHome, { recursive: true, force: true }));
+  t.after(() => removeTemporary(dataHome));
   const directory = path.join(dataHome, 'opencode');
   await mkdir(directory);
   await writeFile(path.join(directory, 'auth.json'), '{malformed');
@@ -123,7 +124,7 @@ test('an explicit Zen env key prevents reading saved auth', async (t) => {
 
 test('Zen auth reads only the official OpenCode API entry', async (t) => {
   const dataHome = await mkdtemp(path.join(os.tmpdir(), 'zen-auth-test-'));
-  t.after(() => rm(dataHome, { recursive: true, force: true }));
+  t.after(() => removeTemporary(dataHome));
   const directory = path.join(dataHome, 'opencode');
   await mkdir(directory);
   await writeFile(
@@ -138,7 +139,7 @@ test('Zen auth reads only the official OpenCode API entry', async (t) => {
 
 test('Zen auth treats missing credentials as optional and rejects malformed explicit config', async (t) => {
   const dataHome = await mkdtemp(path.join(os.tmpdir(), 'zen-auth-test-'));
-  t.after(() => rm(dataHome, { recursive: true, force: true }));
+  t.after(() => removeTemporary(dataHome));
   const options = hostAuthOptions(dataHome);
   await withEnvironment(options.env, async () => {
     const environmentOptions = { platform: options.platform, env: process.env };
@@ -155,7 +156,7 @@ test('Zen auth treats missing credentials as optional and rejects malformed expl
 
 test('Zen auth rejects malformed saved credentials without including secrets', async (t) => {
   const dataHome = await mkdtemp(path.join(os.tmpdir(), 'zen-auth-test-'));
-  t.after(() => rm(dataHome, { recursive: true, force: true }));
+  t.after(() => removeTemporary(dataHome));
   const directory = path.join(dataHome, 'opencode');
   await mkdir(directory);
   await writeFile(path.join(directory, 'auth.json'), '{"opencode":{"type":"api"}}');
@@ -222,7 +223,7 @@ test('Zen picker allowlist preserves order and validates model IDs', () => {
 
 test('Zen local key entry preserves other accounts and writes a private auth file', async (t) => {
   const dataHome = await mkdtemp(path.join(os.tmpdir(), 'zen-connect-test-'));
-  t.after(() => rm(dataHome, { recursive: true, force: true }));
+  t.after(() => removeTemporary(dataHome));
   const directory = path.join(dataHome, 'opencode');
   await mkdir(directory);
   const file = path.join(directory, 'auth.json');

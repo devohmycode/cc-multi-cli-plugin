@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { TestContext } from 'node:test';
@@ -9,6 +9,7 @@ import {
   codexRequest,
   readCodexAuth,
 } from '../../plugins/multi-openai/src/auth.ts';
+import { removeTemporary } from '../temporary.ts';
 
 const jwt = (exp: number) =>
   `header.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.signature`;
@@ -62,7 +63,7 @@ async function fixture(t: TestContext, mode = 'ok', accessToken = oldToken) {
   process.env.PATH = `${bin}${path.delimiter}${originalPath}`;
   t.after(async () => {
     process.env.PATH = originalPath;
-    await rm(cwd, { recursive: true, force: true });
+    await removeTemporary(cwd);
   });
   return {
     authFile,
