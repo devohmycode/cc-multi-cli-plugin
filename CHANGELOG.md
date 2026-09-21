@@ -6,6 +6,50 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
 
 ## Unreleased
 
+- **Grok Build as a native coding harness.** `multi-grok` runs the official `grok`
+  CLI inside Claude Code with the subscription account login, exposing the
+  advertised models in `/model` and one named worker per model. Claude's
+  permission mode travels in the run arguments: the native toolset is bounded
+  with `--tools` and execution is gated with deny rules whose syntax matches
+  Claude Code's own and which outrank every mode, including Bypass. No global
+  hook is installed and nothing is written to the user's Grok configuration.
+  The contract was captured from the binary rather than its documentation, which
+  disagrees with it on three points: the streaming format is plain NDJSON and not
+  ACP session updates, `--permission-mode plan` removes no tool, and
+  `--disallowed-tools` accepts an unknown name and runs the tool anyway. Every
+  announced toolset is therefore checked against the policy and an unenforced
+  removal fails the run. MCP tools join the toolset once their servers connect,
+  whatever the allowlist holds, so their execution is denied by rule and their
+  exposure is documented in [docs/grok.md](docs/grok.md). The gateway chooses the
+  native session identity before the run starts, records it as soon as the CLI
+  speaks, resumes with an interruption notice after a run without a terminal
+  event, and refuses an answer returned on another session. `XAI_API_KEY` is
+  removed from every run so billing stays on the account login. Deny genres are
+  coarser than native tool names — `Edit(*)` also refuses the `write` tool — so a
+  rule is only sent when none of the tools it reaches was granted. The allowlist
+  is not exact either, so every ungranted tool is removed by name as well, through
+  the one alias the CLI needs (`run_terminal_command` is removed as
+  `run_terminal_cmd`). A policy the CLI did not apply, or a CLI that cannot start
+  because its binary is missing or its path is denied, is reported as a request
+  error so the session does not retry a paid run; a start the operating system
+  refused for want of processes, handles or memory stays retryable, since nothing
+  ran and nothing was billed. Failure advice reads `401` and `429` as statuses only
+  where the message presents them as such, so a line count or a file name no longer
+  sends the user to re-login. A
+  prompt sent while a worker is still answering is refused rather than queued
+  behind it: that prompt was written before the running turn answered, so its
+  history stops at the previous assistant message and resuming with it would send
+  the running turn to the CLI a second time. Cursor and Antigravity refuse the
+  same way. Claude's tool, MCP, skill and subagent catalogues are no longer
+  forwarded: measured on a live session they were 72,704 characters of a 95,852
+  character prompt, and they name capabilities the provider cannot call. Every
+  other system reminder is forwarded, because the CLI reaches it no other way —
+  the project's `CLAUDE.md` and the user's own, the environment and repository
+  context, Auto Mode notices, hook output, and recalled memories — and a block
+  Multi does not recognise is forwarded rather than dropped. Request identity
+  ignores every reminder, so a retry carrying only a refreshed block is recognised
+  as the same request instead of paying for a second run.
+
 - Size Antigravity sessions to the provider's real context window. Picker rows and
   named workers took their window from the conservative `behavesAs` profile, so every
   Antigravity model reported 200K and long sessions compacted early. Gemini rows now

@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { executableInvocation } from '../gateway/executable.ts';
 
 const MARKETPLACE = 'cc-multi-cli-plugin';
-const PROVIDERS = ['openai', 'cursor', 'zen', 'antigravity'] as const;
+const PROVIDERS = ['openai', 'cursor', 'zen', 'antigravity', 'grok'] as const;
 export type Provider = (typeof PROVIDERS)[number];
 
 interface Plugin {

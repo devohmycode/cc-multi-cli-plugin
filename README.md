@@ -12,7 +12,7 @@
 [![Linux · macOS · Windows](https://img.shields.io/badge/platforms-Linux_%C2%B7_macOS_%C2%B7_Windows-555)](docs/platform-support.md)
 [![Stars](https://img.shields.io/github/stars/greenpolo/cc-multi-cli-plugin?style=social)](https://github.com/greenpolo/cc-multi-cli-plugin/stargazers)
 
-Multi brings external models and coding harnesses into one Claude Code session through the `/model` picker and named native workers, with each provider's own login and permissions. Providers are OpenAI (ChatGPT via Codex login), Cursor (official SDK), OpenCode Zen (API key), and Antigravity (official CLI).
+Multi brings external models and coding harnesses into one Claude Code session through the `/model` picker and named native workers, with each provider's own login and permissions. Providers are OpenAI (ChatGPT via Codex login), Cursor (official SDK), OpenCode Zen (API key), Antigravity (official CLI), and Grok (official Grok Build CLI).
 
 [Quick start](#install) · [Providers](#providers) · [Documentation](#documentation) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
@@ -24,7 +24,7 @@ Multi brings external models and coding harnesses into one Claude Code session t
 
 - **Choose your model in place.** Switch through `/model` and select supported reasoning effort with `/effort`.
 - **Delegate to named workers.** Run provider-specific subagents with progress, elapsed time, and cancellation.
-- **Keep native execution.** OpenAI and Zen use Claude Code's tools; Cursor and Antigravity run their own SDK or CLI tools.
+- **Keep native execution.** OpenAI and Zen use Claude Code's tools; Cursor, Antigravity and Grok run their own SDK or CLI tools.
 - **Carry your session forward.** Resume saved sessions while keeping provider credentials and native state separate.
 - **Stay in control.** Claude's permission mode and explicit tool restrictions govern provider dispatch.
 
@@ -38,6 +38,7 @@ In Claude Code, add the marketplace and install the providers you want:
 /plugin install multi-cursor@cc-multi-cli-plugin
 /plugin install multi-zen@cc-multi-cli-plugin
 /plugin install multi-antigravity@cc-multi-cli-plugin
+/plugin install multi-grok@cc-multi-cli-plugin
 /reload-plugins
 /multi-core:setup
 ```
@@ -52,6 +53,7 @@ Install any subset; each provider pulls in the shared `multi-core` plugin. Open 
 | `multi-cursor` | `/multi-cursor:login` | [Official Cursor SDK models and workers](docs/cursor.md) |
 | `multi-zen` | `/multi-zen:connect` | [OpenCode Zen models with an API key](docs/zen.md) |
 | `multi-antigravity` | `/multi-antigravity:connect` | [Antigravity models and workers through `agy`](docs/antigravity.md) |
+| `multi-grok` | `/multi-grok:login` | [Grok models and workers through Grok Build](docs/grok.md) |
 
 `multi status` shows what is installed and connected. `multi uninstall` removes the shell integration and keeps provider logins. Plain `claude` is never changed. Rename the launch command or trim the `/model` rows with `/multi-core:setup --command <name> --models <ids>`. Details: [installation](docs/installation.md).
 
@@ -82,7 +84,7 @@ Linux, macOS, and Windows are supported, with offline checks running in CI on al
 | --- | --- |
 | [Installation and account setup](docs/installation.md) | [Permissions and review](docs/permissions.md) |
 | [OpenAI](docs/openai.md) · [Cursor](docs/cursor.md) | [Architecture and execution flow](ARCHITECTURE.md) |
-| [OpenCode Zen](docs/zen.md) · [Antigravity](docs/antigravity.md) | [Platform support and verification](docs/platform-support.md) |
+| [OpenCode Zen](docs/zen.md) · [Antigravity](docs/antigravity.md) · [Grok](docs/grok.md) | [Platform support and verification](docs/platform-support.md) |
 
 <details>
 <summary>Does this change my normal Claude setup?</summary>
@@ -94,7 +96,7 @@ No. Launch Multi with `claude-multi`; plain `claude` stays unchanged. Provider p
 <details>
 <summary>Where do tools run?</summary>
 
-OpenAI and Zen use Claude Code's tool execution loop. Cursor uses its official SDK, and Antigravity uses the real `agy` CLI. Native harness actions are displayed in the session and are never replayed as executable Claude tool calls. See [architecture](ARCHITECTURE.md) and [permissions](docs/permissions.md) for the boundaries.
+OpenAI and Zen use Claude Code's tool execution loop. Cursor uses its official SDK, and Antigravity and Grok use their real CLIs. Native harness actions are displayed in the session and are never replayed as executable Claude tool calls. See [architecture](ARCHITECTURE.md) and [permissions](docs/permissions.md) for the boundaries.
 
 </details>
 

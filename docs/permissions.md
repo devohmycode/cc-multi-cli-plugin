@@ -8,7 +8,7 @@ Claude Code's permission mode is the single control at prompt boundaries. Auto a
 
 The mode snapshot applies at the next prompt. Direct Claude, OpenAI, and Zen
 workers record prompt identity and resolve tool permissions in Claude's loop.
-Cursor and Antigravity load the full settings-policy snapshot at their prompts,
+Cursor, Antigravity and Grok load the full settings-policy snapshot at their prompts,
 or lazily when a direct-model conversation requests a harness worker. Worker modes inherit or resolve from the parent
 context according to the worker definition. A missing or unsupported mode fails
 explicitly.
@@ -21,6 +21,7 @@ explicitly.
 | Zen direct models | Claude Code runs and authorizes the tools. Zen has no independent reviewer and never uses the OpenAI reviewer. |
 | Cursor native harness | Native review belongs to the originating Cursor account and run. Cursor receives the prompt-boundary mode and capability restrictions. See [docs/cursor.md](cursor.md). |
 | Antigravity native harness | A namespaced global pre-tool hook enforces Claude's denials while the native CLI runs. See [docs/antigravity.md](antigravity.md). |
+| Grok native harness | Each run carries Claude's mode, a bounded native toolset and deny rules that outrank every mode; the announced toolset is checked against the policy. See [docs/grok.md](grok.md). |
 | Claude tools | Claude's native permission checks and Anthropic classification apply. |
 
 Claude `PreToolUse` and `PermissionRequest` hooks observe native harness
@@ -35,7 +36,7 @@ tool references into provider-compatible context.
 
 ## Explicit failures
 
-Cursor and Antigravity admission fails explicitly for unsupported modes, unknown workers, untranslatable policies, and unavailable permission context. Multi does not apply these harness checks to Claude, OpenAI, or Zen workers. OpenAI automatic review also fails when the originating OpenAI account has no GPT reviewer, when the action origin is ambiguous, or when review evidence is malformed or unavailable. The gateway does not substitute Claude or the working model for a missing GPT reviewer.
+Cursor, Antigravity and Grok admission fails explicitly for unsupported modes, unknown workers, untranslatable policies, and unavailable permission context. Multi does not apply these harness checks to Claude, OpenAI, or Zen workers. OpenAI automatic review also fails when the originating OpenAI account has no GPT reviewer, when the action origin is ambiguous, or when review evidence is malformed or unavailable. The gateway does not substitute Claude or the working model for a missing GPT reviewer.
 
 ## Managed policy sources
 

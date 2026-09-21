@@ -31,7 +31,9 @@ function executionForModel(model: unknown): WorkerExecution {
   if (typeof model !== 'string') {
     return 'claude';
   }
-  return model.startsWith('multi/cursor/') || model.startsWith('multi/antigravity/')
+  return model.startsWith('multi/cursor/') ||
+    model.startsWith('multi/antigravity/') ||
+    model.startsWith('multi/grok/')
     ? 'harness'
     : 'claude';
 }

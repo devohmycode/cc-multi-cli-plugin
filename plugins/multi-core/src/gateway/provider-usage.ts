@@ -1,7 +1,7 @@
 import type { CodexQuota } from '../../../multi-openai/src/usage.ts';
 import type { UsageSnapshot } from './receipts.ts';
 
-type UsageProvider = 'openai' | 'cursor' | 'zen' | 'antigravity';
+type UsageProvider = 'openai' | 'cursor' | 'zen' | 'antigravity' | 'grok';
 interface ProviderUsageRow {
   id: UsageProvider;
   name: string;
@@ -20,6 +20,7 @@ interface ProviderUsageOptions {
   cursor?: ProviderUsageReader;
   zen?: ProviderUsageReader;
   antigravity?: ProviderUsageReader;
+  grok?: ProviderUsageReader;
   now?: () => number;
 }
 type ProviderUsageReader = (session: string) => Promise<{
@@ -32,6 +33,7 @@ const providers = [
   { id: 'cursor', name: 'Cursor', url: 'https://cursor.com/dashboard?tab=usage' },
   { id: 'zen', name: 'OpenCode Zen', url: 'https://opencode.ai/zen' },
   { id: 'antigravity', name: 'Antigravity' },
+  { id: 'grok', name: 'Grok Build', url: 'https://x.ai/build' },
 ] as const;
 const unavailable: Record<UsageProvider, string[]> = {
   openai: ['Sign in with codex login to read account quota windows.'],
@@ -43,6 +45,10 @@ const unavailable: Record<UsageProvider, string[]> = {
   antigravity: [
     'Native Antigravity account quota could not be retrieved.',
     'Run /usage or /credits inside agy to view your account.',
+  ],
+  grok: [
+    'Grok Build exposes no account quota; per-run cost appears in session receipts.',
+    'Run grok login if the browser credential has expired.',
   ],
 };
 

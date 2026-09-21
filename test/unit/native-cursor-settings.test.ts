@@ -132,11 +132,12 @@ test('the shared admission result is judged by the least restrictive native harn
   );
   // One error is recorded for every native provider, so a launch that also has Cursor must
   // not refuse a rule Antigravity maps natively; Cursor rejects it on its own dispatch.
-  assert.deepEqual((await checkSettings(root, [], {}, sharedAdmission(true))).disallowedTools, [
-    'WebFetch',
-  ]);
+  assert.deepEqual(
+    (await checkSettings(root, [], {}, sharedAdmission({ antigravity: true }))).disallowedTools,
+    ['WebFetch'],
+  );
   await assert.rejects(
-    checkSettings(root, [], {}, sharedAdmission(false)),
+    checkSettings(root, [], {}, sharedAdmission({})),
     /WebFetch; unsupported policy/,
   );
 });

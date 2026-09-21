@@ -5,7 +5,7 @@
 Read [ARCHITECTURE.md](ARCHITECTURE.md) and [README.md](README.md) first. Setup
 and provider details live in [docs/installation.md](docs/installation.md),
 [docs/openai.md](docs/openai.md), [docs/cursor.md](docs/cursor.md),
-[docs/zen.md](docs/zen.md), [docs/antigravity.md](docs/antigravity.md),
+[docs/zen.md](docs/zen.md), [docs/antigravity.md](docs/antigravity.md), [docs/grok.md](docs/grok.md),
 [docs/permissions.md](docs/permissions.md), and [docs/platform-support.md](docs/platform-support.md).
 `.agent/` is gitignored scratch space. It is never authoritative.
 
@@ -26,6 +26,7 @@ and provider details live in [docs/installation.md](docs/installation.md),
 | `plugins/multi-cursor/src/` | Cursor SDK harness, permissions, progress, requests, models, and workspaces. |
 | `plugins/multi-zen/src/` | Zen API-key authentication, catalogs, requests, and translations. |
 | `plugins/multi-antigravity/src/` | `agy` CLI harness, models, hooks, requests, and permissions. |
+| `plugins/multi-grok/src/` | Grok Build CLI harness, models, requests, permissions, and login state. |
 | `test/unit/` | Offline unit tests for gateway and provider behavior. |
 | `test/live/` | Opt-in checks against native CLIs and provider services. |
 | `scripts/` | Development utilities, including banner generation. |
@@ -44,7 +45,7 @@ accepts an explicit `platform` option so every branch is unit-testable on Linux.
 - Fail explicitly on unsupported modes, unknown workers, ambiguous ownership, or missing review.
 - Never replay external tool events as executable Claude tools.
 - Native state is never rewound, and uncertain actions are never rerun blindly.
-- Antigravity native children and MCP are denied.
+- Antigravity native children and MCP are denied. Grok denies native subagents and MCP execution, and verifies the toolset the CLI announces.
 - New bridges isolate session, worker, provider, and workspace state.
 - Do not use Cursor Fast in development or live tests; set `fast:false` explicitly.
 - Keep paid probes bounded and reuse existing usage records when possible.
@@ -67,6 +68,7 @@ test suite. Use Node 24.12 or newer and avoid `DEP0190` warnings.
 | `npm run test:live:approval-worker` | Worker approval | Provider login under test |
 | `npm run test:live:permissions` | Native permissions | Claude and provider login |
 | `npm run test:live:antigravity` | Antigravity CLI harness | `agy` login |
+| `npm run test:live:grok` | Grok Build CLI harness | Grok Build login |
 | `npm run test:live:install` | Plugin installation | None |
 
 The definition of done is passing relevant checks, no `DEP0190` warnings, and an

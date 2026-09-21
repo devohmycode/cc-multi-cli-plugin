@@ -12,6 +12,7 @@ views, up/down to scroll, **Refresh** or `r` to reload, and Escape to close.
 | Cursor | Account subscription usage percentages and billing-cycle resets, plus billed token totals and charged USD for this session's active native agents |
 | OpenCode Zen | Go subscription quota windows and resets when entitled; prepaid balance and billed API spend require the billing console |
 | Antigravity | Native account quota groups, remaining percentages, reset times, and AI credit balance when reported |
+| Grok | Whether an account login is present and how long it remains valid; the CLI exposes no account quota |
 
 Unavailable and disabled providers stay visible. Missing billing data is never
 shown as a zero charge. The menu also shows session token counts for every
