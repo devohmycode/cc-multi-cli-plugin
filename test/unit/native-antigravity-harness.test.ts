@@ -167,6 +167,31 @@ test('Antigravity replays completed requests and resumes native conversation', a
   assert.equal(setupResult.calls[1].conversation, 'conversation-1');
 });
 
+test('the context tag is not part of a request identity', async (t) => {
+  const setupResult = await setup();
+  const harness = new AntigravityHarness([model], { ...setupResult, checkPermissions: policy });
+  t.after(() => harness.close());
+  const messages = [{ role: 'user', content: 'first' }];
+  const tagged = await harness.handle(
+    { model: `${model.model}[1m]`, messages },
+    'session/worker',
+    new AbortController().signal,
+    undefined,
+    context,
+  );
+  // The same native request under the plain spelling, which is what a launch sees once
+  // MULTI_DISABLE_1M_CONTEXT is set. Replaying it must not dispatch the run a second time.
+  const plain = await harness.handle(
+    { model: model.model, messages },
+    'session/worker',
+    new AbortController().signal,
+    undefined,
+    context,
+  );
+  assert.equal(plain.id, tagged.id);
+  assert.equal(setupResult.calls.length, 1);
+});
+
 test('an interrupted run keeps its native conversation and resumes with a notice', async (t) => {
   const stateDirectory = await mkdtemp(path.join(os.tmpdir(), 'agy-interrupted-'));
   const calls: AntigravityRunOptions[] = [];

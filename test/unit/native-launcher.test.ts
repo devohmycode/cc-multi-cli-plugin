@@ -541,6 +541,27 @@ result(JSON.stringify({settings,agents,args,models:args.filter(x=>x.startsWith('
   );
   // The caller's last --model is the one Claude resolves, so that is the one rewritten.
   // Rewriting the first would leave the tagged spelling as the argument Claude actually reads.
+  // An advertised effort variant is collapsed into one picker row, so a launch that names
+  // the variant itself matches no row. It is the same provider and the same window, and it
+  // must keep its own effort rather than fall back to the synthesized base.
+  const variant = await promisify(execFile)(
+    process.execPath,
+    [launcher, '--model', 'multi/antigravity/gemini-high'],
+    {
+      cwd,
+      timeout: 20000,
+      env: {
+        PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+        HOME: cwd,
+        ...windowsHome(cwd),
+        CLAUDE_CONFIG_DIR: path.join(cwd, 'claude'),
+        CODEX_HOME: cwd,
+        MULTI_ANTIGRAVITY: '1',
+      },
+    },
+  );
+  assert.deepEqual(JSON.parse(variant.stdout).models, ['multi/antigravity/gemini-high[1m]']);
+
   const flags: string[] = untagged.args;
   const last = flags.lastIndexOf('--model');
   assert.equal(flags[last + 1], 'multi/antigravity/gemini');

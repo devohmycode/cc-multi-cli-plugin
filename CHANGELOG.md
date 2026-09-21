@@ -21,7 +21,13 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   tag off cannot leave `MULTI_MODELS` naming a model the launcher refuses to start. A saved
   or explicit plain model ID is moved onto the tagged row, so `--model` and a restored
   selection get the same window as the picker; the rewrite lands on the last `--model` the
-  caller spelled, which is the one Claude resolves.
+  caller spelled, which is the one Claude resolves. An advertised effort variant is tagged
+  from the provider rather than from the picker, since the picker collapses variants into
+  one synthesized row and a launch can still name the variant itself. Because two spellings
+  name one native model, they are compared in the untagged spelling wherever a model ID is
+  an identity: the Antigravity request digest, so a spelling change cannot miss a completed
+  exchange and dispatch it twice, and the worker and harness consistency checks, so a
+  spawn that names a model without the tag is not refused.
 
 - Report counts the same way on every machine locale. `toLocaleString()` without
   an argument follows the host, so the launcher's argument-limit message read

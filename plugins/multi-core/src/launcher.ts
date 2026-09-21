@@ -744,7 +744,14 @@ function retagSelection(
   if (rows.has(tagged)) {
     return tagged;
   }
-  return rows.has(native) ? native : model;
+  if (rows.has(native)) {
+    return native;
+  }
+  // An advertised effort variant is collapsed into one synthesized picker row, so a model
+  // selected by its own variant ID matches no row. It is still a real Antigravity model and
+  // takes the same window, so decide from the provider rather than from the picker.
+  const prefix = 'multi/antigravity/';
+  return native.startsWith(prefix) ? oneMillionContext(native, native.slice(prefix.length)) : model;
 }
 
 /** Replace the caller's own `--model`, so a retagged selection cannot be passed twice.
