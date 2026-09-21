@@ -5,7 +5,7 @@ import type { AgentModeOption, AgentOptions } from '@cursor/sdk';
 import type { WorkerPermissions } from '../../multi-core/src/gateway/agent-definitions.ts';
 import type { PermissionContext } from '../../multi-core/src/gateway/mode-hook.ts';
 
-const TOOL_CAPABILITIES = [
+export const TOOL_CAPABILITIES = [
   ['shell', ['Bash']],
   ['read', ['Read']],
   ['edit', ['Edit', 'Write']],

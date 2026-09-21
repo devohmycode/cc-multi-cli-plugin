@@ -84,8 +84,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for current direction and
   check to it, including on the managed-policy path. One admission result is shared by every
   native provider, so a launch with both harnesses is judged by the one that rejects the
   least and Cursor re-validates on its own dispatch, where the rejection belongs and where
-  it can name the file. Structural admission, `permissions.ask`, hooks and sandbox checks
-  still run per file, and Cursor keeps its own validator (#33).
+  it can name the file. That choice is only safe while Antigravity's and Grok's admitted tool
+  vocabularies each contain Cursor's, which three separate tables maintain by hand, so a test
+  now asserts both containments. Structural admission, `permissions.ask`, hooks and sandbox
+  checks still run per file, and Cursor keeps its own validator (#33).
 
 - Start native Cursor workers on macOS 27. Managed policy discovery recognized
   an absent `com.anthropic.claudecode` preferences domain only from the

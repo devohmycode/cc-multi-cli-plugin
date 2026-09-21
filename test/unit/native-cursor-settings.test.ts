@@ -11,6 +11,11 @@ import {
 } from '../../plugins/multi-core/src/gateway/cursor-settings.ts';
 import type { PermissionContext } from '../../plugins/multi-core/src/gateway/mode-hook.ts';
 import { sharedAdmission } from '../../plugins/multi-core/src/launcher.ts';
+import {
+  cursorPermissionPolicy,
+  TOOL_CAPABILITIES,
+} from '../../plugins/multi-cursor/src/permissions.ts';
+import { grokPermissionPolicy } from '../../plugins/multi-grok/src/permissions.ts';
 import { removeTemporary } from '../temporary.ts';
 
 const absentManagedPolicy = async (): Promise<string> => '';
@@ -117,6 +122,50 @@ test('settings admission validates with the requested harness policy', async (t)
   await assert.rejects(
     checkSettings(root, [], {}, { validate: antigravityPermissionPolicy }),
     /permissions.ask/,
+  );
+});
+
+test('Antigravity admits every Claude tool rule Cursor admits', () => {
+  // sharedAdmission() hands the merged rules to Antigravity's validator when both harnesses
+  // are present, which is only safe while this containment holds. It is maintained by hand
+  // in two separate tool tables, so it is asserted rather than assumed.
+  const cursorTools = [
+    ...new Set(TOOL_CAPABILITIES.flatMap(([, names]) => [...names])),
+    // Recognized outside the capability table: absent from Cursor either way, so a rule
+    // naming one cannot grant anything.
+    'Agent',
+    'Task',
+  ];
+  for (const tool of cursorTools) {
+    const context = { permissionMode: 'auto' as const, disallowedTools: [tool] };
+    assert.doesNotThrow(() => cursorPermissionPolicy(context), `Cursor rejected ${tool}`);
+    assert.doesNotThrow(() => antigravityPermissionPolicy(context), `Antigravity rejected ${tool}`);
+  }
+  // Containment is one-way, which is the whole reason the choice matters.
+  const webFetch = { permissionMode: 'auto' as const, disallowedTools: ['WebFetch'] };
+  assert.doesNotThrow(() => antigravityPermissionPolicy(webFetch));
+  assert.throws(() => cursorPermissionPolicy(webFetch), /cannot enforce Claude tool rule WebFetch/);
+});
+
+test('Grok admits every Claude tool rule Cursor admits', () => {
+  // sharedAdmission() also hands the merged rules to Grok's validator when Grok is the
+  // native harness present, which is only safe while this containment holds too.
+  const cursorTools = [
+    ...new Set(TOOL_CAPABILITIES.flatMap(([, names]) => [...names])),
+    'Agent',
+    'Task',
+  ];
+  for (const tool of cursorTools) {
+    const context = { permissionMode: 'auto' as const, disallowedTools: [tool] };
+    assert.doesNotThrow(() => cursorPermissionPolicy(context), `Cursor rejected ${tool}`);
+    assert.doesNotThrow(() => grokPermissionPolicy(context), `Grok rejected ${tool}`);
+  }
+  // Containment is one-way: Grok also enforces tools Cursor cannot express.
+  const notebook = { permissionMode: 'auto' as const, disallowedTools: ['NotebookEdit'] };
+  assert.doesNotThrow(() => grokPermissionPolicy(notebook));
+  assert.throws(
+    () => cursorPermissionPolicy(notebook),
+    /cannot enforce Claude tool rule NotebookEdit/,
   );
 });
 
